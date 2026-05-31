@@ -1,5 +1,6 @@
 {
   "itemGroup.skavenblight": "Example Mod Tab",
   "block.skavenblight.example_block": "Example Block",
-  "item.skavenblight.example_item": "Example Item"
+  "item.skavenblight.example_item": "Example Item",
+  "item.skavenblight.raw_warpstone": "Raw Warpstone"
 }
