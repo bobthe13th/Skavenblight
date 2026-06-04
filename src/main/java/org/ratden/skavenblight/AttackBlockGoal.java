@@ -17,6 +17,10 @@ public class AttackBlockGoal extends Goal {
     public AttackBlockGoal(RatWolf ratwolf) {
         this.ratwolf = ratwolf;
         this.targetBlock = Blocks.DIAMOND_BLOCK;
+        // Stagger the first search across the cooldown window so a wave of
+        // ratwolves spawned on the same tick don't all scan on the same frame.
+        // 0-39 ticks (0-~2s). Also desyncs the pack behaviorally.
+        this.searchCooldown = ratwolf.getRandom().nextInt(40);
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
@@ -78,6 +82,10 @@ public class AttackBlockGoal extends Goal {
         ratwolf.getNavigation().stop();
     }
 
+    // TODO(#4): Replace the brute-force box scan with a stored Nexus position.
+    // With a single Nexus, store its BlockPos when placed (block-place event)
+    // and read that one position here instead of scanning ~250k blocks.
+    // Turns the worst case (no target found) from a full sweep into a single lookup.
     private BlockPos findTargetBlock() {
         BlockPos center = ratwolf.blockPosition();
         int range = 50;
