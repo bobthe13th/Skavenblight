@@ -2,5 +2,11 @@
   "itemGroup.skavenblight": "Example Mod Tab",
   "block.skavenblight.example_block": "Example Block",
   "item.skavenblight.example_item": "Example Item",
-  "item.skavenblight.raw_warpstone": "Raw Warpstone"
+  "item.skavenblight.raw_warpstone": "Raw Warpstone",
+  "item.skavenblight.rat_juice": "Rat Juice",
+
+  "block.skavenblight.warpstone_ore": "Warpstone Ore",
+  "block.skavenblight.warpstone_ore_deepslate": "Deepslate Warpstone Ore",
+
+  "creativetab.skavenblight": "Skavenblight"
 }
