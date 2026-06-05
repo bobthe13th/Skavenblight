@@ -3,10 +3,10 @@ package org.ratden.skavenblight.block;
 import net.minecraft.util.valueproviders.UniformInt;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.DropExperienceBlock;
-import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.properties.BlockSetType;
+import net.minecraft.world.level.block.state.properties.WoodType;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -24,14 +24,50 @@ public class ModBlocks {
                     BlockBehaviour.Properties.of()
                         .strength(4f)
                         .requiresCorrectToolForDrops()
-                        .sound(SoundType.AMETHYST)));
+                        .sound(SoundType.STONE)));
 
     public static final DeferredBlock<Block> WARPSTONE_ORE_DEEPSLATE = registerBlock("warpstone_ore_deepslate",
             () -> new DropExperienceBlock(UniformInt.of(2, 5),
                     BlockBehaviour.Properties.of()
                         .strength(4f)
                         .requiresCorrectToolForDrops()
-                        .sound(SoundType.AMETHYST)));
+                        .sound(SoundType.STONE)));
+
+    public static final DeferredBlock<Block> BLOCK_OF_WARPSTONE = registerBlock("block_of_warpstone",
+        () -> new Block(BlockBehaviour.Properties.of()
+                         .strength(4f)
+                         .requiresCorrectToolForDrops()
+                         .sound(SoundType.AMETHYST)));
+
+    public static final DeferredBlock<StairBlock> WARPSTONE_STAIRS = registerBlock("warpstone_stairs",
+            () -> new StairBlock(ModBlocks.BLOCK_OF_WARPSTONE.get().defaultBlockState(),
+                    BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<SlabBlock> WARPSTONE_SLAB = registerBlock("warpstone_slab",
+            () -> new SlabBlock(BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<PressurePlateBlock> WARPSTONE_PRESSURE_PLATE = registerBlock("warpstone_pressure_plate",
+            () -> new PressurePlateBlock(BlockSetType.IRON, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<ButtonBlock> WARPSTONE_BUTTON = registerBlock("warpstone_button",
+            () -> new ButtonBlock(BlockSetType.IRON, 5, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops().noCollission()));
+
+    public static final DeferredBlock<FenceBlock> WARPSTONE_FENCE = registerBlock("warpstone_fence",
+            () -> new FenceBlock(BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<FenceGateBlock> WARPSTONE_FENCE_GATE = registerBlock("warpstone_fence_gate",
+            () -> new FenceGateBlock(WoodType.OAK, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<WallBlock> WARPSTONE_WALL = registerBlock("warpstone_wall",
+            () -> new WallBlock(BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops()));
+
+    public static final DeferredBlock<DoorBlock> WARPSTONE_DOOR = registerBlock("warpstone_door",
+            () -> new DoorBlock(BlockSetType.IRON, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops().noOcclusion()));
+
+    public static final DeferredBlock<TrapDoorBlock> WARPSTONE_TRAPDOOR = registerBlock("warpstone_trapdoor",
+            () -> new TrapDoorBlock(BlockSetType.IRON, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops().noOcclusion()));
+
+
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);
