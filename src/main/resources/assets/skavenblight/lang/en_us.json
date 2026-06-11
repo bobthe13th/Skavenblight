@@ -3,10 +3,27 @@
   "block.skavenblight.example_block": "Example Block",
   "item.skavenblight.example_item": "Example Item",
   "item.skavenblight.raw_warpstone": "Raw Warpstone",
+    "tooltip_info_item.raw_warpstone.description": "§7Warm to the touch",
+  "item.skavenblight.fused_warpstone": "Fused Warpstone",
+    "tooltip_info_item.fused_warpstone.description": "§7It pulses gently in your hands...",
   "item.skavenblight.rat_juice": "Rat Juice",
+    "tooltip_info_item.rat_juice.description": "§7And where does the juice come from, exactly?",
 
   "block.skavenblight.warpstone_ore": "Warpstone Ore",
   "block.skavenblight.warpstone_ore_deepslate": "Deepslate Warpstone Ore",
+  "block.skavenblight.block_of_warpstone": "Block of Warpstone",
+
+  "block.skavenblight.warpstone_stairs": "Warpstone Stairs",
+  "block.skavenblight.warpstone_slab": "Warpstone Slab",
+  "block.skavenblight.warpstone_pressure_plate": "Warpstone Pressure Plate",
+  "block.skavenblight.warpstone_button": "Warpstone Button",
+  "block.skavenblight.warpstone_fence": "Warpstone Fence",
+  "block.skavenblight.warpstone_fence_gate": "Warpstone Fence Gate",
+  "block.skavenblight.warpstone_wall": "Warpstone Wall",
+  "block.skavenblight.warpstone_door": "Warpstone Door",
+  "block.skavenblight.warpstone_trapdoor": "Warpstone Trapdoor",
+
+
 
   "creativetab.skavenblight": "Skavenblight"
 }

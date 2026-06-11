@@ -21,8 +21,21 @@ public class ModCreativeModeTabs {
                     .displayItems(((itemDisplayParameters, output) -> {
                         output.accept(ModBlocks.WARPSTONE_ORE);
                         output.accept(ModBlocks.WARPSTONE_ORE_DEEPSLATE);
+                        output.accept(ModBlocks.BLOCK_OF_WARPSTONE.get());
+
+                        output.accept(ModBlocks.WARPSTONE_STAIRS);
+                        output.accept(ModBlocks.WARPSTONE_SLAB);
+                        output.accept(ModBlocks.WARPSTONE_PRESSURE_PLATE);
+                        output.accept(ModBlocks.WARPSTONE_BUTTON);
+                        output.accept(ModBlocks.WARPSTONE_FENCE);
+                        output.accept(ModBlocks.WARPSTONE_FENCE_GATE);
+                        output.accept(ModBlocks.WARPSTONE_WALL);
+                        output.accept(ModBlocks.WARPSTONE_DOOR);
+                        output.accept(ModBlocks.WARPSTONE_TRAPDOOR);
+
 
                         output.accept(ModItems.RAW_WARPSTONE);
+                        output.accept(ModItems.FUSED_WARPSTONE);
                         output.accept(ModItems.RAT_JUICE);
                     })).build());
 
