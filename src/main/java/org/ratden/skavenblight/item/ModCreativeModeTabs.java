@@ -37,6 +37,11 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.RAW_WARPSTONE);
                         output.accept(ModItems.FUSED_WARPSTONE);
                         output.accept(ModItems.RAT_JUICE);
+
+                        output.accept(ModItems.WARPSTONE_HELMET);
+                        output.accept(ModItems.WARPSTONE_CHESTPLATE);
+                        output.accept(ModItems.WARPSTONE_LEGGINGS);
+                        output.accept(ModItems.WARPSTONE_BOOTS);
                     })).build());
 
 
