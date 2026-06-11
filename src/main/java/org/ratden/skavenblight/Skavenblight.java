@@ -84,7 +84,7 @@ public class Skavenblight {
 
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
-
+        ModEntities.ENTITY_TYPES.register(modEventBus);
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
