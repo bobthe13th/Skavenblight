@@ -1,9 +1,10 @@
-package org.ratden.skavenblight;
+package org.ratden.skavenblight.entity.client;
 
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.WolfRenderer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.animal.Wolf;
+import org.ratden.skavenblight.Skavenblight;
 
 public class RatWolfRenderer extends WolfRenderer {
 

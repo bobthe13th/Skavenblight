@@ -1,4 +1,4 @@
-package org.ratden.skavenblight;
+package org.ratden.skavenblight.entity.custom;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;

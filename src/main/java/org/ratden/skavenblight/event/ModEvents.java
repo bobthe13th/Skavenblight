@@ -1,8 +1,11 @@
-package org.ratden.skavenblight;
+package org.ratden.skavenblight.event;
 
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
+import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.entity.ModEntities;
+import org.ratden.skavenblight.entity.custom.RatWolf;
 
 @EventBusSubscriber(modid = Skavenblight.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class ModEvents {

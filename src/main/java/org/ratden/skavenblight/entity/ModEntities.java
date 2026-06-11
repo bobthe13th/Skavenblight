@@ -1,10 +1,12 @@
-package org.ratden.skavenblight;
+package org.ratden.skavenblight.entity;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
+import org.ratden.skavenblight.entity.custom.RatWolf;
+import org.ratden.skavenblight.Skavenblight;
 
 public class ModEntities {
 
