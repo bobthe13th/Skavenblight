@@ -16,6 +16,7 @@ public class AttackBlockGoal extends Goal {
 
     public AttackBlockGoal(RatWolf ratwolf) {
         this.ratwolf = ratwolf;
+        //Replace with Nexus if valid / placed
         this.targetBlock = Blocks.DIAMOND_BLOCK;
         // Stagger the first search across the cooldown window so a wave of
         // ratwolves spawned on the same tick don't all scan on the same frame.
@@ -39,6 +40,9 @@ public class AttackBlockGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (targetPos == null) return false;
+        //TODO
+        //If wolf cannot reach target location
+        //run other logic to destroy whats stopping them
         return ratwolf.level().getBlockState(targetPos).is(targetBlock);
     }
 
@@ -71,6 +75,8 @@ public class AttackBlockGoal extends Goal {
         );
 
         if (distanceSq < 4.0D) {
+            //SHould this be destroy, or are we going to move to block entity with health values
+            //Wolf needs to do some damage/s attacks if so, rather than destroy
             ratwolf.level().destroyBlock(targetPos, true);
             targetPos = null;
         }
