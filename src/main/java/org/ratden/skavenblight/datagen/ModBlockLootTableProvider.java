@@ -26,6 +26,10 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
 
     @Override
     protected void generate() {
+
+        dropSelf(ModBlocks.WARPSTONE_NEXUS.get());
+        dropSelf(ModBlocks.ACTIVE_WARPSTONE_NEXUS.get());
+
         dropSelf(ModBlocks.BLOCK_OF_WARPSTONE.get());
 
         dropSelf(ModBlocks.WARPSTONE_STAIRS.get());

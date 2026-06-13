@@ -1,0 +1,14 @@
+{
+  "nexus_speed": {
+    "subtitle": "sounds.skavenblight.nexus_speed",
+    "sounds": [
+      "skavenblight:nexus_speed"
+    ]
+  },
+  "game_over": {
+    "subtitle": "sounds.skavenblight.game_over",
+    "sounds": [
+      "skavenblight:game_over"
+    ]
+  }
+}

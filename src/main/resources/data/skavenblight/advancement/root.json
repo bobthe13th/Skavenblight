@@ -1,0 +1,19 @@
+{
+  "display": {
+    "icon": {
+      "id": "skavenblight:raw_warpstone"
+    },
+    "title": "The Green Moon Rises",
+    "description": "The end of all things comes not with a whisper or a bang, but the chittering of rodents.",
+    "background": "minecraft:textures/block/deepslate.png",
+    "frame": "task",
+    "show_toast": false,
+    "announce_to_chat": false,
+    "hidden": false
+  },
+  "criteria": {
+    "start": {
+      "trigger": "minecraft:tick"
+    }
+  }
+}

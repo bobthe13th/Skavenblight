@@ -37,6 +37,10 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.RAW_WARPSTONE);
                         output.accept(ModItems.FUSED_WARPSTONE);
                         output.accept(ModItems.RAT_JUICE);
+
+                        output.accept(ModBlocks.WARPSTONE_NEXUS);
+                        output.accept(ModBlocks.ACTIVE_WARPSTONE_NEXUS);
+
                     })).build());
 
 

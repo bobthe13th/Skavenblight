@@ -11,6 +11,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -67,7 +68,15 @@ public class ModBlocks {
     public static final DeferredBlock<TrapDoorBlock> WARPSTONE_TRAPDOOR = registerBlock("warpstone_trapdoor",
             () -> new TrapDoorBlock(BlockSetType.IRON, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops().noOcclusion()));
 
+    public static final DeferredBlock<Block> WARPSTONE_NEXUS = registerBlock("warpstone_nexus",
+            () -> new Block(BlockBehaviour.Properties.of()
+                    .strength(10f).requiresCorrectToolForDrops().sound(SoundType.VAULT).lightLevel(state -> 9)));
 
+    public static final DeferredBlock<Block> ACTIVE_WARPSTONE_NEXUS = registerBlock("active_warpstone_nexus",
+            () -> new ActiveWarpstoneNexus(BlockBehaviour.Properties.of()
+                    .strength(10f)
+                    .requiresCorrectToolForDrops().sound(SoundType.VAULT)
+                    .lightLevel(state -> state.getValue(ActiveWarpstoneNexus.LIT) ? 15 : 9)));
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

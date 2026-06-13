@@ -22,8 +22,10 @@ import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.entity.ModEntities;
+import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.sound.ModSounds;
 import org.slf4j.Logger;
 
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
@@ -76,6 +78,10 @@ public class Skavenblight {
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
         ModEntities.ENTITY_TYPES.register(modEventBus);
+
+        NeoForge.EVENT_BUS.addListener(GameOverHandler::onServerTick);
+
+        ModSounds.register(modEventBus);
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
