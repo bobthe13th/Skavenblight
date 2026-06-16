@@ -21,6 +21,7 @@ import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.block.ModBlocks;
+import org.ratden.skavenblight.block.entity.ModBlockEntities;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
@@ -78,6 +79,7 @@ public class Skavenblight {
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);
         ModEntities.ENTITY_TYPES.register(modEventBus);
+        ModBlockEntities.register(modEventBus);
 
         NeoForge.EVENT_BUS.addListener(GameOverHandler::onServerTick);
 

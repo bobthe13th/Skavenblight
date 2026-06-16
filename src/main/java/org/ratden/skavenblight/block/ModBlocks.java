@@ -12,6 +12,7 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
+import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -77,6 +78,15 @@ public class ModBlocks {
                     .strength(10f)
                     .requiresCorrectToolForDrops().sound(SoundType.VAULT)
                     .lightLevel(state -> state.getValue(ActiveWarpstoneNexus.LIT) ? 15 : 9)));
+
+    public static final DeferredBlock<Block> SKAVEN_TUNNEL_SOURCE = registerBlock(
+            "skaven_tunnel_source",
+            () -> new SkavenTunnelSourceBlock(BlockBehaviour.Properties.of()
+                    .strength(4.0f)
+                    .requiresCorrectToolForDrops()
+                    .sound(SoundType.STONE)
+            )
+    );
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

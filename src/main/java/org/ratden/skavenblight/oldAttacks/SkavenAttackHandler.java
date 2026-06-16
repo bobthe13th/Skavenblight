@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-public class SkavenAttackHandler {
+/*public class SkavenAttackHandler {
     private static final List<SkavenAttack> ACTIVE_ATTACKS = new ArrayList<>();
 
     public static void startWolfRatAttack(ServerLevel level, BlockPos targetPos) {
@@ -29,4 +29,6 @@ public class SkavenAttackHandler {
         }
     }
 }
+
+ */
 

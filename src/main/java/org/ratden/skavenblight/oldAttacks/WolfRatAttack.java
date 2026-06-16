@@ -3,7 +3,7 @@ package org.ratden.skavenblight.oldAttacks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 
-public class WolfRatAttack implements SkavenAttack {
+/*public class WolfRatAttack implements SkavenAttack {
     private final ServerLevel level;
     private final BlockPos targetPos;
     private int tick;
@@ -21,7 +21,7 @@ public class WolfRatAttack implements SkavenAttack {
         tick++;
 
         if (tick == 100) {
-            // TODO: spawn wolf rats here once Quill's entity is merged
+
             finished = true;
         }
     }
@@ -31,4 +31,6 @@ public class WolfRatAttack implements SkavenAttack {
         return finished;
     }
 }
+
+ */
 

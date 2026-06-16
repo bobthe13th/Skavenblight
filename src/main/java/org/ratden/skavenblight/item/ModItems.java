@@ -37,6 +37,8 @@ public class ModItems {
         () -> new RatJuiceItem(new Item.Properties().food(ModFoodProperties.RAT_JUICE)));
 
 
+
+
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

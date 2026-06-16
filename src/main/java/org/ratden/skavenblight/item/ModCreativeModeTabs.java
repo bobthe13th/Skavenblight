@@ -41,6 +41,8 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.WARPSTONE_NEXUS);
                         output.accept(ModBlocks.ACTIVE_WARPSTONE_NEXUS);
 
+                        output.accept(ModBlocks.SKAVEN_TUNNEL_SOURCE);
+
                     })).build());
 
 
