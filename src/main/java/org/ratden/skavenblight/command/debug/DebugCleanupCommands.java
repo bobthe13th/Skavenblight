@@ -3,8 +3,11 @@ package org.ratden.skavenblight.command.debug;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.entity.custom.RatWolf;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
 
@@ -19,6 +22,9 @@ public class DebugCleanupCommands {
                 .then(
                         Commands.literal("incursions")
                                 .executes(DebugCleanupCommands::clearIncursions)
+                )
+                .then(Commands.literal("sources")
+                        .executes(context -> cleanupSources(context.getSource()))
                 );
     }
 
@@ -66,5 +72,53 @@ public class DebugCleanupCommands {
         );
 
         return removed;
+    }
+    private static int cleanupSources(CommandSourceStack source) {
+        try {
+
+            ServerPlayer player = source.getPlayerOrException();
+            ServerLevel level = player.serverLevel();
+
+            int radius = 100;
+            int removed = 0;
+
+            BlockPos playerPos = player.blockPosition();
+
+            for (BlockPos pos : BlockPos.betweenClosed(
+                    playerPos.offset(-radius, -radius, -radius),
+                    playerPos.offset(radius, radius, radius))) {
+
+                if (level.getBlockState(pos)
+                        .is(ModBlocks.SKAVEN_TUNNEL_SOURCE.get())) {
+
+                    level.removeBlock(pos, false);
+                    removed++;
+                }
+            }
+
+            int finalRemoved = removed;
+
+            source.sendSuccess(
+                    () -> Component.literal(
+                            "Removed "
+                                    + finalRemoved
+                                    + " tunnel sources."
+                    ),
+                    false
+            );
+
+            return removed;
+
+        } catch (Exception exception) {
+
+            source.sendFailure(
+                    Component.literal(
+                            "Failed to remove tunnel sources: "
+                                    + exception.getMessage()
+                    )
+            );
+
+            return 0;
+        }
     }
 }

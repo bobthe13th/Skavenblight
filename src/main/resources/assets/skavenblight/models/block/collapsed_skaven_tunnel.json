@@ -2,8 +2,8 @@
 	"format_version": "1.21.11",
 	"credit": "Made with Blockbench",
 	"textures": {
-		"0": "collapsed_skaven_tunnel",
-		"particle": "collapsed_skaven_tunnel"
+		"0": "skavenblight:block/collapsed_skaven_tunnel",
+		"particle": "skavenblight:block/collapsed_skaven_tunnel"
 	},
 	"elements": [
 		{
