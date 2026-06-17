@@ -1,0 +1,26 @@
+{
+  "parent": "skavenblight:root",
+  "display": {
+    "icon": {
+      "id": "minecraft:written_book"
+    },
+    "title": "The Failed Expedition",
+    "description": "Find out what happened to the lost expedition",
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "has_nexus": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "minecraft:warpstone_nexus"
+          }
+        ]
+      }
+    }
+  }
+}

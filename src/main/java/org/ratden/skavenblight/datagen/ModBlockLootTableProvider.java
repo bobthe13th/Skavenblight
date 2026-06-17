@@ -26,6 +26,10 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
 
     @Override
     protected void generate() {
+
+        dropSelf(ModBlocks.WARPSTONE_NEXUS.get());
+        dropSelf(ModBlocks.ACTIVE_WARPSTONE_NEXUS.get());
+
         dropSelf(ModBlocks.BLOCK_OF_WARPSTONE.get());
 
         dropSelf(ModBlocks.WARPSTONE_STAIRS.get());
@@ -47,6 +51,7 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                 block -> createMultipleOreDrops(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get(), ModItems.RAW_WARPSTONE.get(), 1, 3));
 
         dropSelf(ModBlocks.SPAWN_TUNNEL_SMALL.get());
+        dropSelf(ModBlocks.SKAVEN_TUNNEL_SOURCE.get());
     }
 
     //Basically the createCopperOreDrops() vanilla method

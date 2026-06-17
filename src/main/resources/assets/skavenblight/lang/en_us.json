@@ -28,6 +28,11 @@
   "block.skavenblight.warpstone_door": "Warpstone Door",
   "block.skavenblight.warpstone_trapdoor": "Warpstone Trapdoor",
 
+  "block.skavenblight.warpstone_nexus": "Warpstone Nexus",
+  "block.skavenblight.active_warpstone_nexus": "Active Warpstone Nexus",
+
+  "block.skavenblight.skaven_tunnel_source": "Skaven Tunnel Source",
+
   "block.skavenblight.spawn_tunnel_small_active": "Small Spawn Tunnel (Active)",
 
   "creativetab.skavenblight": "Skavenblight"

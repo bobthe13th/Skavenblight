@@ -39,6 +39,11 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.FUSED_WARPSTONE);
                         output.accept(ModItems.RAT_JUICE);
 
+                        output.accept(ModBlocks.WARPSTONE_NEXUS);
+                        output.accept(ModBlocks.ACTIVE_WARPSTONE_NEXUS);
+
+                        output.accept(ModBlocks.SKAVEN_TUNNEL_SOURCE);
+
                         output.accept(ModItems.WARPSTONE_HELMET);
                         output.accept(ModItems.WARPSTONE_CHESTPLATE);
                         output.accept(ModItems.WARPSTONE_LEGGINGS);

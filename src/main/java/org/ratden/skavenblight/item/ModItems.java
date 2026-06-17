@@ -38,7 +38,6 @@ public class ModItems {
     public static final DeferredItem<Item> RAT_JUICE = ITEMS.register("rat_juice",
         () -> new RatJuiceItem(new Item.Properties().food(ModFoodProperties.RAT_JUICE)));
 
-
     public static final DeferredItem<ArmorItem> WARPSTONE_HELMET = ITEMS.register("warpstone_helmet",
             () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.HELMET,
                     new Item.Properties().durability(ArmorItem.Type.HELMET.getDurability(19))));
@@ -51,9 +50,7 @@ public class ModItems {
     public static final DeferredItem<ArmorItem> WARPSTONE_BOOTS = ITEMS.register("warpstone_boots",
             () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.BOOTS,
                     new Item.Properties().durability(ArmorItem.Type.BOOTS.getDurability(19))));
-
-
-
+                    
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }
