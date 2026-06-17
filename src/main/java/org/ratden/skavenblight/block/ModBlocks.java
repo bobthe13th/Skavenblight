@@ -11,12 +11,12 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
-<<<<<<< HEAD
+
 import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
 import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
-=======
+
 import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
->>>>>>> dev
+
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
