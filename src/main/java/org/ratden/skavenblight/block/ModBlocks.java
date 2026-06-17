@@ -11,6 +11,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -67,7 +68,8 @@ public class ModBlocks {
     public static final DeferredBlock<TrapDoorBlock> WARPSTONE_TRAPDOOR = registerBlock("warpstone_trapdoor",
             () -> new TrapDoorBlock(BlockSetType.IRON, BlockBehaviour.Properties.of().strength(2f).requiresCorrectToolForDrops().noOcclusion()));
 
-
+    public static final DeferredBlock<Block> SPAWN_TUNNEL_SMALL = registerBlock("spawn_tunnel_small",
+        () -> new SpawnTunnelSmall(BlockBehaviour.Properties.of().noOcclusion()));
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

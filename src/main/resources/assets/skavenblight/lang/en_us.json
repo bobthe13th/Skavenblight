@@ -9,6 +9,11 @@
   "item.skavenblight.rat_juice": "Rat Juice",
     "tooltip_info_item.rat_juice.description": "§7And where does the juice come from, exactly?",
 
+  "item.skavenblight.warpstone_helmet": "Warpstone Helmet",
+  "item.skavenblight.warpstone_chestplate": "Warpstone Chestplate",
+  "item.skavenblight.warpstone_leggings": "Warpstone Leggings",
+  "item.skavenblight.warpstone_boots": "Warpstone Boots",
+
   "block.skavenblight.warpstone_ore": "Warpstone Ore",
   "block.skavenblight.warpstone_ore_deepslate": "Deepslate Warpstone Ore",
   "block.skavenblight.block_of_warpstone": "Block of Warpstone",
@@ -23,7 +28,7 @@
   "block.skavenblight.warpstone_door": "Warpstone Door",
   "block.skavenblight.warpstone_trapdoor": "Warpstone Trapdoor",
 
-
+  "block.skavenblight.spawn_tunnel_small_active": "Small Spawn Tunnel (Active)",
 
   "creativetab.skavenblight": "Skavenblight"
 }
