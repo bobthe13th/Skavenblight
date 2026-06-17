@@ -1,6 +1,7 @@
 package org.ratden.skavenblight.item;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -9,6 +10,7 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.item.custom.RatJuiceItem;
+
 
 import java.util.List;
 
@@ -35,6 +37,21 @@ public class ModItems {
 
     public static final DeferredItem<Item> RAT_JUICE = ITEMS.register("rat_juice",
         () -> new RatJuiceItem(new Item.Properties().food(ModFoodProperties.RAT_JUICE)));
+
+
+    public static final DeferredItem<ArmorItem> WARPSTONE_HELMET = ITEMS.register("warpstone_helmet",
+            () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.HELMET,
+                    new Item.Properties().durability(ArmorItem.Type.HELMET.getDurability(19))));
+    public static final DeferredItem<ArmorItem> WARPSTONE_CHESTPLATE = ITEMS.register("warpstone_chestplate",
+            () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.CHESTPLATE,
+                    new Item.Properties().durability(ArmorItem.Type.CHESTPLATE.getDurability(19))));
+    public static final DeferredItem<ArmorItem> WARPSTONE_LEGGINGS = ITEMS.register("warpstone_leggings",
+            () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.LEGGINGS,
+                    new Item.Properties().durability(ArmorItem.Type.LEGGINGS.getDurability(19))));
+    public static final DeferredItem<ArmorItem> WARPSTONE_BOOTS = ITEMS.register("warpstone_boots",
+            () -> new ArmorItem(ModArmorMaterials.WARPSTONE_ARMOR_MATERIAL,ArmorItem.Type.BOOTS,
+                    new Item.Properties().durability(ArmorItem.Type.BOOTS.getDurability(19))));
+
 
 
     public static void register(IEventBus eventBus) {

@@ -45,6 +45,8 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                 block -> createOreDrop(ModBlocks.WARPSTONE_ORE.get(), ModItems.RAW_WARPSTONE.get()));
         add(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get(),
                 block -> createMultipleOreDrops(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get(), ModItems.RAW_WARPSTONE.get(), 1, 3));
+
+        dropSelf(ModBlocks.SPAWN_TUNNEL_SMALL.get());
     }
 
     //Basically the createCopperOreDrops() vanilla method
