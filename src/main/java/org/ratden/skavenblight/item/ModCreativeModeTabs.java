@@ -33,6 +33,7 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.WARPSTONE_DOOR);
                         output.accept(ModBlocks.WARPSTONE_TRAPDOOR);
 
+                        output.accept(ModBlocks.SPAWN_TUNNEL_SMALL);
 
                         output.accept(ModItems.RAW_WARPSTONE);
                         output.accept(ModItems.FUSED_WARPSTONE);

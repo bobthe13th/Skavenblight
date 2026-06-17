@@ -28,7 +28,7 @@
   "block.skavenblight.warpstone_door": "Warpstone Door",
   "block.skavenblight.warpstone_trapdoor": "Warpstone Trapdoor",
 
-
+  "block.skavenblight.spawn_tunnel_small_active": "Small Spawn Tunnel (Active)",
 
   "creativetab.skavenblight": "Skavenblight"
 }
