@@ -11,6 +11,7 @@ import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursion;
 import org.ratden.skavenblight.event.skavenIncursion.action.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.SetSourceState;
 import org.ratden.skavenblight.event.skavenIncursion.action.SpawnWolfRats;
+import org.ratden.skavenblight.event.skavenIncursion.action.SourcePlacement;
 
 public class WolfRatAssault implements SkavenIncursion {
     private final ServerLevel level;
@@ -23,7 +24,7 @@ public class WolfRatAssault implements SkavenIncursion {
     public WolfRatAssault(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
         this.level = level;
         this.targetPos = targetPos.immutable();
-        this.sourcePos = targetPos.offset(5, 0, 0).immutable();
+        this.sourcePos = SourcePlacement.forAssault(level, targetPos, targetType).immutable();
         this.targetType = targetType;
         this.elapsedTicks = 0;
         this.finished = false;
