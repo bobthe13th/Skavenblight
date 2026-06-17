@@ -11,8 +11,12 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
+<<<<<<< HEAD
 import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
 import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
+=======
+import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
+>>>>>>> dev
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -87,6 +91,9 @@ public class ModBlocks {
                     .sound(SoundType.STONE)
             )
     );
+
+    public static final DeferredBlock<Block> SPAWN_TUNNEL_SMALL = registerBlock("spawn_tunnel_small",
+        () -> new SpawnTunnelSmall(BlockBehaviour.Properties.of().noOcclusion()));
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

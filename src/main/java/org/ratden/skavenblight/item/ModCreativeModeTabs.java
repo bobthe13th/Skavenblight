@@ -33,6 +33,7 @@ public class ModCreativeModeTabs {
                         output.accept(ModBlocks.WARPSTONE_DOOR);
                         output.accept(ModBlocks.WARPSTONE_TRAPDOOR);
 
+                        output.accept(ModBlocks.SPAWN_TUNNEL_SMALL);
 
                         output.accept(ModItems.RAW_WARPSTONE);
                         output.accept(ModItems.FUSED_WARPSTONE);
@@ -43,6 +44,10 @@ public class ModCreativeModeTabs {
 
                         output.accept(ModBlocks.SKAVEN_TUNNEL_SOURCE);
 
+                        output.accept(ModItems.WARPSTONE_HELMET);
+                        output.accept(ModItems.WARPSTONE_CHESTPLATE);
+                        output.accept(ModItems.WARPSTONE_LEGGINGS);
+                        output.accept(ModItems.WARPSTONE_BOOTS);
                     })).build());
 
 
