@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import org.ratden.skavenblight.block.entity.state.SourceState;
+import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenDifficultyTracker;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursion;
 import org.ratden.skavenblight.event.skavenIncursion.action.CreateTunnelSource;
@@ -17,11 +18,13 @@ public class WolfRatAssault implements SkavenIncursion {
     private final BlockPos sourcePos;
     private int elapsedTicks;
     private boolean finished;
+    private final IncursionTargetType targetType;
 
-    public WolfRatAssault(ServerLevel level, BlockPos targetPos) {
+    public WolfRatAssault(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
         this.level = level;
         this.targetPos = targetPos.immutable();
         this.sourcePos = targetPos.offset(5, 0, 0).immutable();
+        this.targetType = targetType;
         this.elapsedTicks = 0;
         this.finished = false;
     }
@@ -38,10 +41,19 @@ public class WolfRatAssault implements SkavenIncursion {
         return SkavenDifficultyTracker.getComplexity() >= 1 ? 1 : 0;
     }
 
-    public static int calculateWolfRatCount() {
-        return getBaseWolfRatCount()
+    public static int calculateWolfRatCount(IncursionTargetType targetType) {
+        int wolfRatCount = getBaseWolfRatCount()
                 + getThreatContribution()
                 + getComplexityContribution();
+
+        if (targetType == IncursionTargetType.NEXUS) {
+            wolfRatCount += 2;
+        }
+
+        return wolfRatCount;
+    }
+    public static int calculateWolfRatCount() {
+        return calculateWolfRatCount(IncursionTargetType.PLAYER);
     }
 
     public static String getDebugName() {
@@ -56,7 +68,7 @@ public class WolfRatAssault implements SkavenIncursion {
                 + " + complexity contribution "
                 + getComplexityContribution()
                 + " = "
-                + calculateWolfRatCount();
+                + calculateWolfRatCount(IncursionTargetType.PLAYER);
     }
 
     public static String getDebugTimeline() {
@@ -97,7 +109,7 @@ public class WolfRatAssault implements SkavenIncursion {
         }
 
         if (elapsedTicks == 100) {
-            SpawnWolfRats.execute(level, sourcePos, calculateWolfRatCount());
+            SpawnWolfRats.execute(level, sourcePos, calculateWolfRatCount(targetType));
         }
 
         if (elapsedTicks == 160) {

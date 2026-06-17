@@ -5,6 +5,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenDifficultyTracker;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.WolfRatAssault;
@@ -30,6 +31,10 @@ public class DebugIncursionCommands {
                 player.serverLevel(),
                 player.blockPosition()
         );
+        IncursionTargetType targetType = SkavenIncursionHandler.startWolfRatAssault(
+                player.serverLevel(),
+                player.blockPosition()
+        );
 
         source.sendSuccess(
                 () -> Component.literal(
@@ -38,6 +43,7 @@ public class DebugIncursionCommands {
                                 + " | Formula: 2 + threat/10"
                                 + " + 1 complexity bonus when complexity >= 1"
                                 + " | Expected wolf rats: " + expectedWolfRats
+                                + "\nTarget type: " + targetType
                 ),
                 false
         );
