@@ -1,7 +1,7 @@
 {
   "variants": {
     "": {
-      "model": "skavenblight:block/warpstone_nexus"
+      "model": "skavenblight:block/inert_warpstone_nexus"
     }
   }
 }

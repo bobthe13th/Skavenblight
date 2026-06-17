@@ -21,6 +21,14 @@ public class ModBlockEntities {
                             ModBlocks.SKAVEN_TUNNEL_SOURCE.get()
                     ).build(null));
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpstoneNexusEntity>>
+            WARPSTONE_NEXUS =
+            BLOCK_ENTITIES.register("warpstone_nexus",
+                    () -> BlockEntityType.Builder.of(
+                            WarpstoneNexusEntity::new,
+                            ModBlocks.ACTIVE_WARPSTONE_NEXUS.get()
+                    ).build(null));
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }

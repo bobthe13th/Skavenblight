@@ -12,7 +12,6 @@
 		"8": "skavenblight:block/warpstone_nexus/metal_pillar",
 		"9": "skavenblight:block/warpstone_nexus/light_pillar",
 		"10": "skavenblight:block/warpstone_nexus/beast_pillar",
-		"11": "skavenblight:block/warpstone_nexus/warpstone",
 		"particle": "skavenblight:block/warpstone_nexus/roof_stone"
 	},
 	"elements": [
@@ -201,42 +200,6 @@
 				"up": {"uv": [0, 0, 1, 4], "texture": "#1"},
 				"down": {"uv": [0, 0, 1, 4], "texture": "#1"}
 			}
-		},
-		{
-			"from": [4, 4, 4.5],
-			"to": [8, 8.5, 8.5],
-			"faces": {
-				"north": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"east": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"south": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"west": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"up": {"uv": [0, 0, 2, 2], "texture": "#11"},
-				"down": {"uv": [0, 0, 2, 2], "texture": "#11"}
-			}
-		},
-		{
-			"from": [9, 4, 4.5],
-			"to": [13, 8.5, 8.5],
-			"faces": {
-				"north": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"east": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"south": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"west": {"uv": [0, 0, 2, 2.25], "texture": "#11"},
-				"up": {"uv": [0, 0, 2, 2], "texture": "#11"},
-				"down": {"uv": [0, 0, 2, 2], "texture": "#11"}
-			}
-		},
-		{
-			"from": [6, 5, 6],
-			"to": [11, 17, 11],
-			"faces": {
-				"north": {"uv": [0, 0, 2.5, 6], "texture": "#11"},
-				"east": {"uv": [2.5, 0, 5, 6], "texture": "#11"},
-				"south": {"uv": [5, 0, 7.5, 6], "texture": "#11"},
-				"west": {"uv": [0, 6, 2.5, 12], "texture": "#11"},
-				"up": {"uv": [5, 8.5, 2.5, 6], "texture": "#11"},
-				"down": {"uv": [7.5, 6, 5, 8.5], "texture": "#11"}
-			}
 		}
 	],
 	"display": {
@@ -290,9 +253,6 @@
 			"scope": 0,
 			"color": 0,
 			"children": []
-		},
-		14,
-		15,
-		16
+		}
 	]
 }

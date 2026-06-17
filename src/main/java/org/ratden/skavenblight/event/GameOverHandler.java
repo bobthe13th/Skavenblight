@@ -2,9 +2,16 @@ package org.ratden.skavenblight.event;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.ratden.skavenblight.sound.ModSounds;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -14,9 +21,13 @@ public class GameOverHandler {
 
     private static final List<GameOver> GAME_OVER = new ArrayList<>();
 
-        public static void start(ServerLevel level, BlockPos pos) {
-            GAME_OVER.add(new GameOver(level, pos.immutable(), 0));
+    public static void start(ServerLevel level, BlockPos pos) {
+        if (!GAME_OVER.isEmpty()) {
+            return;
         }
+
+        GAME_OVER.add(new GameOver(level, pos.immutable(), 0));
+    }
 
         public static void onServerTick(ServerTickEvent.Post event) {
             Iterator<GameOver> iterator = GAME_OVER.iterator();
@@ -37,6 +48,22 @@ public class GameOverHandler {
                             1.5, 1.5, 1.8,
                             0.1
                     );
+                    for (Player player : level.players()) {
+                        if (player instanceof ServerPlayer serverPlayer) {
+                            serverPlayer.playNotifySound(
+                                    ModSounds.GAME_OVER.get(),
+                                    SoundSource.MASTER,
+                                    1.5f,
+                                    1.0f
+                            );
+                            serverPlayer.connection.send(
+                                    new ClientboundSetTitleTextPacket(Component.literal("GAME OVER"))
+                            );
+                            serverPlayer.connection.send(
+                                    new ClientboundSetSubtitleTextPacket(Component.literal("The Warpstone Nexus has fallen."))
+                            );
+                        }
+                    }
                 }
 
                 if (gameOver.tick == 20) {

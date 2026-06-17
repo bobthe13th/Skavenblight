@@ -1,14 +1,15 @@
 package org.ratden.skavenblight.block.custom;
 
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import org.ratden.skavenblight.block.ModBlocks;
+import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.sound.ModSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
-import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -20,8 +21,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import org.jetbrains.annotations.Nullable;
+import org.ratden.skavenblight.world.NexusTracker;
 
-public class ActiveWarpstoneNexus extends Block {
+public class ActiveWarpstoneNexus extends Block implements EntityBlock {
     public static final BooleanProperty LIT = BlockStateProperties.LIT;
 
     public ActiveWarpstoneNexus(Properties properties) {
@@ -75,65 +78,61 @@ public class ActiveWarpstoneNexus extends Block {
 
     @Override
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean movedByPiston) {
-        if (!level.isClientSide() && state.getBlock() != newState.getBlock()) {
-            for (Player player : level.players()) {
-                if (player instanceof ServerPlayer serverPlayer) {
-                    serverPlayer.playNotifySound(
-                            ModSounds.GAME_OVER.get(),
-                            SoundSource.MASTER,
-                            1.5f,
-                            1.0f
-                    );
-                    serverPlayer.connection.send(
-                            new ClientboundSetTitleTextPacket(Component.literal("GAME OVER"))
-                    );
-                    serverPlayer.connection.send(
-                            new ClientboundSetSubtitleTextPacket(Component.literal("The Warpstone Nexus has fallen."))
-                    );
-                };
-                if (level instanceof ServerLevel serverLevel) {
-                    GameOverHandler.start(serverLevel, pos);
-                }
+        if (!level.isClientSide()
+                && level instanceof ServerLevel serverLevel
+                && state.getBlock() != newState.getBlock()) {
 
-               /* level.playSound(
-                        null,
-                        player.blockPosition(),
-                        ModSounds.GAME_OVER.get(),
-                        SoundSource.MASTER,
-                        1.0f,
-                        1.0f
-                );
+            boolean wasTrackedNexus = NexusTracker.isActiveNexus(serverLevel, pos);
 
-                */
+            if (wasTrackedNexus) {
+                NexusTracker.clearActiveNexus(serverLevel);
+                GameOverHandler.start(serverLevel, pos);
             }
-            /*if (level instanceof ServerLevel serverLevel) {
-                serverLevel.sendParticles(
-                        ParticleTypes.END_ROD,
-                        pos.getX() + 0.5,
-                        pos.getY() + 1.0,
-                        pos.getZ() + 0.5,
-                        200,
-                        0.2,
-                        0.2,
-                        0.2,
-                        0.2
-                );
-            }
-
-
-            level.explode(
-                    null,
-                    pos.getX() + 0.5,
-                    pos.getY() + 0.5,
-                    pos.getZ() + 0.5,
-                    3.0f,
-                    Level.ExplosionInteraction.BLOCK
-            );
-
-             */
         }
 
         super.onRemove(state, level, pos, newState, movedByPiston);
+    }
+
+    @Override
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
+
+    @Nullable
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new WarpstoneNexusEntity(pos, state);
+    }
+
+    @Override
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+        super.onPlace(state, level, pos, oldState, movedByPiston);
+
+        if (level.isClientSide()) {
+            return;
+        }
+
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        if (oldState.is(this)) {
+            return;
+        }
+
+        if (NexusTracker.hasActiveNexus(serverLevel)
+                && !NexusTracker.isActiveNexus(serverLevel, pos)) {
+
+            level.setBlock(
+                    pos,
+                    ModBlocks.WARPSTONE_NEXUS.get().defaultBlockState(),
+                    3
+            );
+
+            return;
+        }
+
+        NexusTracker.setActiveNexus(serverLevel, pos);
     }
 }
 
