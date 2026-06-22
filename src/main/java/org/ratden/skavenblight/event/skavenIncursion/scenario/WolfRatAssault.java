@@ -6,70 +6,93 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenDifficultyTracker;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursion;
 import org.ratden.skavenblight.event.skavenIncursion.action.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.SetSourceState;
-import org.ratden.skavenblight.event.skavenIncursion.action.SpawnWolfRats;
 import org.ratden.skavenblight.event.skavenIncursion.action.SourcePlacement;
+import org.ratden.skavenblight.event.skavenIncursion.action.SpawnWolfRats;
+import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
+import org.ratden.skavenblight.world.SkavenblightWorldData;
 
 public class WolfRatAssault implements SkavenIncursion {
     private final ServerLevel level;
     private final BlockPos targetPos;
     private final BlockPos sourcePos;
+    private final IncursionTargetType targetType;
+
+    private final int wolfRatCount;
+    private final int poisonAttackChancePercent;
+
     private int elapsedTicks;
     private boolean finished;
-    private final IncursionTargetType targetType;
 
     public WolfRatAssault(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
         this.level = level;
         this.targetPos = targetPos.immutable();
         this.sourcePos = SourcePlacement.forAssault(level, targetPos, targetType).immutable();
         this.targetType = targetType;
+
+        this.wolfRatCount = calculateWolfRatCount(level, targetType);
+        this.poisonAttackChancePercent = calculatePoisonAttackChancePercent(level);
+
         this.elapsedTicks = 0;
         this.finished = false;
-    }
-
-    public static int getBaseWolfRatCount() {
-        return 2;
-    }
-
-    public static int getThreatContribution() {
-        return SkavenDifficultyTracker.getThreat() / 10;
-    }
-
-    public static int getComplexityContribution() {
-        return SkavenDifficultyTracker.getComplexity() >= 1 ? 1 : 0;
-    }
-
-    public static int calculateWolfRatCount(IncursionTargetType targetType) {
-        int wolfRatCount = getBaseWolfRatCount()
-                + getThreatContribution()
-                + getComplexityContribution();
-
-        if (targetType == IncursionTargetType.NEXUS) {
-            wolfRatCount += 2;
-        }
-
-        return wolfRatCount;
-    }
-    public static int calculateWolfRatCount() {
-        return calculateWolfRatCount(IncursionTargetType.PLAYER);
     }
 
     public static String getDebugName() {
         return "Wolf Rat Assault";
     }
 
-    public static String getDebugFormula() {
-        return "Wolf rats = base "
-                + getBaseWolfRatCount()
-                + " + threat contribution "
-                + getThreatContribution()
-                + " + complexity contribution "
-                + getComplexityContribution()
-                + " = "
-                + calculateWolfRatCount(IncursionTargetType.PLAYER);
+    public static int getThreatBudgetMultiplierPercent(IncursionTargetType targetType) {
+        if (targetType == IncursionTargetType.NEXUS) {
+            return 20;
+        }
+
+        return 15;
+    }
+
+    public static int calculateThreatBudget(ServerLevel level, IncursionTargetType targetType) {
+        int threat = SkavenblightWorldData.get(level).getThreat();
+        int multiplierPercent = getThreatBudgetMultiplierPercent(targetType);
+
+        return Math.max(1, roundUpPercent(threat, multiplierPercent));
+    }
+
+    public static int calculateWolfRatCount(ServerLevel level, IncursionTargetType targetType) {
+        int threatBudget = calculateThreatBudget(level, targetType);
+
+        return Math.max(1, threatBudget / IncursionCosts.WOLF_RAT);
+    }
+
+    public static int getComplexityBudgetMultiplier() {
+        return 2;
+    }
+
+    public static int calculateComplexityBudget(ServerLevel level) {
+        int schemeComplexity = SkavenblightWorldData.get(level).getSchemeComplexity();
+
+        return schemeComplexity * getComplexityBudgetMultiplier();
+    }
+
+    public static int calculatePoisonAttackChancePercent(ServerLevel level) {
+        int complexityBudget = calculateComplexityBudget(level);
+
+        return Math.min(100, complexityBudget * 10);
+    }
+
+    private static int roundUpPercent(int value, int percent) {
+        return (value * percent + 99) / 100;
+    }
+
+    public static String getDebugSummary(ServerLevel level, IncursionTargetType targetType) {
+        return "Wolf Rat Assault"
+                + "\nTarget type: " + targetType
+                + "\nThreat budget: " + calculateThreatBudget(level, targetType)
+                + "\nWolf rat cost: " + IncursionCosts.WOLF_RAT
+                + "\nWolf rats: " + calculateWolfRatCount(level, targetType)
+                + "\nComplexity budget: " + calculateComplexityBudget(level)
+                + "\nPoison attack chance: " + calculatePoisonAttackChancePercent(level) + "%"
+                + "\nNote: poison attack chance is calculated but not implemented yet.";
     }
 
     public static String getDebugTimeline() {
@@ -110,7 +133,10 @@ public class WolfRatAssault implements SkavenIncursion {
         }
 
         if (elapsedTicks == 100) {
-            SpawnWolfRats.execute(level, sourcePos, calculateWolfRatCount(targetType));
+            SpawnWolfRats.execute(level, sourcePos, wolfRatCount);
+
+            // Future:
+            // SpawnWolfRats.execute(level, sourcePos, wolfRatCount, poisonAttackChancePercent);
         }
 
         if (elapsedTicks == 160) {
