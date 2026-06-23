@@ -10,8 +10,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
 import org.ratden.skavenblight.block.entity.state.SourceState;
-import org.ratden.skavenblight.event.skavenIncursion.action.CreateTunnelSource;
-import org.ratden.skavenblight.event.skavenIncursion.action.SetSourceState;
+import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
+import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.SetSourceState;
 
 public class DebugSourceCommands {
 

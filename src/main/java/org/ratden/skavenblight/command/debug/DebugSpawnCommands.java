@@ -6,7 +6,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import org.ratden.skavenblight.event.skavenIncursion.action.SpawnWolfRats;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
 
 public class DebugSpawnCommands {
 

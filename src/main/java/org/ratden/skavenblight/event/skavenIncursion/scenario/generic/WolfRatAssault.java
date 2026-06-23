@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.scenario;
+package org.ratden.skavenblight.event.skavenIncursion.scenario.generic;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -6,15 +6,15 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursion;
-import org.ratden.skavenblight.event.skavenIncursion.action.CreateTunnelSource;
-import org.ratden.skavenblight.event.skavenIncursion.action.SetSourceState;
-import org.ratden.skavenblight.event.skavenIncursion.action.SourcePlacement;
-import org.ratden.skavenblight.event.skavenIncursion.action.SpawnWolfRats;
+import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
+import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.SetSourceState;
+import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.SourcePlacement;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
 import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
 
-public class WolfRatAssault implements SkavenIncursion {
+public class WolfRatAssault implements SkavenScenario {
     private final ServerLevel level;
     private final BlockPos targetPos;
     private final BlockPos sourcePos;

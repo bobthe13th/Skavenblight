@@ -7,8 +7,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
-import org.ratden.skavenblight.event.skavenIncursion.scenario.WolfRatAssault;
+import org.ratden.skavenblight.event.skavenIncursion.ActiveIncursionManager;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.generic.WolfRatAssault;
 
 public class DebugIncursionCommands {
 
@@ -31,7 +31,7 @@ public class DebugIncursionCommands {
             int nexusTargets = 0;
 
             for (int i = 0; i < count; i++) {
-                IncursionTargetType targetType = SkavenIncursionHandler.startWolfRatAssault(
+                IncursionTargetType targetType = ActiveIncursionManager.startWolfRatAssault(
                         player.serverLevel(),
                         player.blockPosition()
                 );

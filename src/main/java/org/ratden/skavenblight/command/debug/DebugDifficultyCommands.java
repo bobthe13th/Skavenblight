@@ -57,7 +57,7 @@ public class DebugDifficultyCommands {
 
     private static int showDifficulty(CommandSourceStack source) {
         source.sendSuccess(() -> Component.literal(
-                "Skaven Difficulty | Threat: " + SkavenDifficultyTracker.getThreat()
+                "Skaven Difficulty | Threat: " + SkavenblightWorldData.get(level).setThreat()
                         + " | Complexity: " + SkavenDifficultyTracker.getComplexity()
         ), false);
 

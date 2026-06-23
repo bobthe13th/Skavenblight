@@ -4,13 +4,13 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
+import org.ratden.skavenblight.event.skavenIncursion.ActiveIncursionManager;
 
 @EventBusSubscriber(modid = Skavenblight.MODID)
 public class GameplayEvents {
 
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
-        SkavenIncursionHandler.onServerTick(event);
+        ActiveIncursionManager.onServerTick(event);
     }
 }

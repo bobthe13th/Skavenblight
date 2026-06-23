@@ -9,7 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.entity.custom.RatWolf;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
+import org.ratden.skavenblight.event.skavenIncursion.ActiveIncursionManager;
 
 public class DebugCleanupCommands {
 
@@ -62,7 +62,7 @@ public class DebugCleanupCommands {
             com.mojang.brigadier.context.CommandContext<CommandSourceStack> context
     ) {
 
-        int removed = SkavenIncursionHandler.clearIncursions();
+        int removed = ActiveIncursionManager.clearIncursions();
 
         context.getSource().sendSuccess(
                 () -> net.minecraft.network.chat.Component.literal(
