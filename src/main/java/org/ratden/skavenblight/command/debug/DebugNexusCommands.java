@@ -46,7 +46,7 @@ public class DebugNexusCommands {
                                 + "\nPosition: " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
                                 + "\nTier: " + nexus.getNexusTier()
                                 + "\nStability: " + nexus.getStability()
-                                + "\nEnergy: " + nexus.getEnergy()
+                                + "\nFlux: " + nexus.getFluxStorage().getFlux() + " / " + nexus.getFluxStorage().getMaxFlux()
                 ),
                 false
         );

@@ -23,6 +23,8 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import org.jetbrains.annotations.Nullable;
 import org.ratden.skavenblight.world.NexusTracker;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 
 public class ActiveWarpstoneNexus extends Block implements EntityBlock {
     public static final BooleanProperty LIT = BlockStateProperties.LIT;
@@ -133,6 +135,19 @@ public class ActiveWarpstoneNexus extends Block implements EntityBlock {
         }
 
         NexusTracker.setActiveNexus(serverLevel, pos);
+    }
+
+   //
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        if (level.isClientSide()) {
+            return null; // Don't tick on the client
+        }
+
+        // Checks if the block entity type matches our Warpstone Nexus type
+        return type == org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get() ?
+                (lvl, pos, st, blockEntity) -> ((WarpstoneNexusEntity) blockEntity).tick(lvl, pos, st) : null;
     }
 }
 
