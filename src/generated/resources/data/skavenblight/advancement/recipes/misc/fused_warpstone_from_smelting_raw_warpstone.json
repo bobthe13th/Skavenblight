@@ -1,0 +1,32 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_raw_warpstone": {
+      "conditions": {
+        "items": [
+          {
+            "items": "skavenblight:raw_warpstone"
+          }
+        ]
+      },
+      "trigger": "minecraft:inventory_changed"
+    },
+    "has_the_recipe": {
+      "conditions": {
+        "recipe": "skavenblight:fused_warpstone_from_smelting_raw_warpstone"
+      },
+      "trigger": "minecraft:recipe_unlocked"
+    }
+  },
+  "requirements": [
+    [
+      "has_the_recipe",
+      "has_raw_warpstone"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "skavenblight:fused_warpstone_from_smelting_raw_warpstone"
+    ]
+  }
+}

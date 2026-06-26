@@ -1,0 +1,32 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_the_recipe": {
+      "conditions": {
+        "recipe": "skavenblight:fused_warpstone_from_smelting_warpstone_ore"
+      },
+      "trigger": "minecraft:recipe_unlocked"
+    },
+    "has_warpstone_ore": {
+      "conditions": {
+        "items": [
+          {
+            "items": "skavenblight:warpstone_ore"
+          }
+        ]
+      },
+      "trigger": "minecraft:inventory_changed"
+    }
+  },
+  "requirements": [
+    [
+      "has_the_recipe",
+      "has_warpstone_ore"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "skavenblight:fused_warpstone_from_smelting_warpstone_ore"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/button",
+  "textures": {
+    "texture": "skavenblight:block/block_of_warpstone"
+  }
+}
