@@ -2,7 +2,7 @@ package org.ratden.skavenblight.event.skavenIncursion;
 
 public class SkavenDifficultyTracker {
 
-    private static int threat = 10;
+   /* private static int threat = 10;
     private static int complexity = 0;
 
     public static int getThreat() {
@@ -20,4 +20,6 @@ public class SkavenDifficultyTracker {
     public static void setComplexity(int value) {
         complexity = Math.max(0, value);
     }
+
+    */
 }

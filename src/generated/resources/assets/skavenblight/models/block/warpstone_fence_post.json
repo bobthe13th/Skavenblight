@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/fence_post",
+  "textures": {
+    "texture": "skavenblight:block/block_of_warpstone"
+  }
+}

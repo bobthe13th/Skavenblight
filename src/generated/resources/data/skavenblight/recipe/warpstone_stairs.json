@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "group": "warpstone",
+  "key": {
+    "#": {
+      "item": "skavenblight:fused_warpstone"
+    }
+  },
+  "pattern": [
+    "#  ",
+    "## ",
+    "###"
+  ],
+  "result": {
+    "count": 4,
+    "id": "skavenblight:warpstone_stairs"
+  }
+}

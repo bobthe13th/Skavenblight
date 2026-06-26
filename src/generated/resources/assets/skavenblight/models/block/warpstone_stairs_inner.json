@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/inner_stairs",
+  "textures": {
+    "bottom": "skavenblight:block/block_of_warpstone",
+    "side": "skavenblight:block/block_of_warpstone",
+    "top": "skavenblight:block/block_of_warpstone"
+  }
+}
