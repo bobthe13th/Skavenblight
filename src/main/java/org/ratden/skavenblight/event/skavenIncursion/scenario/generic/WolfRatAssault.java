@@ -6,15 +6,26 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.SetSourceState;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.SourcePlacement;
-import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
 import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
 
+import java.util.UUID;
+
 public class WolfRatAssault implements SkavenScenario {
+    private final UUID instanceId;
+    private final LeadershipRegistry leadershipRegistry;
+    private final LeaderGroup packGroup;
+
+
     private final ServerLevel level;
     private final BlockPos targetPos;
     private final BlockPos sourcePos;
@@ -27,6 +38,16 @@ public class WolfRatAssault implements SkavenScenario {
     private boolean finished;
 
     public WolfRatAssault(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
+        this.instanceId = UUID.randomUUID();
+        this.leadershipRegistry = new LeadershipRegistry(instanceId);
+
+        this.packGroup = leadershipRegistry.createLeaderGroup(
+                LeaderGroupType.PACK,
+                LeaderRank.NONE
+        );
+
+
+
         this.level = level;
         this.targetPos = targetPos.immutable();
         this.sourcePos = SourcePlacement.forAssault(level, targetPos, targetType).immutable();
@@ -37,6 +58,16 @@ public class WolfRatAssault implements SkavenScenario {
 
         this.elapsedTicks = 0;
         this.finished = false;
+    }
+
+    @Override
+    public String getId() {
+        return "wolf_rat_assault";
+    }
+
+    @Override
+    public UUID getInstanceId() {
+        return instanceId;
     }
 
     public static String getDebugName() {
@@ -129,14 +160,21 @@ public class WolfRatAssault implements SkavenScenario {
                     1f
             );
 
-            CreateTunnelSource.execute(level, sourcePos, SourceState.ACTIVE);
+            CreateTunnelSource.execute(
+                    level,
+                    sourcePos,
+                    SourceState.ACTIVE,
+                    leadershipRegistry.createPackContext(packGroup)
+            );
         }
 
         if (elapsedTicks == 100) {
-            SpawnWolfRats.execute(level, sourcePos, wolfRatCount);
-
-            // Future:
-            // SpawnWolfRats.execute(level, sourcePos, wolfRatCount, poisonAttackChancePercent);
+            SpawnWolfRats.execute(
+                    level,
+                    sourcePos,
+                    wolfRatCount,
+                    leadershipRegistry.createPackContext(packGroup)
+            );
         }
 
         if (elapsedTicks == 160) {

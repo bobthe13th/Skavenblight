@@ -7,6 +7,12 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+
+import java.util.UUID;
 
 public class DebugSpawnCommands {
 
@@ -26,11 +32,40 @@ public class DebugSpawnCommands {
 
         ServerPlayer player = source.getPlayerOrException();
 
+        LeadershipRegistry leadershipRegistry =
+                new LeadershipRegistry(UUID.randomUUID());
+
+        LeaderGroup vermintideGroup = leadershipRegistry.createLeaderGroup(
+                LeaderGroupType.VERMINTIDE,
+                LeaderRank.NONE
+        );
+
+        LeaderGroup fangGroup = leadershipRegistry.createLeaderGroup(
+                LeaderGroupType.FANG,
+                LeaderRank.NONE
+        );
+
+        LeaderGroup clawGroup = leadershipRegistry.createLeaderGroup(
+                LeaderGroupType.CLAW,
+                LeaderRank.NONE
+        );
+
+        LeaderGroup packGroup = leadershipRegistry.createLeaderGroup(
+                LeaderGroupType.PACK,
+                LeaderRank.NONE
+        );
+
         int spawned = SpawnWolfRats.execute(
                 player.serverLevel(),
                 player.blockPosition(),
-                count
-        );
+                count,
+                leadershipRegistry.createContext(
+                        vermintideGroup,
+                        fangGroup,
+                        clawGroup,
+                        packGroup
+                )
+        ).size();
 
         source.sendSuccess(
                 () -> Component.literal("Debug spawned " + spawned + " wolf rats."),

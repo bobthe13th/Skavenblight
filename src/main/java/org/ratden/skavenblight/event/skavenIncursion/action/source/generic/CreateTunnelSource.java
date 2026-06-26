@@ -9,18 +9,15 @@ import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
 import org.ratden.skavenblight.block.entity.SkavenTunnelSourceEntity;
 import org.ratden.skavenblight.block.entity.state.SourceState;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
 
 public class CreateTunnelSource {
-
-    public static boolean execute(ServerLevel level, BlockPos pos, SourceState sourceState) {
-        return execute(level, pos, sourceState, "unknown");
-    }
 
     public static boolean execute(
             ServerLevel level,
             BlockPos pos,
             SourceState sourceState,
-            String parentIncursionName
+            LeadershipContext leadershipContext
     ) {
         prepareTunnelArea(level, pos);
 
@@ -37,7 +34,11 @@ public class CreateTunnelSource {
         BlockEntity blockEntity = level.getBlockEntity(pos);
 
         if (blockEntity instanceof SkavenTunnelSourceEntity tunnelSource) {
-            tunnelSource.setParentIncursionName(parentIncursionName);
+            tunnelSource.setScenarioId(leadershipContext.getScenarioId());
+            tunnelSource.setVermintideId(leadershipContext.getVermintideId());
+            tunnelSource.setFangId(leadershipContext.getFangId());
+            tunnelSource.setClawId(leadershipContext.getClawId());
+            tunnelSource.setPackId(leadershipContext.getPackId());
             tunnelSource.setCreatedGameTime(level.getGameTime());
         }
 
@@ -67,5 +68,8 @@ public class CreateTunnelSource {
                 }
             }
         }
+    }
+
+    private CreateTunnelSource() {
     }
 }

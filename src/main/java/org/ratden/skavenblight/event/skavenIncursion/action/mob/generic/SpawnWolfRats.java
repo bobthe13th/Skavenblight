@@ -3,14 +3,24 @@ package org.ratden.skavenblight.event.skavenIncursion.action.mob.generic;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.entity.ModEntities;
+import org.ratden.skavenblight.entity.custom.RatWolf;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class SpawnWolfRats {
 
-    public static int execute(ServerLevel level, BlockPos sourcePos, int count) {
-        int spawned = 0;
+    public static List<RatWolf> execute(
+            ServerLevel level,
+            BlockPos sourcePos,
+            int count,
+            LeadershipContext leadershipContext
+    ) {
+        List<RatWolf> spawnedWolfRats = new ArrayList<>();
 
         for (int i = 0; i < count; i++) {
-            var ratWolf = ModEntities.RAT_WOLF.get().create(level);
+            RatWolf ratWolf = ModEntities.RAT_WOLF.get().create(level);
 
             if (ratWolf == null) {
                 continue;
@@ -22,6 +32,12 @@ public class SpawnWolfRats {
                 continue;
             }
 
+            ratWolf.setScenarioId(leadershipContext.getScenarioId());
+            ratWolf.setVermintideId(leadershipContext.getVermintideId());
+            ratWolf.setFangId(leadershipContext.getFangId());
+            ratWolf.setClawId(leadershipContext.getClawId());
+            ratWolf.setPackId(leadershipContext.getPackId());
+
             ratWolf.moveTo(
                     spawnPos.getX() + 0.5,
                     spawnPos.getY(),
@@ -31,10 +47,10 @@ public class SpawnWolfRats {
             );
 
             level.addFreshEntity(ratWolf);
-            spawned++;
+            spawnedWolfRats.add(ratWolf);
         }
 
-        return spawned;
+        return spawnedWolfRats;
     }
 
     private static BlockPos findSafeSpawnPos(ServerLevel level, BlockPos sourcePos) {
