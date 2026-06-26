@@ -18,5 +18,29 @@
 				"down": {"uv": [5.25, 0.25, 5.75, 0.75], "texture": "#0"}
 			}
 		}
-	]
+	],
+	"display": {
+		"thirdperson_righthand": {
+			"scale": [0.2, 0.2, 0.2]
+		},
+		"thirdperson_lefthand": {
+			"scale": [0.2, 0.2, 0.2]
+		},
+		"firstperson_righthand": {
+			"scale": [0.2, 0.2, 0.2]
+		},
+		"firstperson_lefthand": {
+			"scale": [0.2, 0.2, 0.2]
+		},
+		"ground": {
+			"scale": [0.2, 0.2, 0.2]
+		},
+		"gui": {
+			"translation": [0, -2, 0],
+			"scale": [0.3, 0.3, 0.5]
+		},
+		"fixed": {
+			"scale": [0.2, 0.2, 0.2]
+		}
+	}
 }
