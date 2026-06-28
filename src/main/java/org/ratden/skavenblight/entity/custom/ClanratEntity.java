@@ -16,7 +16,7 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
-    // References to your Blockbench animation keys
+    // References to our Blockbench animation keys
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
     protected static final RawAnimation FALL = RawAnimation.begin().thenLoop("animation.clanrat.fall");

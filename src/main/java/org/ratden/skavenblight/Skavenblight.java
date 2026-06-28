@@ -92,6 +92,7 @@ public class Skavenblight {
         modEventBus.addListener(this::registerEntityAttributes);
 
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
+
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         // >>> YOUR CODE GOES HERE <<<
         // Initialize our custom wealth values when the mod loads - if/when implemented
@@ -140,6 +141,7 @@ public class Skavenblight {
             LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
         }
     }
+
     public void registerEntityAttributes(net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent event) {
         // Links your Clanrat attributes to its actual registered EntityType
         event.put(org.ratden.skavenblight.entity.ModEntities.CLANRAT.get(),
@@ -148,4 +150,6 @@ public class Skavenblight {
         // If your RatWolf also has attributes, add it here too!
         // event.register(ModEntities.RAT_WOLF.get(), RatWolf.createAttributes().build());
     }
+
+
 }

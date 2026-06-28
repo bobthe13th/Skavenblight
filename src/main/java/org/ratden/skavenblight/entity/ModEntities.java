@@ -35,10 +35,14 @@ public class ModEntities {
             );
 
     @EventBusSubscriber(modid = Skavenblight.MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-    public class ClientEntityEvent {
+    public static class ClientEntityEvent { // <-- ADDED 'static' HERE
         @SubscribeEvent
         public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+            // Registers the Skaven Clanrat renderer
             event.registerEntityRenderer(ModEntities.CLANRAT.get(), ClanratRenderer::new);
+
+            // Registers the RatWolf renderer so it isn't invisible either!
+            event.registerEntityRenderer(ModEntities.RAT_WOLF.get(), org.ratden.skavenblight.entity.client.RatWolfRenderer::new);
         }
     }
 }
