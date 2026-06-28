@@ -3,11 +3,13 @@ package org.ratden.skavenblight.world;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.saveddata.SavedData;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 
 public class SkavenblightWorldData extends SavedData {
     public static final String DATA_NAME = "skavenblight_world_data";
+    public static final String DEFAULT_SCHEME_ID = "tutorial";
 
     public static final Factory<SkavenblightWorldData> FACTORY =
             new Factory<>(
@@ -44,6 +46,9 @@ public class SkavenblightWorldData extends SavedData {
 
     // Director memory
     private long lastGlobalIncursionGameTime;
+    private String lastScenarioId;
+    private String lastScenarioPattern;
+
     private long lastAssaultGameTime;
     private long lastRaidGameTime;
     private long lastInfiltrationGameTime;
@@ -62,13 +67,16 @@ public class SkavenblightWorldData extends SavedData {
         this.schemeComplexity = 0;
         this.schemeProgress = 0;
 
-        this.currentSchemeId = "chieftain_test";
+        this.currentSchemeId = DEFAULT_SCHEME_ID;
         this.currentSchemeStartGameTime = 0L;
         this.currentSchemeDeadlineGameTime = 0L;
         this.skavenSchemeSuccesses = 0;
         this.skavenSchemeFailures = 0;
 
         this.lastGlobalIncursionGameTime = 0L;
+        this.lastScenarioId = "";
+        this.lastScenarioPattern = "";
+
         this.lastAssaultGameTime = 0L;
         this.lastRaidGameTime = 0L;
         this.lastInfiltrationGameTime = 0L;
@@ -97,8 +105,8 @@ public class SkavenblightWorldData extends SavedData {
         data.schemeProgress = tag.getInt("scheme_progress");
 
         data.currentSchemeId = tag.getString("current_scheme_id");
-        if (data.currentSchemeId.isEmpty()) {
-            data.currentSchemeId = "chieftain_test";
+        if (data.currentSchemeId.isEmpty() || data.currentSchemeId.equals("chieftain_test")) {
+            data.currentSchemeId = DEFAULT_SCHEME_ID;
         }
 
         data.currentSchemeStartGameTime = tag.getLong("current_scheme_start_game_time");
@@ -107,6 +115,9 @@ public class SkavenblightWorldData extends SavedData {
         data.skavenSchemeFailures = tag.getInt("skaven_scheme_failures");
 
         data.lastGlobalIncursionGameTime = tag.getLong("last_global_incursion_game_time");
+        data.lastScenarioId = tag.getString("last_scenario_id");
+        data.lastScenarioPattern = tag.getString("last_scenario_pattern");
+
         data.lastAssaultGameTime = tag.getLong("last_assault_game_time");
         data.lastRaidGameTime = tag.getLong("last_raid_game_time");
         data.lastInfiltrationGameTime = tag.getLong("last_infiltration_game_time");
@@ -140,6 +151,9 @@ public class SkavenblightWorldData extends SavedData {
         tag.putInt("skaven_scheme_failures", skavenSchemeFailures);
 
         tag.putLong("last_global_incursion_game_time", lastGlobalIncursionGameTime);
+        tag.putString("last_scenario_id", lastScenarioId);
+        tag.putString("last_scenario_pattern", lastScenarioPattern);
+
         tag.putLong("last_assault_game_time", lastAssaultGameTime);
         tag.putLong("last_raid_game_time", lastRaidGameTime);
         tag.putLong("last_infiltration_game_time", lastInfiltrationGameTime);
@@ -149,6 +163,35 @@ public class SkavenblightWorldData extends SavedData {
 
         return tag;
     }
+
+    // Campaign
+
+    public boolean isSkavenblightStarted() {
+        return skavenblightStarted;
+    }
+
+    public long getSkavenblightStartGameTime() {
+        return skavenblightStartGameTime;
+    }
+
+    public void startSkavenblight(long gameTime) {
+        this.skavenblightStarted = true;
+        this.skavenblightStartGameTime = gameTime;
+
+        if (this.currentSchemeId == null || this.currentSchemeId.isEmpty() || this.currentSchemeId.equals("chieftain_test")) {
+            this.currentSchemeId = DEFAULT_SCHEME_ID;
+        }
+
+        this.currentSchemeStartGameTime = gameTime;
+        setDirty();
+    }
+
+    public void setSkavenblightStarted(boolean skavenblightStarted) {
+        this.skavenblightStarted = skavenblightStarted;
+        setDirty();
+    }
+
+    // Nexus
 
     public boolean hasActiveNexus() {
         return hasActiveNexus;
@@ -174,6 +217,8 @@ public class SkavenblightWorldData extends SavedData {
         return hasActiveNexus && activeNexusPos.equals(pos);
     }
 
+    // Difficulty
+
     public int getThreat() {
         return threat;
     }
@@ -182,6 +227,8 @@ public class SkavenblightWorldData extends SavedData {
         this.threat = Math.max(0, threat);
         setDirty();
     }
+
+    // Scheme
 
     public int getSchemeComplexity() {
         return schemeComplexity;
@@ -206,7 +253,123 @@ public class SkavenblightWorldData extends SavedData {
     }
 
     public void setCurrentSchemeId(String currentSchemeId) {
-        this.currentSchemeId = currentSchemeId;
+        if (currentSchemeId == null || currentSchemeId.isEmpty()) {
+            this.currentSchemeId = DEFAULT_SCHEME_ID;
+        } else {
+            this.currentSchemeId = currentSchemeId;
+        }
+
         setDirty();
+    }
+
+    public long getCurrentSchemeStartGameTime() {
+        return currentSchemeStartGameTime;
+    }
+
+    public void setCurrentSchemeStartGameTime(long currentSchemeStartGameTime) {
+        this.currentSchemeStartGameTime = currentSchemeStartGameTime;
+        setDirty();
+    }
+
+    public long getCurrentSchemeDeadlineGameTime() {
+        return currentSchemeDeadlineGameTime;
+    }
+
+    public void setCurrentSchemeDeadlineGameTime(long currentSchemeDeadlineGameTime) {
+        this.currentSchemeDeadlineGameTime = currentSchemeDeadlineGameTime;
+        setDirty();
+    }
+
+    public int getSkavenSchemeSuccesses() {
+        return skavenSchemeSuccesses;
+    }
+
+    public void addSkavenSchemeSuccess() {
+        this.skavenSchemeSuccesses++;
+        setDirty();
+    }
+
+    public int getSkavenSchemeFailures() {
+        return skavenSchemeFailures;
+    }
+
+    public void addSkavenSchemeFailure() {
+        this.skavenSchemeFailures++;
+        setDirty();
+    }
+
+    // Director memory
+
+    public long getLastGlobalIncursionGameTime() {
+        return lastGlobalIncursionGameTime;
+    }
+
+    public void setLastGlobalIncursionGameTime(long lastGlobalIncursionGameTime) {
+        this.lastGlobalIncursionGameTime = lastGlobalIncursionGameTime;
+        setDirty();
+    }
+
+    public String getLastScenarioId() {
+        return lastScenarioId;
+    }
+
+    public void setLastScenarioId(String lastScenarioId) {
+        this.lastScenarioId = lastScenarioId == null ? "" : lastScenarioId;
+        setDirty();
+    }
+
+    public String getLastScenarioPattern() {
+        return lastScenarioPattern;
+    }
+
+    public void setLastScenarioPattern(String lastScenarioPattern) {
+        this.lastScenarioPattern = lastScenarioPattern == null ? "" : lastScenarioPattern;
+        setDirty();
+    }
+
+    public void recordScenarioStarted(String scenarioId, ScenarioPattern pattern, long gameTime) {
+        this.lastGlobalIncursionGameTime = gameTime;
+        this.lastScenarioId = scenarioId == null ? "" : scenarioId;
+        this.lastScenarioPattern = pattern == null ? "" : pattern.name();
+
+        if (pattern == ScenarioPattern.ASSAULT) {
+            this.lastAssaultGameTime = gameTime;
+        } else if (pattern == ScenarioPattern.RAID) {
+            this.lastRaidGameTime = gameTime;
+        } else if (pattern == ScenarioPattern.INFILTRATION) {
+            this.lastInfiltrationGameTime = gameTime;
+        } else if (pattern == ScenarioPattern.AMBUSH) {
+            this.lastAmbushGameTime = gameTime;
+        } else if (pattern == ScenarioPattern.RITUAL) {
+            this.lastRitualGameTime = gameTime;
+        } else if (pattern == ScenarioPattern.SIEGE) {
+            this.lastSiegeGameTime = gameTime;
+        }
+
+        setDirty();
+    }
+
+    public long getLastAssaultGameTime() {
+        return lastAssaultGameTime;
+    }
+
+    public long getLastRaidGameTime() {
+        return lastRaidGameTime;
+    }
+
+    public long getLastInfiltrationGameTime() {
+        return lastInfiltrationGameTime;
+    }
+
+    public long getLastAmbushGameTime() {
+        return lastAmbushGameTime;
+    }
+
+    public long getLastRitualGameTime() {
+        return lastRitualGameTime;
+    }
+
+    public long getLastSiegeGameTime() {
+        return lastSiegeGameTime;
     }
 }

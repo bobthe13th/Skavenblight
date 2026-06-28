@@ -15,16 +15,36 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
 
+import java.util.EnumSet;
 import java.util.UUID;
 
 public class WolfRatAssault implements SkavenScenario {
+    public static final ScenarioDefinition DEFINITION = new ScenarioDefinition(
+            "wolf_rat_assault",
+            ScenarioPattern.ASSAULT,
+            ScenarioGoal.PRESSURE,
+            EnumSet.of(
+                    IncursionTargetType.PLAYER,
+                    IncursionTargetType.NEXUS
+            ),
+            0,
+            -1,
+            100,
+            24000L,
+            true,
+            true,
+            false
+    );
+
     private final UUID instanceId;
     private final LeadershipRegistry leadershipRegistry;
     private final LeaderGroup packGroup;
-
 
     private final ServerLevel level;
     private final BlockPos targetPos;
@@ -46,8 +66,6 @@ public class WolfRatAssault implements SkavenScenario {
                 LeaderRank.NONE
         );
 
-
-
         this.level = level;
         this.targetPos = targetPos.immutable();
         this.sourcePos = SourcePlacement.forAssault(level, targetPos, targetType).immutable();
@@ -60,9 +78,23 @@ public class WolfRatAssault implements SkavenScenario {
         this.finished = false;
     }
 
+    public static String id() {
+        return DEFINITION.getId();
+    }
+
+    @Override
+    public ScenarioDefinition getDefinition() {
+        return DEFINITION;
+    }
+
     @Override
     public String getId() {
-        return "wolf_rat_assault";
+        return DEFINITION.getId();
+    }
+
+    @Override
+    public ScenarioPattern getPattern() {
+        return DEFINITION.getPattern();
     }
 
     @Override

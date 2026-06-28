@@ -88,6 +88,9 @@ public class Skavenblight {
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
 
+        // Register the entity attributes
+        modEventBus.addListener(this::registerEntityAttributes);
+
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         // >>> YOUR CODE GOES HERE <<<
@@ -136,5 +139,13 @@ public class Skavenblight {
             LOGGER.info("HELLO FROM CLIENT SETUP");
             LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
         }
+    }
+    public void registerEntityAttributes(net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent event) {
+        // Links your Clanrat attributes to its actual registered EntityType
+        event.put(org.ratden.skavenblight.entity.ModEntities.CLANRAT.get(),
+                org.ratden.skavenblight.entity.custom.ClanratEntity.createAttributes().build());
+
+        // If your RatWolf also has attributes, add it here too!
+        // event.register(ModEntities.RAT_WOLF.get(), RatWolf.createAttributes().build());
     }
 }
