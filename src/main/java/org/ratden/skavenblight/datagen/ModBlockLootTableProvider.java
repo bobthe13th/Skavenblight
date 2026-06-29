@@ -52,6 +52,7 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
 
         dropSelf(ModBlocks.SPAWN_TUNNEL_SMALL.get());
         dropSelf(ModBlocks.SKAVEN_TUNNEL_SOURCE.get());
+        dropSelf(ModBlocks.WARP_FLUX_CONDUIT.get());
     }
 
     //Basically the createCopperOreDrops() vanilla method

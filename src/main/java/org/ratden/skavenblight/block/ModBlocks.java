@@ -17,6 +17,7 @@ import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
 
 import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
 
+import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -94,6 +95,13 @@ public class ModBlocks {
 
     public static final DeferredBlock<Block> SPAWN_TUNNEL_SMALL = registerBlock("spawn_tunnel_small",
         () -> new SpawnTunnelSmall(BlockBehaviour.Properties.of().noOcclusion()));
+
+    public static final DeferredBlock<Block> WARP_FLUX_CONDUIT = registerBlock("warp_flux_conduit",
+            () -> new WarpFluxConduitBlock(BlockBehaviour.Properties.of()
+                    .strength(2.0f)
+                    .requiresCorrectToolForDrops()
+                    .sound(SoundType.METAL)
+                    .noOcclusion())); // noOcclusion is important for pipes/cables to render nicely
 
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

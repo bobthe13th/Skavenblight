@@ -8,12 +8,14 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.model.generators.BlockStateProvider;
 import net.neoforged.neoforge.client.model.generators.ConfiguredModel;
 import net.neoforged.neoforge.client.model.generators.ModelFile;
+import net.neoforged.neoforge.client.model.generators.MultiPartBlockStateBuilder;
 import net.neoforged.neoforge.common.data.ExistingFileHelper;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
 import net.minecraft.client.renderer.item.ItemProperties;
+import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
 
 import static org.ratden.skavenblight.block.ModBlocks.SPAWN_TUNNEL_SMALL;
 
@@ -52,8 +54,38 @@ public class ModBlockStateProvider extends BlockStateProvider {
 
         customSpawnerBlock(ModBlocks.SPAWN_TUNNEL_SMALL);
 
+        makeConduit(ModBlocks.WARP_FLUX_CONDUIT, "warp_flux_conduit");
+
     }
 
+    public void makeConduit(DeferredBlock<?> block, String baseName) {
+        MultiPartBlockStateBuilder builder = getMultipartBuilder(block.get());
+
+        // 1. Define the models we expect to exist in assets/skavenblight/models/block/
+        // (You still need to create these geometry files in Blockbench!)
+        ModelFile coreOff = models().getExistingFile(modLoc("block/" + baseName + "_core_off"));
+        ModelFile corePale = models().getExistingFile(modLoc("block/" + baseName + "_core_pale"));
+        ModelFile coreMedium = models().getExistingFile(modLoc("block/" + baseName + "_core_medium"));
+        ModelFile coreStrong = models().getExistingFile(modLoc("block/" + baseName + "_core_strong"));
+        ModelFile arm = models().getExistingFile(modLoc("block/" + baseName + "_arm"));
+
+        // 2. Generate the Core states based on glow intensity
+        builder.part().modelFile(coreOff).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 0).end();
+        builder.part().modelFile(corePale).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 1).end();
+        builder.part().modelFile(coreMedium).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 2).end();
+        builder.part().modelFile(coreStrong).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 3).end();
+
+        // 3. Generate the connecting Arms based on boolean direction states
+        builder.part().modelFile(arm).addModel().condition(BlockStateProperties.NORTH, true).end();
+        builder.part().modelFile(arm).rotationY(90).addModel().condition(BlockStateProperties.EAST, true).end();
+        builder.part().modelFile(arm).rotationY(180).addModel().condition(BlockStateProperties.SOUTH, true).end();
+        builder.part().modelFile(arm).rotationY(270).addModel().condition(BlockStateProperties.WEST, true).end();
+        builder.part().modelFile(arm).rotationX(270).addModel().condition(BlockStateProperties.UP, true).end();
+        builder.part().modelFile(arm).rotationX(90).addModel().condition(BlockStateProperties.DOWN, true).end();
+
+        // 4. Generate the Item Model (usually just referencing a custom generated item texture or the core off model)
+        simpleBlockItem(block.get(), coreOff);
+    }
 
     private void customSpawnerBlock(DeferredBlock<?> deferredBlock) {
         // 1. Get references to your active and inactive models.

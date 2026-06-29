@@ -29,6 +29,14 @@ public class ModBlockEntities {
                             ModBlocks.ACTIVE_WARPSTONE_NEXUS.get()
                     ).build(null));
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpFluxConduitBlockEntity>>
+            WARP_FLUX_CONDUIT =
+            BLOCK_ENTITIES.register("warp_flux_conduit",
+                    () -> BlockEntityType.Builder.of(
+                            WarpFluxConduitBlockEntity::new,
+                            ModBlocks.WARP_FLUX_CONDUIT.get()
+                    ).build(null));
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }
