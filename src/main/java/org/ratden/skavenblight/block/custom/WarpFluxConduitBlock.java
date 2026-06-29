@@ -64,6 +64,20 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
     }
 
     @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        // Only trigger if the block is actually being destroyed/replaced by a different block
+        if (!state.is(newState.getBlock())) {
+
+            if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
+                WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+                manager.removeConduit(serverLevel, pos);
+            }
+
+            super.onRemove(state, level, pos, newState, isMoving);
+        }
+    }
+
+    @Override
     public BlockState updateShape(BlockState state, Direction direction, BlockState neighborState, LevelAccessor level, BlockPos currentPos, BlockPos neighborPos) {
         if (level instanceof Level realLevel) {
             boolean canConnect = canConnectTo(realLevel, currentPos, neighborPos, direction);

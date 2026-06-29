@@ -103,6 +103,18 @@ public class ModBlocks {
                     .sound(SoundType.METAL)
                     .noOcclusion())); // noOcclusion is important for pipes/cables to render nicely
 
+    public static final DeferredBlock<Block> BASIC_WARP_FLUX_STORAGE = registerStorageBlock("basic_warp_flux_storage",
+            () -> new org.ratden.skavenblight.block.custom.WarpFluxStorageBlock(
+                    BlockBehaviour.Properties.of().strength(4.0f).sound(SoundType.METAL).requiresCorrectToolForDrops(),
+                    50000, 500, 500
+            ));
+
+    // A specialized helper function just for your expandable storage block tiers
+    private static <T extends Block> DeferredBlock<T> registerStorageBlock(String name, java.util.function.Supplier<T> block) {
+        DeferredBlock<T> toReturn = BLOCKS.register(name, block);
+        ModItems.ITEMS.register(name, () -> new org.ratden.skavenblight.item.custom.WarpFluxStorageBlockItem(toReturn.get(), new net.minecraft.world.item.Item.Properties()));
+        return toReturn;
+    }
     private static <T extends Block> DeferredBlock<T> registerBlock(String name, Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);
         registerBlockItem(name, toReturn);

@@ -37,6 +37,14 @@ public class ModBlockEntities {
                             ModBlocks.WARP_FLUX_CONDUIT.get()
                     ).build(null));
 
+    public static final net.neoforged.neoforge.registries.DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpFluxStorageBlockEntity>>
+            WARP_FLUX_STORAGE =
+            BLOCK_ENTITIES.register("warp_flux_storage",
+                    () -> BlockEntityType.Builder.of(
+                            WarpFluxStorageBlockEntity::new,
+                            ModBlocks.BASIC_WARP_FLUX_STORAGE.get() // To add more tiers later, comma-separate them here!
+                    ).build(null));
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }

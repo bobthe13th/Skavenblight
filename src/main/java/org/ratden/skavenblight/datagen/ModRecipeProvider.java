@@ -40,6 +40,15 @@ public class ModRecipeProvider extends RecipeProvider implements IConditionBuild
                 .unlockedBy(getHasName(ModItems.RAW_WARPSTONE), has(ModItems.RAW_WARPSTONE))
                 .save(recipeOutput);
 
+        ShapedRecipeBuilder.shaped(RecipeCategory.REDSTONE, ModBlocks.BASIC_WARP_FLUX_STORAGE.get())
+                .pattern("III")
+                .pattern("IWI")
+                .pattern("III")
+                .define('I', net.minecraft.world.item.Items.IRON_INGOT)
+                .define('W', ModItems.FUSED_WARPSTONE.get())
+                .unlockedBy("has_warpstone", has(ModItems.FUSED_WARPSTONE.get()))
+                .save(recipeOutput);
+
         ShapelessRecipeBuilder.shapeless(RecipeCategory.MISC, ModItems.FUSED_WARPSTONE.get(),9)
                 .requires(ModBlocks.BLOCK_OF_WARPSTONE)
                 .unlockedBy("has_block_of_warpstone", has(ModBlocks.BLOCK_OF_WARPSTONE)).save(recipeOutput);

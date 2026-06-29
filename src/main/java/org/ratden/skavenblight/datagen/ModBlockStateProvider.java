@@ -56,6 +56,8 @@ public class ModBlockStateProvider extends BlockStateProvider {
 
         makeConduit(ModBlocks.WARP_FLUX_CONDUIT, "warp_flux_conduit");
 
+        //blockWithItem(ModBlocks.BASIC_WARP_FLUX_STORAGE);
+
     }
 
     public void makeConduit(DeferredBlock<?> block, String baseName) {

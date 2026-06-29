@@ -132,6 +132,74 @@ public class WarpFluxGridManager extends SavedData {
         this.setDirty(); // Tells Minecraft to save the GridManager to the world file
     }
 
+    // --- Network Splitting and Rebuilding ---
+
+    public void removeConduit(ServerLevel level, BlockPos pos) {
+        UUID networkId = positionToNetwork.remove(pos); // Remove the broken conduit
+        if (networkId == null) return;
+
+        WarpFluxNetwork oldNetwork = networks.remove(networkId);
+        if (oldNetwork == null) return;
+
+        // 1. Unmap all remaining conduits that were part of this old network
+        for (BlockPos cPos : oldNetwork.getConduits()) {
+            if (!cPos.equals(pos)) {
+                positionToNetwork.remove(cPos);
+            }
+        }
+
+        // 2. Look at the 6 blocks surrounding the broken conduit.
+        // If there are surviving conduits, rebuild a new network from them.
+        for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+            BlockPos neighbor = pos.relative(dir);
+            if (level.getBlockState(neighbor).getBlock() instanceof org.ratden.skavenblight.block.custom.WarpFluxConduitBlock) {
+
+                // If this neighbor hasn't been scooped up by a rebuild yet, start a flood fill!
+                if (!positionToNetwork.containsKey(neighbor)) {
+                    rebuildNetwork(level, neighbor);
+                }
+            }
+        }
+
+        this.setDirty();
+    }
+
+    private void rebuildNetwork(ServerLevel level, BlockPos startPos) {
+        WarpFluxNetwork newNetwork = new WarpFluxNetwork();
+        networks.put(newNetwork.getId(), newNetwork);
+
+        Queue<BlockPos> queue = new LinkedList<>();
+        queue.add(startPos);
+
+        // Standard Breadth-First Search (Flood Fill)
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.poll();
+
+            // Skip if we already visited this block
+            if (positionToNetwork.containsKey(current)) continue;
+
+            // Add to new network
+            newNetwork.addConduit(current);
+            positionToNetwork.put(current, newNetwork.getId());
+
+            // Check neighbors to continue the flood fill
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                BlockPos neighbor = current.relative(dir);
+
+                if (level.getBlockState(neighbor).getBlock() instanceof org.ratden.skavenblight.block.custom.WarpFluxConduitBlock) {
+                    if (!positionToNetwork.containsKey(neighbor)) {
+                        queue.add(neighbor);
+                    }
+                }
+                // Re-discover endpoints (Nexuses and consumers)
+                else if (level.getCapability(org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX, neighbor, dir.getOpposite()) != null) {
+                    newNetwork.addEndpoint(neighbor);
+                }
+            }
+        }
+    }
+
+
     public static WarpFluxGridManager load(CompoundTag tag, HolderLookup.Provider registries) {
         WarpFluxGridManager manager = new WarpFluxGridManager();
 
