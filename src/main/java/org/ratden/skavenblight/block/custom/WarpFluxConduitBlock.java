@@ -79,11 +79,33 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
 
     @Override
     public BlockState updateShape(BlockState state, Direction direction, BlockState neighborState, LevelAccessor level, BlockPos currentPos, BlockPos neighborPos) {
-        if (level instanceof Level realLevel) {
-            boolean canConnect = canConnectTo(realLevel, currentPos, neighborPos, direction);
-            return state.setValue(getPropertyForDirection(direction), canConnect);
+
+        // --- Logical Network Sync ---
+        if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
+            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+            org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(currentPos);
+
+            if (network != null) {
+                // Check if the neighbor block we are reacting to has our Warp Flux capability
+                boolean isEndpoint = serverLevel.getCapability(ModCapabilities.WARP_FLUX, neighborPos, direction.getOpposite()) != null;
+
+                if (isEndpoint) {
+                    // Add it to the network's endpoint list! (Since it's a HashSet, duplicates are ignored)
+                    network.getEndpoints().add(neighborPos);
+                } else {
+                    // The machine was broken or isn't a capability provider, so ensure it's removed
+                    network.getEndpoints().remove(neighborPos);
+                }
+
+                manager.setDirty(); // Tell Minecraft to save the updated grid
+            }
         }
-        return super.updateShape(state, direction, neighborState, level, currentPos, neighborPos);
+        // ------------------------------------
+
+        // ... YOUR EXISTING VISUAL CONNECTION LOGIC GOES HERE ...
+        // (e.g., checking canConnectTo and returning the updated BlockState with the boolean properties)
+        boolean connected = canConnectTo((Level) level, currentPos, neighborPos, direction);
+        return state.setValue(getPropertyForDirection(direction), connected);
     }
 
     private BlockState makeConnections(Level level, BlockPos pos) {

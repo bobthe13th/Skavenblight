@@ -56,7 +56,13 @@ public class ModBlockStateProvider extends BlockStateProvider {
 
         makeConduit(ModBlocks.WARP_FLUX_CONDUIT, "warp_flux_conduit");
 
-        //blockWithItem(ModBlocks.BASIC_WARP_FLUX_STORAGE);
+        //Basic warp flux storage datagen
+        // 1. Tell datagen to grab the custom model you manually placed in the resources folder
+        ModelFile basicWarpFluxStorageModel = models().getExistingFile(modLoc("block/basic_warp_flux_storage"));
+        // 2. Generate the block state using that existing model
+        simpleBlock(ModBlocks.BASIC_WARP_FLUX_STORAGE.get(), basicWarpFluxStorageModel);
+        // 3. Generate the item model pointing to that same existing block model
+        simpleBlockItem(ModBlocks.BASIC_WARP_FLUX_STORAGE.get(), basicWarpFluxStorageModel);
 
     }
 
