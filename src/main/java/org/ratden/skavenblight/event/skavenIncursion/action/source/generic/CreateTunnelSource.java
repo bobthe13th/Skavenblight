@@ -11,9 +11,11 @@ import org.ratden.skavenblight.block.entity.SkavenTunnelSourceEntity;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
 
+import java.util.UUID;
+
 public class CreateTunnelSource {
 
-    public static boolean execute(
+    public static UUID execute(
             ServerLevel level,
             BlockPos pos,
             SourceState sourceState,
@@ -28,7 +30,7 @@ public class CreateTunnelSource {
         boolean success = level.setBlock(pos, blockState, 3);
 
         if (!success) {
-            return false;
+            return null;
         }
 
         BlockEntity blockEntity = level.getBlockEntity(pos);
@@ -40,9 +42,11 @@ public class CreateTunnelSource {
             tunnelSource.setClawId(leadershipContext.getClawId());
             tunnelSource.setPackId(leadershipContext.getPackId());
             tunnelSource.setCreatedGameTime(level.getGameTime());
+
+            return tunnelSource.getSourceId();
         }
 
-        return true;
+        return null;
     }
 
     private static void prepareTunnelArea(ServerLevel level, BlockPos sourcePos) {

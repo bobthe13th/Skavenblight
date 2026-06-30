@@ -55,6 +55,8 @@ public class DebugSpawnCommands {
                 LeaderRank.NONE
         );
 
+        UUID debugSourceId = UUID.randomUUID();
+
         int spawned = SpawnWolfRats.execute(
                 player.serverLevel(),
                 player.blockPosition(),
@@ -64,14 +66,21 @@ public class DebugSpawnCommands {
                         fangGroup,
                         clawGroup,
                         packGroup
-                )
+                ),
+                debugSourceId
         ).size();
 
         source.sendSuccess(
-                () -> Component.literal("Debug spawned " + spawned + " wolf rats."),
+                () -> Component.literal(
+                        "Debug spawned " + spawned + " wolf rats."
+                                + "\nDebug Source ID: " + debugSourceId
+                ),
                 false
         );
 
         return spawned;
+    }
+
+    private DebugSpawnCommands() {
     }
 }

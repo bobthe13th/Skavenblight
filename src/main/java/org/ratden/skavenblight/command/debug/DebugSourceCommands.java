@@ -98,7 +98,7 @@ public class DebugSourceCommands {
                     LeaderRank.NONE
             );
 
-            boolean success = CreateTunnelSource.execute(
+            UUID createdSourceId = CreateTunnelSource.execute(
                     player.serverLevel(),
                     hitResult.getBlockPos().above(),
                     sourceState,
@@ -110,11 +110,12 @@ public class DebugSourceCommands {
                     )
             );
 
-            if (success) {
+            if (createdSourceId != null) {
                 source.sendSuccess(
                         () -> Component.literal(
                                 "Created tunnel source in state: "
                                         + sourceState.getSerializedName()
+                                        + "\nSource ID: " + createdSourceId
                         ),
                         false
                 );
@@ -225,5 +226,8 @@ public class DebugSourceCommands {
             source.sendFailure(Component.literal("Error: " + exception.getMessage()));
             return 0;
         }
+    }
+
+    private DebugSourceCommands() {
     }
 }

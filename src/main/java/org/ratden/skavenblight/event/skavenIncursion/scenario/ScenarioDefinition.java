@@ -1,6 +1,8 @@
 package org.ratden.skavenblight.event.skavenIncursion.scenario;
 
-import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.director.OverlapType;
+import org.ratden.skavenblight.event.skavenIncursion.director.PressureProfile;
 
 import java.util.Collections;
 import java.util.EnumSet;
@@ -10,6 +12,8 @@ public class ScenarioDefinition {
     private final String id;
     private final ScenarioPattern pattern;
     private final ScenarioGoal goal;
+    private final OverlapType overlapType;
+    private final PressureProfile pressureProfile;
     private final Set<IncursionTargetType> allowedTargetTypes;
 
     private final int minComplexity;
@@ -26,6 +30,8 @@ public class ScenarioDefinition {
             String id,
             ScenarioPattern pattern,
             ScenarioGoal goal,
+            OverlapType overlapType,
+            PressureProfile pressureProfile,
             Set<IncursionTargetType> allowedTargetTypes,
             int minComplexity,
             int maxComplexity,
@@ -38,6 +44,8 @@ public class ScenarioDefinition {
         this.id = id;
         this.pattern = pattern;
         this.goal = goal;
+        this.overlapType = overlapType;
+        this.pressureProfile = pressureProfile;
         this.allowedTargetTypes = Collections.unmodifiableSet(
                 EnumSet.copyOf(allowedTargetTypes)
         );
@@ -60,6 +68,14 @@ public class ScenarioDefinition {
 
     public ScenarioGoal getGoal() {
         return goal;
+    }
+
+    public OverlapType getOverlapType() {
+        return overlapType;
+    }
+
+    public PressureProfile getPressureProfile() {
+        return pressureProfile;
     }
 
     public Set<IncursionTargetType> getAllowedTargetTypes() {

@@ -42,8 +42,9 @@ public class DebugMobCommands {
                     () -> Component.literal(
                             "Mob Leadership Info"
                                     + "\nEntity: " + entity.getType()
-                                    + "\nUUID: " + entity.getUUID()
+                                    + "\nEntity UUID: " + entity.getUUID()
                                     + "\nScenario ID: " + ownedMob.getScenarioId()
+                                    + "\nSource ID: " + ownedMob.getSourceId()
                                     + "\nVermintide ID: " + ownedMob.getVermintideId()
                                     + "\nFang ID: " + ownedMob.getFangId()
                                     + "\nClaw ID: " + ownedMob.getClawId()
@@ -91,5 +92,8 @@ public class DebugMobCommands {
         }
 
         return closestEntity;
+    }
+
+    private DebugMobCommands() {
     }
 }

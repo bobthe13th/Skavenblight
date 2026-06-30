@@ -13,14 +13,15 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.IncursionOwnedMo
 
 import java.util.UUID;
 
-public class RatWolf extends Wolf implements IncursionOwnedMob {
+public class WolfRat extends Wolf implements IncursionOwnedMob {
     private UUID scenarioId;
+    private UUID sourceId;
     private UUID packId;
     private UUID clawId;
     private UUID fangId;
     private UUID vermintideId;
 
-    public RatWolf(EntityType<? extends Wolf> type, Level level) {
+    public WolfRat(EntityType<? extends Wolf> type, Level level) {
         super(type, level);
     }
 
@@ -43,6 +44,16 @@ public class RatWolf extends Wolf implements IncursionOwnedMob {
     }
 
     @Override
+    public void setSourceId(UUID sourceId) {
+        this.sourceId = sourceId;
+    }
+
+    @Override
+    public UUID getSourceId() {
+        return sourceId;
+    }
+
+    @Override
     public void setPackId(UUID packId) {
         this.packId = packId;
     }
@@ -51,6 +62,7 @@ public class RatWolf extends Wolf implements IncursionOwnedMob {
     public UUID getPackId() {
         return packId;
     }
+
     @Override
     public void setClawId(UUID clawId) {
         this.clawId = clawId;
@@ -89,9 +101,14 @@ public class RatWolf extends Wolf implements IncursionOwnedMob {
             tag.putUUID("scenario_id", scenarioId);
         }
 
+        if (sourceId != null) {
+            tag.putUUID("source_id", sourceId);
+        }
+
         if (packId != null) {
             tag.putUUID("pack_id", packId);
         }
+
         if (clawId != null) {
             tag.putUUID("claw_id", clawId);
         }
@@ -113,9 +130,14 @@ public class RatWolf extends Wolf implements IncursionOwnedMob {
             scenarioId = tag.getUUID("scenario_id");
         }
 
+        if (tag.hasUUID("source_id")) {
+            sourceId = tag.getUUID("source_id");
+        }
+
         if (tag.hasUUID("pack_id")) {
             packId = tag.getUUID("pack_id");
         }
+
         if (tag.hasUUID("claw_id")) {
             clawId = tag.getUUID("claw_id");
         }

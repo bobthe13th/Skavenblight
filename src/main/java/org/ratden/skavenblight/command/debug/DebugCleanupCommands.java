@@ -8,8 +8,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.block.ModBlocks;
-import org.ratden.skavenblight.entity.custom.RatWolf;
-import org.ratden.skavenblight.event.skavenIncursion.ActiveIncursionManager;
+import org.ratden.skavenblight.entity.custom.WolfRat;
+import org.ratden.skavenblight.event.skavenIncursion.director.ActiveIncursionManager;
 
 public class DebugCleanupCommands {
 
@@ -37,12 +37,12 @@ public class DebugCleanupCommands {
 
         int removed = 0;
 
-        for (RatWolf ratWolf : level.getEntitiesOfClass(
-                RatWolf.class,
+        for (WolfRat wolfRat : level.getEntitiesOfClass(
+                WolfRat.class,
                 player.getBoundingBox().inflate(1000)
         )) {
 
-            ratWolf.discard();
+            wolfRat.discard();
             removed++;
         }
 

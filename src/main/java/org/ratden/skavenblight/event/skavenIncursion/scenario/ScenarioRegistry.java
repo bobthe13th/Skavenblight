@@ -2,8 +2,9 @@ package org.ratden.skavenblight.event.skavenIncursion.scenario;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.generic.WolfRatAssault;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.tutorial.TutorialCampAttack;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -14,6 +15,7 @@ public class ScenarioRegistry {
 
     static {
         registerDefinition(WolfRatAssault.DEFINITION);
+        registerDefinition(TutorialCampAttack.DEFINITION);
     }
 
     public static SkavenScenario createScenario(
@@ -24,6 +26,10 @@ public class ScenarioRegistry {
     ) {
         if (scenarioId.equals(WolfRatAssault.id())) {
             return new WolfRatAssault(level, targetPos, targetType);
+        }
+
+        if (scenarioId.equals(TutorialCampAttack.id())) {
+            return new TutorialCampAttack(level, targetPos, targetType);
         }
 
         return null;

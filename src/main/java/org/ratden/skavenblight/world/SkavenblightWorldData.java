@@ -34,6 +34,7 @@ public class SkavenblightWorldData extends SavedData {
 
     // Difficulty
     private int threat;
+    private int incursionTempo;
 
     // Scheme
     private String currentSchemeId;
@@ -64,6 +65,8 @@ public class SkavenblightWorldData extends SavedData {
         this.activeNexusPos = BlockPos.ZERO;
 
         this.threat = 10;
+        this.incursionTempo = 0;
+
         this.schemeComplexity = 0;
         this.schemeProgress = 0;
 
@@ -101,6 +104,8 @@ public class SkavenblightWorldData extends SavedData {
         }
 
         data.threat = tag.getInt("threat");
+        data.incursionTempo = tag.getInt("incursion_tempo");
+
         data.schemeComplexity = tag.getInt("scheme_complexity");
         data.schemeProgress = tag.getInt("scheme_progress");
 
@@ -141,6 +146,8 @@ public class SkavenblightWorldData extends SavedData {
         }
 
         tag.putInt("threat", threat);
+        tag.putInt("incursion_tempo", incursionTempo);
+
         tag.putInt("scheme_complexity", schemeComplexity);
         tag.putInt("scheme_progress", schemeProgress);
 
@@ -226,6 +233,19 @@ public class SkavenblightWorldData extends SavedData {
     public void setThreat(int threat) {
         this.threat = Math.max(0, threat);
         setDirty();
+    }
+
+    public int getIncursionTempo() {
+        return incursionTempo;
+    }
+
+    public void setIncursionTempo(int incursionTempo) {
+        this.incursionTempo = Math.max(0, incursionTempo);
+        setDirty();
+    }
+
+    public void addIncursionTempo(int amount) {
+        setIncursionTempo(this.incursionTempo + amount);
     }
 
     // Scheme
