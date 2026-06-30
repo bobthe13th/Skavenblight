@@ -53,26 +53,30 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
     }
 
     @Override
-    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+    protected void onPlace(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
 
-        if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
-            // Tell the Grid Manager a new conduit was placed
-            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+        if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                    org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+
+            // FIX: Flipped the variables to (serverLevel, pos) to match your GridManager!
             manager.addConduit(serverLevel, pos);
+            manager.setDirty();
         }
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        // Only trigger if the block is actually being destroyed/replaced by a different block
-        if (!state.is(newState.getBlock())) {
+    protected void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (state.getBlock() != newState.getBlock()) {
+            if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                        org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
 
-            if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
-                WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+                // FIX: Flipped the variables to (serverLevel, pos)
                 manager.removeConduit(serverLevel, pos);
+                manager.setDirty();
             }
-
             super.onRemove(state, level, pos, newState, isMoving);
         }
     }

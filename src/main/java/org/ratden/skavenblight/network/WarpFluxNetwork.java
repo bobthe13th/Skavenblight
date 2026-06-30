@@ -56,7 +56,7 @@ public class WarpFluxNetwork {
     }
 
     public int pushFlux(ServerLevel level, int maxAmount, BlockPos sourcePos) {
-        if (maxAmount <= 0 || !isValid(level)) return 0;
+        //if (maxAmount <= 0 || !isValid(level)) return 0;
 
         int remainingFlux = maxAmount;
 
@@ -105,6 +105,19 @@ public class WarpFluxNetwork {
         level.sendParticles(net.minecraft.core.particles.ParticleTypes.WAX_ON,
                 randomConduit.getX() + 0.5, randomConduit.getY() + 0.5, randomConduit.getZ() + 0.5,
                 1, 0.2, 0.2, 0.2, 0.0);
+    }
+
+    public void scanForEndpoints(ServerLevel level) {
+        this.endpoints.clear();
+        for (BlockPos conduitPos : this.conduits) {
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                BlockPos neighborPos = conduitPos.relative(dir);
+                // If a machine is touching this cable, add it to our endpoints!
+                if (level.getCapability(org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX, neighborPos, dir.getOpposite()) != null) {
+                    this.endpoints.add(neighborPos);
+                }
+            }
+        }
     }
 
 }

@@ -75,4 +75,45 @@ public class WarpFluxStorageBlockEntity extends BlockEntity {
         super.loadAdditional(tag, registries);
         this.fluxStorage.loadNBTData(tag, registries);
     }
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        // Check if we are on the server side
+        if (this.getLevel() != null && !this.getLevel().isClientSide() && this.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                    org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+
+            // Look around us for networks and tell them to rescan!
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                net.minecraft.core.BlockPos neighborPos = this.getBlockPos().relative(dir);
+                org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(neighborPos);
+
+                if (network != null) {
+                    // Our capability is ready! Tell the network to scan and add us.
+                    network.scanForEndpoints(serverLevel);
+                    manager.setDirty();
+                }
+            }
+        }
+    }
+
+    @Override
+    public void setRemoved() {
+        if (this.getLevel() != null && !this.getLevel().isClientSide() && this.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                    org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                net.minecraft.core.BlockPos neighborPos = this.getBlockPos().relative(dir);
+                org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(neighborPos);
+
+                if (network != null) {
+                    // Tell the network we are broken so it stops sending power here
+                    network.getEndpoints().remove(this.getBlockPos());
+                    manager.setDirty();
+                }
+            }
+        }
+        super.setRemoved();
+    }
 }

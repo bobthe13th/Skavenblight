@@ -49,17 +49,12 @@ public class WarpFluxGridManager extends SavedData {
             CompoundTag networkTag = new CompoundTag();
             networkTag.putUUID("networkId", network.getId());
 
-            ListTag conduitList = new ListTag();
-            for (BlockPos pos : network.getConduits()) {
-                conduitList.add(NbtUtils.writeBlockPos(pos));
-            }
-            networkTag.put("conduits", conduitList);
+            // Convert our HashSets of BlockPos into flat arrays of Longs
+            long[] conduitArr = network.getConduits().stream().mapToLong(BlockPos::asLong).toArray();
+            networkTag.putLongArray("conduits", conduitArr);
 
-            ListTag endpointList = new ListTag();
-            for (BlockPos pos : network.getEndpoints()) {
-                endpointList.add(NbtUtils.writeBlockPos(pos));
-            }
-            networkTag.put("endpoints", endpointList);
+            long[] endpointArr = network.getEndpoints().stream().mapToLong(BlockPos::asLong).toArray();
+            networkTag.putLongArray("endpoints", endpointArr);
 
             networkList.add(networkTag);
         }
@@ -197,6 +192,9 @@ public class WarpFluxGridManager extends SavedData {
                 }
             }
         }
+        // Call this after the grid manager finishes identifying the cables for a rebuilt network
+        newNetwork.scanForEndpoints(level);
+        this.setDirty();
     }
 
 
@@ -205,27 +203,24 @@ public class WarpFluxGridManager extends SavedData {
 
         if (tag.contains("networks", Tag.TAG_LIST)) {
             ListTag networkList = tag.getList("networks", Tag.TAG_COMPOUND);
+
             for (int i = 0; i < networkList.size(); i++) {
                 CompoundTag networkTag = networkList.getCompound(i);
-
-                // We will need a constructor in WarpFluxNetwork that takes a UUID
                 WarpFluxNetwork network = new WarpFluxNetwork(networkTag.getUUID("networkId"));
 
-                ListTag conduitList = networkTag.getList("conduits", Tag.TAG_INT_ARRAY);
-                for (int j = 0; j < conduitList.size(); j++) {
-                    BlockPos pos = NbtUtils.readBlockPos(conduitList.getCompound(j), "pos").orElse(BlockPos.ZERO);
-                    if (!pos.equals(BlockPos.ZERO)) {
-                        network.addConduit(pos);
-                        manager.positionToNetwork.put(pos, network.getId());
-                    }
+                // Unpack the longs right back into BlockPos!
+                // No messy NbtUtils or Tag casting required.
+                long[] conduitsLongs = networkTag.getLongArray("conduits");
+                for (long posLong : conduitsLongs) {
+                    BlockPos pos = BlockPos.of(posLong);
+                    network.addConduit(pos);
+                    manager.positionToNetwork.put(pos, network.getId());
                 }
 
-                ListTag endpointList = networkTag.getList("endpoints", Tag.TAG_INT_ARRAY);
-                for (int j = 0; j < endpointList.size(); j++) {
-                    BlockPos pos = NbtUtils.readBlockPos(endpointList.getCompound(j), "pos").orElse(BlockPos.ZERO);
-                    if (!pos.equals(BlockPos.ZERO)) {
-                        network.addEndpoint(pos);
-                    }
+                long[] endpointsLongs = networkTag.getLongArray("endpoints");
+                for (long posLong : endpointsLongs) {
+                    BlockPos pos = BlockPos.of(posLong);
+                    network.addEndpoint(pos);
                 }
 
                 manager.networks.put(network.getId(), network);
