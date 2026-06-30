@@ -45,4 +45,19 @@ public class ModEntities {
             event.registerEntityRenderer(ModEntities.RAT_WOLF.get(), org.ratden.skavenblight.entity.client.RatWolfRenderer::new);
         }
     }
+    @net.neoforged.bus.api.SubscribeEvent
+    public static void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_STORAGE.get(),
+                (be, side) -> be.getFluxStorage()
+        );
+
+        // Also register your Warpstone Nexus entity if you haven't yet!
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get(),
+                (be, side) -> be.getFluxStorage()
+        );
+    }
 }

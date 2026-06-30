@@ -21,7 +21,8 @@ public class ModBlockTagProvider extends BlockTagsProvider {
         tag(BlockTags.MINEABLE_WITH_PICKAXE)
                 .add(ModBlocks.BLOCK_OF_WARPSTONE.get())
                 .add(ModBlocks.WARPSTONE_ORE.get())
-                .add(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get());
+                .add(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get())
+                .add(ModBlocks.WARP_FLUX_CONDUIT.get());
 
         tag(BlockTags.NEEDS_DIAMOND_TOOL)
                 .add(ModBlocks.WARPSTONE_ORE.get())

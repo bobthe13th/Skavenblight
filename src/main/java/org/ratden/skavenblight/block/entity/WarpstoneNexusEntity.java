@@ -47,22 +47,65 @@ public class WarpstoneNexusEntity extends BlockEntity {
 
     // Called every tick by the block
     public void tick(Level level, BlockPos pos, BlockState state) {
-        if (level.isClientSide()) return; // Only generate on the server
+        if (level.isClientSide()) return; // Only process power on the server
 
+        net.minecraft.server.level.ServerLevel serverLevel = (net.minecraft.server.level.ServerLevel) level;
+
+        // ==========================================
+        // GENERATION LOGIC
+        // ==========================================
         int generationRate = switch (this.nexusTier) {
-            case 0 -> Config.tier0Generation;
-            case 1 -> Config.tier1Generation;
-            case 2 -> Config.tier2Generation;
-            default -> Config.tier0Generation;
+            case 1 -> org.ratden.skavenblight.Config.tier1Generation;
+            case 2 -> org.ratden.skavenblight.Config.tier2Generation;
+            default -> org.ratden.skavenblight.Config.tier0Generation;
         };
 
-        // Bypass 'receiveFlux' limits using setFlux because this is internal generation
         int current = this.fluxStorage.getFlux();
         int max = this.fluxStorage.getMaxFlux();
 
         if (current < max) {
             this.fluxStorage.setFlux(Math.min(max, current + generationRate));
             setChanged(); // Tells Minecraft this block needs to be saved
+        }
+
+        // ==========================================
+        // NETWORK TRANSFER LOGIC
+        // ==========================================
+        int currentFlux = this.fluxStorage.getFlux();
+        if (currentFlux <= 0) return;
+
+        // Simulate an extraction to find out exactly how much energy this Nexus tier
+        // is allowed to output this tick based on its internal 'maxExtract' value.
+        int amountToPush = this.fluxStorage.extractFlux(currentFlux, true);
+        if (amountToPush <= 0) return;
+
+        // Grab the Grid Manager to locate nearby networks
+        org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+
+        // Look at all 6 sides of the Nexus to find a connected Conduit Network
+        for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+            BlockPos neighborPos = pos.relative(dir);
+            org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(neighborPos);
+
+            if (network != null) {
+                // Push the flux directly onto the network!
+                int transferred = network.pushFlux(serverLevel, amountToPush, pos);
+
+                if (transferred > 0) {
+                    // Deduct the successfully transferred power from the Nexus's storage (non-simulated)
+                    this.fluxStorage.extractFlux(transferred, false);
+                    this.setChanged();
+
+                    // Subtract what we sent from our remaining allowance this tick
+                    amountToPush -= transferred;
+
+                    // If we've hit our max transfer limit for this tick, stop looking at other sides
+                    if (amountToPush <= 0) {
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -84,6 +127,8 @@ public class WarpstoneNexusEntity extends BlockEntity {
         updateTierStats(); // Ensure storage limits match the loaded tier
         this.fluxStorage.loadNBTData(tag, registries);
     }
+
+
 
     // Standard Getters & Setters
     public int getNexusTier() { return nexusTier; }

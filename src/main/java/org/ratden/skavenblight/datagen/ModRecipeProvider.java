@@ -31,6 +31,24 @@ public class ModRecipeProvider extends RecipeProvider implements IConditionBuild
                 .define('W', ModItems.RAW_WARPSTONE.get())
                 .unlockedBy("has_raw_warpstone", has(ModItems.RAW_WARPSTONE)).save(recipeOutput);
 
+        ShapedRecipeBuilder.shaped(RecipeCategory.MISC, ModBlocks.WARP_FLUX_CONDUIT.get(), 8)
+                .pattern("III")
+                .pattern("GGG")
+                .pattern("III")
+                .define('I', Items.IRON_INGOT)
+                .define('G', Items.GLASS) // Or FUSED_WARPSTONE, whatever makes sense!
+                .unlockedBy(getHasName(ModItems.RAW_WARPSTONE), has(ModItems.RAW_WARPSTONE))
+                .save(recipeOutput);
+
+        ShapedRecipeBuilder.shaped(RecipeCategory.REDSTONE, ModBlocks.BASIC_WARP_FLUX_STORAGE.get())
+                .pattern("III")
+                .pattern("IWI")
+                .pattern("III")
+                .define('I', net.minecraft.world.item.Items.IRON_INGOT)
+                .define('W', ModItems.FUSED_WARPSTONE.get())
+                .unlockedBy("has_warpstone", has(ModItems.FUSED_WARPSTONE.get()))
+                .save(recipeOutput);
+
         ShapelessRecipeBuilder.shapeless(RecipeCategory.MISC, ModItems.FUSED_WARPSTONE.get(),9)
                 .requires(ModBlocks.BLOCK_OF_WARPSTONE)
                 .unlockedBy("has_block_of_warpstone", has(ModBlocks.BLOCK_OF_WARPSTONE)).save(recipeOutput);

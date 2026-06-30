@@ -52,6 +52,12 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
 
         dropSelf(ModBlocks.SPAWN_TUNNEL_SMALL.get());
         dropSelf(ModBlocks.SKAVEN_TUNNEL_SOURCE.get());
+        dropSelf(ModBlocks.WARP_FLUX_CONDUIT.get());
+
+        this.add(ModBlocks.BASIC_WARP_FLUX_STORAGE.get(), block -> createSingleItemTable(block)
+                .apply(net.minecraft.world.level.storage.loot.functions.CopyCustomDataFunction.copyData(
+                                net.minecraft.world.level.storage.loot.providers.nbt.ContextNbtProvider.BLOCK_ENTITY)
+                        .copy("flux", "flux")));
     }
 
     //Basically the createCopperOreDrops() vanilla method
