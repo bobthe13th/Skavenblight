@@ -41,4 +41,37 @@ public class WarpFluxStorageBlock extends Block implements EntityBlock {
         return type == ModBlockEntities.WARP_FLUX_STORAGE.get() ?
                 (lvl, pos, st, be) -> ((WarpFluxStorageBlockEntity) be).tick(lvl, pos, st) : null;
     }
+
+    //we might want to replace this with a more advanced GUI eventually.
+    @Override
+    protected net.minecraft.world.InteractionResult useWithoutItem(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, net.minecraft.world.entity.player.Player player, net.minecraft.world.phys.BlockHitResult hitResult) {
+
+        // We only want to calculate and send the message on the server side to prevent double-firing
+        if (!level.isClientSide()) {
+
+            // Grab the block entity at the clicked position
+            net.minecraft.world.level.block.entity.BlockEntity blockEntity = level.getBlockEntity(pos);
+
+            // Check to make sure it's actually our storage block entity
+            if (blockEntity instanceof WarpFluxStorageBlockEntity storageEntity) {
+
+                // Fetch the current and max flux
+                int currentFlux = storageEntity.getFluxStorage().getFlux();
+                int maxFlux = storageEntity.getFluxStorage().getMaxFlux();
+
+                // Create the text message. (You can color this or translate it later!)
+                net.minecraft.network.chat.Component message = net.minecraft.network.chat.Component.literal(
+                        "Warp Flux: " + currentFlux + " / " + maxFlux
+                );
+
+                // Send the message to the player.
+                // The 'true' boolean puts it in the Action Bar (above the hotbar) instead of clogging the chat.
+                player.displayClientMessage(message, true);
+            }
+        }
+
+        // Return a successful interaction so the hand swings
+        return net.minecraft.world.InteractionResult.sidedSuccess(level.isClientSide());
+    }
+
 }

@@ -3,8 +3,8 @@
 	"credit": "Made with Blockbench",
 	"texture_size": [64, 64],
 	"textures": {
-		"0": "skavenblight:block/texture",
-		"particle": "skavenblight:block/texture"
+		"0": "skavenblight:block/basic_warp_flux_storage",
+		"particle": "skavenblight:block/basic_warp_flux_storage"
 	},
 	"elements": [
 		{

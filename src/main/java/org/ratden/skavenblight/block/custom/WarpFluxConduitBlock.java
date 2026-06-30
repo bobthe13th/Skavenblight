@@ -53,37 +53,63 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
     }
 
     @Override
-    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+    protected void onPlace(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
 
-        if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
-            // Tell the Grid Manager a new conduit was placed
-            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+        if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                    org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+
+            // FIX: Flipped the variables to (serverLevel, pos) to match your GridManager!
             manager.addConduit(serverLevel, pos);
+            manager.setDirty();
         }
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        // Only trigger if the block is actually being destroyed/replaced by a different block
-        if (!state.is(newState.getBlock())) {
+    protected void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (state.getBlock() != newState.getBlock()) {
+            if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                org.ratden.skavenblight.network.WarpFluxGridManager manager =
+                        org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
 
-            if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
-                WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+                // FIX: Flipped the variables to (serverLevel, pos)
                 manager.removeConduit(serverLevel, pos);
+                manager.setDirty();
             }
-
             super.onRemove(state, level, pos, newState, isMoving);
         }
     }
 
     @Override
     public BlockState updateShape(BlockState state, Direction direction, BlockState neighborState, LevelAccessor level, BlockPos currentPos, BlockPos neighborPos) {
-        if (level instanceof Level realLevel) {
-            boolean canConnect = canConnectTo(realLevel, currentPos, neighborPos, direction);
-            return state.setValue(getPropertyForDirection(direction), canConnect);
+
+        // --- Logical Network Sync ---
+        if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
+            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+            org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(currentPos);
+
+            if (network != null) {
+                // Check if the neighbor block we are reacting to has our Warp Flux capability
+                boolean isEndpoint = serverLevel.getCapability(ModCapabilities.WARP_FLUX, neighborPos, direction.getOpposite()) != null;
+
+                if (isEndpoint) {
+                    // Add it to the network's endpoint list! (Since it's a HashSet, duplicates are ignored)
+                    network.getEndpoints().add(neighborPos);
+                } else {
+                    // The machine was broken or isn't a capability provider, so ensure it's removed
+                    network.getEndpoints().remove(neighborPos);
+                }
+
+                manager.setDirty(); // Tell Minecraft to save the updated grid
+            }
         }
-        return super.updateShape(state, direction, neighborState, level, currentPos, neighborPos);
+        // ------------------------------------
+
+        // ... YOUR EXISTING VISUAL CONNECTION LOGIC GOES HERE ...
+        // (e.g., checking canConnectTo and returning the updated BlockState with the boolean properties)
+        boolean connected = canConnectTo((Level) level, currentPos, neighborPos, direction);
+        return state.setValue(getPropertyForDirection(direction), connected);
     }
 
     private BlockState makeConnections(Level level, BlockPos pos) {

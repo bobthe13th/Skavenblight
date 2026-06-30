@@ -97,6 +97,8 @@ public class Skavenblight {
         // >>> YOUR CODE GOES HERE <<<
         // Initialize our custom wealth values when the mod loads - if/when implemented
         //WealthRegistry.registerBaseValues();
+        // Add this line right below your other addListener calls in the constructor!
+        modEventBus.addListener(this::registerCapabilities);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -146,10 +148,22 @@ public class Skavenblight {
         // Links your Clanrat attributes to its actual registered EntityType
         event.put(org.ratden.skavenblight.entity.ModEntities.CLANRAT.get(),
                 org.ratden.skavenblight.entity.custom.ClanratEntity.createAttributes().build());
-
-        // If your RatWolf also has attributes, add it here too!
-        // event.register(ModEntities.RAT_WOLF.get(), RatWolf.createAttributes().build());
     }
 
+    public void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+        // Register the capability for the basic storage block
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_STORAGE.get(),
+                (blockEntity, side) -> blockEntity.getFluxStorage()
+        );
+
+        // 2. Register the capability for the Nexus
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get(),
+                (blockEntity, side) -> blockEntity.getFluxStorage()
+        );
+    }
 
 }
