@@ -28,7 +28,16 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
     public static final BooleanProperty WEST = BlockStateProperties.WEST;
     public static final BooleanProperty UP = BlockStateProperties.UP;
     public static final BooleanProperty DOWN = BlockStateProperties.DOWN;
+    public static final BooleanProperty NORTH_ACTIVE = BooleanProperty.create("north_active");
+    public static final BooleanProperty SOUTH_ACTIVE = BooleanProperty.create("south_active");
+    public static final BooleanProperty EAST_ACTIVE = BooleanProperty.create("east_active");
+    public static final BooleanProperty WEST_ACTIVE = BooleanProperty.create("west_active");
+    public static final BooleanProperty UP_ACTIVE = BooleanProperty.create("up_active");
+    public static final BooleanProperty DOWN_ACTIVE = BooleanProperty.create("down_active");
 
+    public static final net.minecraft.world.level.block.state.properties.IntegerProperty POWER_TIER = net.minecraft.world.level.block.state.properties.IntegerProperty.create("power", 0, 3);
+
+    // 0 = Off, 1 = Pale, 2 = Medium, 3 = Strong
     // 0 = Off, 1 = Pale, 2 = Medium, 3 = Strong Glow
     public static final IntegerProperty GLOW_INTENSITY = IntegerProperty.create("glow_intensity", 0, 3);
 
@@ -43,7 +52,8 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(NORTH, EAST, SOUTH, WEST, UP, DOWN, GLOW_INTENSITY);
+        builder.add(NORTH, SOUTH, EAST, WEST, UP, DOWN, GLOW_INTENSITY,
+                NORTH_ACTIVE, SOUTH_ACTIVE, EAST_ACTIVE, WEST_ACTIVE, UP_ACTIVE, DOWN_ACTIVE);
     }
 
     @Nullable
@@ -53,30 +63,26 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
     }
 
     @Override
-    protected void onPlace(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
 
-        if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-            org.ratden.skavenblight.network.WarpFluxGridManager manager =
-                    org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
-
-            // FIX: Flipped the variables to (serverLevel, pos) to match your GridManager!
+        if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
+            // Tell the Grid Manager a new conduit was placed
+            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
             manager.addConduit(serverLevel, pos);
-            manager.setDirty();
         }
     }
 
     @Override
-    protected void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (state.getBlock() != newState.getBlock()) {
-            if (!level.isClientSide() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-                org.ratden.skavenblight.network.WarpFluxGridManager manager =
-                        org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        // Only trigger if the block is actually being destroyed/replaced by a different block
+        if (!state.is(newState.getBlock())) {
 
-                // FIX: Flipped the variables to (serverLevel, pos)
+            if (!level.isClientSide() && level instanceof ServerLevel serverLevel) {
+                WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
                 manager.removeConduit(serverLevel, pos);
-                manager.setDirty();
             }
+
             super.onRemove(state, level, pos, newState, isMoving);
         }
     }
@@ -158,6 +164,37 @@ public class WarpFluxConduitBlock extends Block implements EntityBlock {
             if (be instanceof WarpFluxConduitBlockEntity conduit) {
                 conduit.tick(lvl, pos, st);
             }
+        };
+    }
+
+    // Stops the block from reducing the light level that passes through it
+    @Override
+    public int getLightBlock(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos) {
+        return 0;
+    }
+
+    // Allows sunlight to shoot straight down through the block without stopping
+    @Override
+    public boolean propagatesSkylightDown(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos) {
+        return true;
+    }
+
+    // Removes the dark "ambient occlusion" shadow the game draws in the corners under the block
+    @Override
+    public float getShadeBrightness(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos) {
+        return 1.0f;
+    }
+
+    /**
+     * Calculates the light emission based on the current glow intensity state.
+     */
+    public static int getLightEmission(BlockState state) {
+        int intensity = state.getValue(GLOW_INTENSITY);
+        return switch (intensity) {
+            case 3 -> 7; // Strong: Max light level!
+            case 2 -> 3; // Medium: Torch-level light
+            case 1 -> 1;  // Pale: Dim glow
+            default -> 0; // Off: Completely dark
         };
     }
 }

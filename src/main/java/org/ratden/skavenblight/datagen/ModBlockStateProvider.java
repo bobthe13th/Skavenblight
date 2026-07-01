@@ -69,30 +69,59 @@ public class ModBlockStateProvider extends BlockStateProvider {
     public void makeConduit(DeferredBlock<?> block, String baseName) {
         MultiPartBlockStateBuilder builder = getMultipartBuilder(block.get());
 
-        // 1. Define the models we expect to exist in assets/skavenblight/models/block/
-        // (You still need to create these geometry files in Blockbench!)
-        ModelFile coreOff = models().getExistingFile(modLoc("block/" + baseName + "_core_off"));
-        ModelFile corePale = models().getExistingFile(modLoc("block/" + baseName + "_core_pale"));
-        ModelFile coreMedium = models().getExistingFile(modLoc("block/" + baseName + "_core_medium"));
-        ModelFile coreStrong = models().getExistingFile(modLoc("block/" + baseName + "_core_strong"));
-        ModelFile arm = models().getExistingFile(modLoc("block/" + baseName + "_arm"));
+        ModelFile[] cores = new ModelFile[] {
+                models().getExistingFile(modLoc("block/" + baseName + "_core_off")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_pale")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_medium")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_strong"))
+        };
 
-        // 2. Generate the Core states based on glow intensity
-        builder.part().modelFile(coreOff).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 0).end();
-        builder.part().modelFile(corePale).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 1).end();
-        builder.part().modelFile(coreMedium).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 2).end();
-        builder.part().modelFile(coreStrong).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 3).end();
+        ModelFile[] arms = new ModelFile[] {
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_off")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_pale")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_medium")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_strong"))
+        };
 
-        // 3. Generate the connecting Arms based on boolean direction states
-        builder.part().modelFile(arm).addModel().condition(BlockStateProperties.NORTH, true).end();
-        builder.part().modelFile(arm).rotationY(90).addModel().condition(BlockStateProperties.EAST, true).end();
-        builder.part().modelFile(arm).rotationY(180).addModel().condition(BlockStateProperties.SOUTH, true).end();
-        builder.part().modelFile(arm).rotationY(270).addModel().condition(BlockStateProperties.WEST, true).end();
-        builder.part().modelFile(arm).rotationX(270).addModel().condition(BlockStateProperties.UP, true).end();
-        builder.part().modelFile(arm).rotationX(90).addModel().condition(BlockStateProperties.DOWN, true).end();
+        // 1. INACTIVE ARMS: Connected, but no power flowing. Always use the 'Off' arm!
+        builder.part().modelFile(arms[0]).addModel().condition(BlockStateProperties.NORTH, true).condition(WarpFluxConduitBlock.NORTH_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(90).addModel().condition(BlockStateProperties.EAST, true).condition(WarpFluxConduitBlock.EAST_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(180).addModel().condition(BlockStateProperties.SOUTH, true).condition(WarpFluxConduitBlock.SOUTH_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(270).addModel().condition(BlockStateProperties.WEST, true).condition(WarpFluxConduitBlock.WEST_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationX(270).addModel().condition(BlockStateProperties.UP, true).condition(WarpFluxConduitBlock.UP_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationX(90).addModel().condition(BlockStateProperties.DOWN, true).condition(WarpFluxConduitBlock.DOWN_ACTIVE, false).end();
 
-        // 4. Generate the Item Model (usually just referencing a custom generated item texture or the core off model)
-        simpleBlockItem(block.get(), coreOff);
+        // 2. ACTIVE ARMS AND CORES: Tie them to the glow intensity!
+        for (int i = 0; i < 4; i++) {
+            builder.part().modelFile(cores[i]).addModel()
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).addModel()
+                    .condition(BlockStateProperties.NORTH, true).condition(WarpFluxConduitBlock.NORTH_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(90).addModel()
+                    .condition(BlockStateProperties.EAST, true).condition(WarpFluxConduitBlock.EAST_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(180).addModel()
+                    .condition(BlockStateProperties.SOUTH, true).condition(WarpFluxConduitBlock.SOUTH_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(270).addModel()
+                    .condition(BlockStateProperties.WEST, true).condition(WarpFluxConduitBlock.WEST_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationX(270).addModel()
+                    .condition(BlockStateProperties.UP, true).condition(WarpFluxConduitBlock.UP_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationX(90).addModel()
+                    .condition(BlockStateProperties.DOWN, true).condition(WarpFluxConduitBlock.DOWN_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+        }
+
+        simpleBlockItem(block.get(), cores[0]);
     }
 
     private void customSpawnerBlock(DeferredBlock<?> deferredBlock) {

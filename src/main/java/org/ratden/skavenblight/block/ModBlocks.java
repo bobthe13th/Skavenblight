@@ -101,7 +101,9 @@ public class ModBlocks {
                     .strength(2.0f)
                     .requiresCorrectToolForDrops()
                     .sound(SoundType.METAL)
-                    .noOcclusion())); // noOcclusion is important for pipes/cables to render nicely
+                    .noOcclusion() // Keeps your custom models from creating x-ray holes
+                    .lightLevel(WarpFluxConduitBlock::getLightEmission) // Links the dynamic light!
+            ));
 
     public static final DeferredBlock<Block> BASIC_WARP_FLUX_STORAGE = registerStorageBlock("basic_warp_flux_storage",
             () -> new org.ratden.skavenblight.block.custom.WarpFluxStorageBlock(

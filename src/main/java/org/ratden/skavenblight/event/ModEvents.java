@@ -35,4 +35,5 @@ public class ModEvents {
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
     }
+
 }

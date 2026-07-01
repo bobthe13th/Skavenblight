@@ -34,34 +34,7 @@ public class WarpFluxStorageBlockEntity extends BlockEntity {
     }
 
     public void tick(Level level, BlockPos pos, BlockState state) {
-        if (level.isClientSide()) return;
-
-        int currentFlux = this.fluxStorage.getFlux();
-        if (currentFlux <= 0) return;
-
-        // Query our capability to see how much we are allowed to pull out this tick
-        int amountToPush = this.fluxStorage.extractFlux(currentFlux, true);
-        if (amountToPush <= 0) return;
-
-        net.minecraft.server.level.ServerLevel serverLevel = (net.minecraft.server.level.ServerLevel) level;
-        org.ratden.skavenblight.network.WarpFluxGridManager manager =
-                org.ratden.skavenblight.network.WarpFluxGridManager.get(serverLevel);
-
-        // Auto-discharge into any cables/networks touching our 6 sides
-        for (Direction dir : Direction.values()) {
-            BlockPos neighborPos = pos.relative(dir);
-            org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(neighborPos);
-
-            if (network != null) {
-                int transferred = network.pushFlux(serverLevel, amountToPush, pos);
-                if (transferred > 0) {
-                    this.fluxStorage.extractFlux(transferred, false);
-                    this.setChanged();
-                    amountToPush -= transferred;
-                    if (amountToPush <= 0) break;
-                }
-            }
-        }
+        // The WarpFluxNetwork now automatically handles balancing all power in the grid.
     }
 
     @Override
