@@ -3,6 +3,7 @@ package org.ratden.skavenblight.datagen;
 import net.minecraft.core.Direction;
 import net.minecraft.data.DataGenerator;
 import net.minecraft.data.PackOutput;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.model.generators.BlockStateProvider;
@@ -64,6 +65,11 @@ public class ModBlockStateProvider extends BlockStateProvider {
         // 3. Generate the item model pointing to that same existing block model
         simpleBlockItem(ModBlocks.BASIC_WARP_FLUX_STORAGE.get(), basicWarpFluxStorageModel);
 
+        standardMachineBlock(ModBlocks.WARP_FLUX_FURNACE,
+                "warp_flux_furnace_side",
+                "warp_flux_furnace_top",
+                "warp_flux_furnace_front",
+                "warp_flux_furnace_front_on");
     }
 
     public void makeConduit(DeferredBlock<?> block, String baseName) {
@@ -163,6 +169,55 @@ public class ModBlockStateProvider extends BlockStateProvider {
                 .predicate(modLoc("is_active"), 1.0f)
                 .model(activeModel)
                 .end();
+    }
+
+    /**
+     * Creates standard blockstates and models for a horizontal-directional machine that can be turned on and off.
+     * Future machines can call this method with their respective textures to completely generate all models instantly.
+     */
+    private void standardMachineBlock(DeferredBlock<Block> block, String sideTex, String topTex, String frontInactiveTex, String frontActiveTex) {
+        // 1. Create the 3D model for the INACTIVE state
+        ModelFile inactiveModel = models().cube("block/" + block.getId().getPath(),
+                modLoc("block/" + sideTex),    // Bottom
+                modLoc("block/" + topTex),     // Top
+                modLoc("block/" + frontInactiveTex), // Front (North default)
+                modLoc("block/" + sideTex),    // South
+                modLoc("block/" + sideTex),    // West
+                modLoc("block/" + sideTex)     // East
+        ).renderType("minecraft:solid");
+
+        // 2. Create the 3D model for the ACTIVE state (with glowing front)
+        ModelFile activeModel = models().cube("block/" + block.getId().getPath() + "_on",
+                modLoc("block/" + sideTex),    // Bottom
+                modLoc("block/" + topTex),     // Top
+                modLoc("block/" + frontActiveTex), // Front (Glowing!)
+                modLoc("block/" + sideTex),    // South
+                modLoc("block/" + sideTex),    // West
+                modLoc("block/" + sideTex)     // East
+        ).renderType("minecraft:solid");
+
+        // 3. Assemble the variant map combining Facing and Lit properties
+        getVariantBuilder(block.get()).forAllStates(state -> {
+            Direction dir = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
+            boolean isLit = state.getValue(BlockStateProperties.LIT);
+
+            ModelFile currentModel = isLit ? activeModel : inactiveModel;
+
+            int yRot = switch (dir) {
+                case EAST -> 90;
+                case SOUTH -> 180;
+                case WEST -> 270;
+                default -> 0; // NORTH
+            };
+
+            return ConfiguredModel.builder()
+                    .modelFile(currentModel)
+                    .rotationY(yRot)
+                    .build();
+        });
+
+        // 4. Generate a clean 3D block item model for the player's hand/inventory (defaults to the inactive look)
+        simpleBlockItem(block.get(), inactiveModel);
     }
 
     private void blockWithItem(DeferredBlock<?> deferredBlock){

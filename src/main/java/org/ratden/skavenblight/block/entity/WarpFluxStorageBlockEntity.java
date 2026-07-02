@@ -16,7 +16,7 @@ public class WarpFluxStorageBlockEntity extends BlockEntity {
     public WarpFluxStorageBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.WARP_FLUX_STORAGE.get(), pos, state);
 
-        int cap = 10000;
+        int cap = 1000;
         int rec = 100;
         int ext = 100;
 

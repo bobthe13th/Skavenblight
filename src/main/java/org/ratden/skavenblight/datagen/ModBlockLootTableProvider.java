@@ -58,6 +58,8 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                 .apply(net.minecraft.world.level.storage.loot.functions.CopyCustomDataFunction.copyData(
                                 net.minecraft.world.level.storage.loot.providers.nbt.ContextNbtProvider.BLOCK_ENTITY)
                         .copy("flux", "flux")));
+
+        dropSelf(ModBlocks.WARP_FLUX_FURNACE.get());
     }
 
     //Basically the createCopperOreDrops() vanilla method

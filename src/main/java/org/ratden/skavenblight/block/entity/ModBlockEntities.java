@@ -44,6 +44,10 @@ public class ModBlockEntities {
                             WarpFluxStorageBlockEntity::new,
                             ModBlocks.BASIC_WARP_FLUX_STORAGE.get() // To add more tiers later, comma-separate them here!
                     ).build(null));
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpFluxFurnaceBlockEntity>> WARP_FLUX_FURNACE =
+            BLOCK_ENTITIES.register("warp_flux_furnace", () ->
+                    BlockEntityType.Builder.of(WarpFluxFurnaceBlockEntity::new, ModBlocks.WARP_FLUX_FURNACE.get())
+                            .build(null));
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);

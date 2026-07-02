@@ -28,6 +28,7 @@ import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
+import org.ratden.skavenblight.screen.ModMenus;
 import org.ratden.skavenblight.sound.ModSounds;
 import org.slf4j.Logger;
 
@@ -92,15 +93,15 @@ public class Skavenblight {
 
         // Register the entity attributes
         modEventBus.addListener(this::registerEntityAttributes);
-
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
 
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-        // >>> YOUR CODE GOES HERE <<<
+        modContainer.registerConfig(ModConfig.Type.SERVER, org.ratden.skavenblight.config.WarpFluxFurnaceConfig.SPEC, "skavenblight-furnace-server.toml");
         // Initialize our custom wealth values when the mod loads - if/when implemented
         //WealthRegistry.registerBaseValues();
         // Add this line right below your other addListener calls in the constructor!
         modEventBus.addListener(this::registerCapabilities);
+        ModMenus.register(modEventBus);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -162,10 +163,16 @@ public class Skavenblight {
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
 
-        // 2. Register the capability for the Nexus
+        // Register the capability for the Nexus
         event.registerBlockEntity(
                 org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
                 org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get(),
+                (blockEntity, side) -> blockEntity.getFluxStorage()
+        );
+
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_FURNACE.get(),
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
     }
