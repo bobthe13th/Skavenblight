@@ -89,25 +89,14 @@ public class WarpstoneNexusEntity extends BlockEntity {
             org.ratden.skavenblight.network.WarpFluxNetwork network = manager.getNetworkAt(neighborPos);
 
             if (network != null) {
-                // Push the flux directly onto the network!
-                int transferred = network.pushFlux(serverLevel, amountToPush, pos);
-
-                if (transferred > 0) {
-                    // Deduct the successfully transferred power from the Nexus's storage (non-simulated)
-                    this.fluxStorage.extractFlux(transferred, false);
+                // Just generate the power and put it in your own storage!
+                // The network's tick() will automatically extract it and route it to the furnaces.
+                this.fluxStorage.receiveFlux(amountToPush, false);
                     this.setChanged();
-
-                    // Subtract what we sent from our remaining allowance this tick
-                    amountToPush -= transferred;
-
-                    // If we've hit our max transfer limit for this tick, stop looking at other sides
-                    if (amountToPush <= 0) {
-                        break;
-                    }
                 }
             }
         }
-    }
+
 
     // --- Save and Load Data ---
 

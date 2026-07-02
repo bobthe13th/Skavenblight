@@ -17,32 +17,44 @@ public class WarpFluxConduitBlockEntity extends BlockEntity {
     }
 
     public void triggerTransferGlow(int fluxAmount, int maxCapacity) {
-        // Calculate intensity based on transfer size relative to config max
-        float percentage = (float) fluxAmount / maxCapacity;
+        // Ignore the math! Any flux at all immediately pushes the conduit to max brightness.
+        this.currentIntensity = 3;
 
-        int targetIntensity;
-        if (percentage > 0.75f) targetIntensity = 3; // Strong
-        else if (percentage > 0.25f) targetIntensity = 2; // Medium
-        else targetIntensity = 1; // Pale
-
-        this.currentIntensity = targetIntensity;
-        this.glowTicksRemaining = 10; // Glow for half a second after a transfer tick
+        // Hold this maximum brightness for 10 ticks (half a second) before it begins to fade
+        this.glowTicksRemaining = 10;
     }
 
+    // Removed 'static' and the 'WarpFluxConduitBlockEntity entity' parameter!
     public void tick(Level level, BlockPos pos, BlockState state) {
         if (level.isClientSide) return;
 
-        if (glowTicksRemaining > 0) {
-            glowTicksRemaining--;
+        if (this.glowTicksRemaining > 0) {
+            this.glowTicksRemaining--;
 
-            // Ensure the block state matches the current intensity
-            if (state.getValue(WarpFluxConduitBlock.GLOW_INTENSITY) != currentIntensity) {
-                level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, currentIntensity), 3);
+            if (state.getValue(WarpFluxConduitBlock.GLOW_INTENSITY) != this.currentIntensity) {
+                level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, this.currentIntensity), 3);
             }
-        } else if (state.getValue(WarpFluxConduitBlock.GLOW_INTENSITY) != 0) {
-            // Turn off the glow
-            this.currentIntensity = 0;
-            level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, 0), 3);
+
+        } else if (this.currentIntensity > 0) {
+            // The timer ran out, time to fade down!
+            this.currentIntensity--;
+
+            if (this.currentIntensity > 0) {
+                // Hold at the lower intensity for a few ticks
+                this.glowTicksRemaining = 5;
+                level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, this.currentIntensity), 3);
+            } else {
+                // We finally hit 0! Turn off the core AND all the connection arms simultaneously.
+                BlockState turnOffState = state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, 0)
+                        .setValue(WarpFluxConduitBlock.NORTH_ACTIVE, false)
+                        .setValue(WarpFluxConduitBlock.SOUTH_ACTIVE, false)
+                        .setValue(WarpFluxConduitBlock.EAST_ACTIVE, false)
+                        .setValue(WarpFluxConduitBlock.WEST_ACTIVE, false)
+                        .setValue(WarpFluxConduitBlock.UP_ACTIVE, false)
+                        .setValue(WarpFluxConduitBlock.DOWN_ACTIVE, false);
+
+                level.setBlock(pos, turnOffState, 3);
+            }
         }
     }
 }

@@ -27,7 +27,7 @@ public class WarpFluxFurnaceMenu extends AbstractContainerMenu {
         this.blockEntity = (WarpFluxFurnaceBlockEntity) entity;
         this.data = data;
 
-        IItemHandler itemHandler = this.blockEntity.getItemHandler();
+        IItemHandler itemHandler = this.blockEntity.getItemHandler(null);
 
         // 3. Add Machine Slots (Index 0 and 1)
         this.addSlot(new SlotItemHandler(itemHandler, 0, 41, 34)); // Input Slot

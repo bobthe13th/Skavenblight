@@ -143,7 +143,48 @@ public class WarpFluxFurnaceBlockEntity extends BlockEntity implements net.minec
     }
 
     // Getters for capabilities
-    public ItemStackHandler getItemHandler() { return itemHandler; }
+    public net.neoforged.neoforge.items.IItemHandler getItemHandler(@org.jetbrains.annotations.Nullable net.minecraft.core.Direction side) {
+        // If we are accessing internally (side is null), return the full unrestricted inventory
+        if (side == null) {
+            return itemHandler;
+        }
+
+        // Otherwise, wrap the inventory in a strict filter!
+        return new net.neoforged.neoforge.items.IItemHandler() {
+            @Override
+            public int getSlots() { return itemHandler.getSlots(); }
+
+            @Override
+            public net.minecraft.world.item.ItemStack getStackInSlot(int slot) { return itemHandler.getStackInSlot(slot); }
+
+            @Override
+            public int getSlotLimit(int slot) { return itemHandler.getSlotLimit(slot); }
+
+            @Override
+            public boolean isItemValid(int slot, @NotNull net.minecraft.world.item.ItemStack stack) {
+                return itemHandler.isItemValid(slot, stack);
+            }
+
+            @Override
+            public net.minecraft.world.item.ItemStack insertItem(int slot, net.minecraft.world.item.ItemStack stack, boolean simulate) {
+                // Rule: Only allow insertion into Slot 0 (Input), and ONLY from the Top or Sides
+                if (slot == 0 && side != net.minecraft.core.Direction.DOWN) {
+                    return itemHandler.insertItem(slot, stack, simulate);
+                }
+                return stack; // Return the stack untouched to reject the insertion
+            }
+
+            @Override
+            public net.minecraft.world.item.ItemStack extractItem(int slot, int amount, boolean simulate) {
+                // Rule: Only allow extraction from Slot 1 (Output), and ONLY from the Bottom
+                if (slot == 1 && side == net.minecraft.core.Direction.DOWN) {
+                    return itemHandler.extractItem(slot, amount, simulate);
+                }
+                return net.minecraft.world.item.ItemStack.EMPTY; // Return empty to reject extraction
+            }
+        };
+    }
+
     public WarpFluxStorage getFluxStorage() { return fluxStorage; }
     protected final ContainerData data = new ContainerData() {
         @Override

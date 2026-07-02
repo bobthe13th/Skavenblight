@@ -3,10 +3,13 @@ package org.ratden.skavenblight.network;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
-import org.ratden.skavenblight.capability.ModCapabilities;
 import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
+import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
+import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
+import org.ratden.skavenblight.capability.ModCapabilities;
+import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
 
 import java.util.*;
 
@@ -16,9 +19,6 @@ public class WarpFluxNetwork {
     private final Set<BlockPos> conduits = new HashSet<>();
     private final Set<BlockPos> endpoints = new HashSet<>();
 
-    // Tracks the remaining glow time (0 to 60 ticks) for individual conduits
-    private final Map<BlockPos, Integer> conduitTimers = new HashMap<>();
-
     public WarpFluxNetwork() {
         this.networkId = UUID.randomUUID();
     }
@@ -27,276 +27,171 @@ public class WarpFluxNetwork {
         this.networkId = networkId;
     }
 
-    public UUID getId() {
-        return this.networkId;
-    }
+    public UUID getId() { return this.networkId; }
+    public Set<BlockPos> getConduits() { return this.conduits; }
+    public Set<BlockPos> getEndpoints() { return this.endpoints; }
 
-    public Set<BlockPos> getConduits() {
-        return this.conduits;
-    }
-
-    public Set<BlockPos> getEndpoints() {
-        return this.endpoints;
-    }
-
-    public void addConduit(BlockPos pos) {
-        this.conduits.add(pos);
-    }
-
-    public void addEndpoint(BlockPos pos) {
-        this.endpoints.add(pos);
-    }
-
-    public boolean isValid(ServerLevel level) {
-        for (BlockPos pos : endpoints) {
-            if (level.getBlockEntity(pos) instanceof WarpstoneNexusEntity) {
-                return true;
-            }
-        }
-        return false;
-    }
+    public void addConduit(BlockPos pos) { this.conduits.add(pos); }
+    public void addEndpoint(BlockPos pos) { this.endpoints.add(pos); }
 
     public void tick(ServerLevel level) {
-        // --- 1. INDIVIDUAL CONDUIT DECAY LOGIC ---
-        if (!conduitTimers.isEmpty()) {
-            Iterator<Map.Entry<BlockPos, Integer>> iterator = conduitTimers.entrySet().iterator();
-
-            while (iterator.hasNext()) {
-                Map.Entry<BlockPos, Integer> entry = iterator.next();
-                BlockPos pos = entry.getKey();
-                int timeRemaining = entry.getValue() - 1;
-
-                BlockState state = level.getBlockState(pos);
-
-                // SAFETY CHECK: If the pipe was the one you just broke, stop tracking it!
-                if (!(state.getBlock() instanceof WarpFluxConduitBlock)) {
-                    iterator.remove();
-                    continue;
-                }
-
-                int targetIntensity = 0; // Off
-                if (timeRemaining > 40) targetIntensity = 3;      // 3 to 2 seconds: Strong
-                else if (timeRemaining > 20) targetIntensity = 2; // 2 to 1 seconds: Medium
-                else if (timeRemaining > 0) targetIntensity = 1;  // 1 to 0 seconds: Pale
-
-                int currentIntensity = state.getValue(WarpFluxConduitBlock.GLOW_INTENSITY);
-                if (currentIntensity != targetIntensity) {
-                    level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, targetIntensity), 3);
-                }
-
-                if (timeRemaining <= 0) {
-                    iterator.remove();
-
-                    // The pipe is completely cold. Shut off all routing arms!
-                    state = state.setValue(WarpFluxConduitBlock.NORTH_ACTIVE, false)
-                            .setValue(WarpFluxConduitBlock.SOUTH_ACTIVE, false)
-                            .setValue(WarpFluxConduitBlock.EAST_ACTIVE, false)
-                            .setValue(WarpFluxConduitBlock.WEST_ACTIVE, false)
-                            .setValue(WarpFluxConduitBlock.UP_ACTIVE, false)
-                            .setValue(WarpFluxConduitBlock.DOWN_ACTIVE, false);
-
-                    level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, 0), 3);
-                } else {
-                    if (currentIntensity != targetIntensity) {
-                        level.setBlock(pos, state.setValue(WarpFluxConduitBlock.GLOW_INTENSITY, targetIntensity), 3);
-                    }
-                    entry.setValue(timeRemaining);
-                }
-            }
-        }
-
-        // --- 2. BATTERY BALANCING LOGIC ---
         if (endpoints.isEmpty()) return;
 
-        long totalFlux = 0;
-        long totalCapacity = 0;
+        List<EndpointData> generators = new ArrayList<>();
+        List<EndpointData> batteries = new ArrayList<>();
+        List<EndpointData> consumers = new ArrayList<>();
 
-        List<org.ratden.skavenblight.capability.custom.IWarpFluxStorage> connectedStorages = new ArrayList<>();
-
+        // 1. Categorize
         for (BlockPos pos : endpoints) {
-            var storage = level.getCapability(ModCapabilities.WARP_FLUX, pos, null);
-            if (storage != null && storage.getMaxFlux() > 0) {
-                connectedStorages.add(storage);
-                totalFlux += storage.getFlux();
-                totalCapacity += storage.getMaxFlux();
-            }
-        }
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be == null) continue;
 
-        if (connectedStorages.isEmpty() || totalCapacity == 0) return;
+            IWarpFluxStorage storage = level.getCapability(ModCapabilities.WARP_FLUX, pos, null);
+            if (storage == null) continue;
 
-        double fillPercentage = (double) totalFlux / totalCapacity;
-        long distributedFlux = 0;
+            EndpointData data = new EndpointData(pos, storage);
 
-        for (int i = 0; i < connectedStorages.size(); i++) {
-            var storage = connectedStorages.get(i);
-            if (i == connectedStorages.size() - 1) {
-                storage.setFlux((int) (totalFlux - distributedFlux));
+            if (be instanceof WarpstoneNexusEntity) {
+                generators.add(data);
+            } else if (be instanceof WarpFluxStorageBlockEntity) {
+                batteries.add(data);
             } else {
-                int targetFlux = (int) (storage.getMaxFlux() * fillPercentage);
-                storage.setFlux(targetFlux);
-                distributedFlux += targetFlux;
+                consumers.add(data);
             }
         }
+
+        // 2. Sort Consumers (Emptiest machines first)
+        consumers.sort(Comparator.comparingDouble(s ->
+                s.storage().getMaxFlux() == 0 ? 1.0 : (double) s.storage().getFlux() / s.storage().getMaxFlux()
+        ));
+
+        // 3. Transfer Power
+        transferPower(generators, consumers, level);
+        transferPower(batteries, consumers, level);
+        transferPower(generators, batteries, level);
     }
-
-    public int pushFlux(ServerLevel level, int maxAmount, BlockPos sourcePos) {
-        if (maxAmount <= 0) return 0;
-
-        List<org.ratden.skavenblight.capability.custom.IWarpFluxStorage> validStorages = new ArrayList<>();
-        List<BlockPos> validPositions = new ArrayList<>();
-
-        for (BlockPos endpointPos : endpoints) {
-            if (endpointPos.equals(sourcePos)) continue;
-
-            var fluxStorage = level.getCapability(ModCapabilities.WARP_FLUX, endpointPos, null);
-            if (fluxStorage != null && fluxStorage.receiveFlux(1, true) > 0) {
-                validStorages.add(fluxStorage);
-                validPositions.add(endpointPos);
-            }
-        }
-
-        if (validStorages.isEmpty()) return 0;
-
-        int splitAmount = maxAmount / validStorages.size();
-        int remainder = maxAmount % validStorages.size();
-
-        int totalPushed = 0;
-
-        // Tracks exactly which arms are actively routing power this tick
-        Map<BlockPos, Set<Direction>> activeDirsThisPulse = new HashMap<>();
-
-        for (int i = 0; i < validStorages.size(); i++) {
-            var storage = validStorages.get(i);
-            BlockPos receiverPos = validPositions.get(i);
-
-            int amountToPush = splitAmount;
-            if (i < remainder) amountToPush += 1;
-
-            if (amountToPush > 0) {
-                int accepted = storage.receiveFlux(amountToPush, false);
-                if (accepted > 0) {
-                    totalPushed += accepted;
-
-                    // --- 3. TRACE PATHS ---
-                    List<BlockPos> path = findShortestPath(sourcePos, receiverPos);
-                    if (!path.isEmpty()) {
-                        List<BlockPos> fullChain = new ArrayList<>();
-                        fullChain.add(sourcePos);
-                        fullChain.addAll(path);
-                        fullChain.add(receiverPos);
-
-                        for (int j = 1; j < fullChain.size() - 1; j++) {
-                            BlockPos current = fullChain.get(j);
-                            BlockPos prev = fullChain.get(j - 1);
-                            BlockPos next = fullChain.get(j + 1);
-
-                            Direction dirToPrev = getDirectionTo(current, prev);
-                            Direction dirToNext = getDirectionTo(current, next);
-
-                            // Add the entry and exit directions for this specific conduit block
-                            activeDirsThisPulse.computeIfAbsent(current, k -> new HashSet<>())
-                                    .addAll(Arrays.asList(dirToPrev, dirToNext));
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- 4. APPLY EXACT VISUALS ---
-        // This ensures the active paths turn ON, and any "Ghost" branches turn OFF instantly!
-        for (Map.Entry<BlockPos, Set<Direction>> entry : activeDirsThisPulse.entrySet()) {
-            BlockPos current = entry.getKey();
-            Set<Direction> activeDirs = entry.getValue();
-
-            BlockState state = level.getBlockState(current);
-            if (state.getBlock() instanceof WarpFluxConduitBlock) {
-                state = state.setValue(WarpFluxConduitBlock.NORTH_ACTIVE, activeDirs.contains(Direction.NORTH))
-                        .setValue(WarpFluxConduitBlock.SOUTH_ACTIVE, activeDirs.contains(Direction.SOUTH))
-                        .setValue(WarpFluxConduitBlock.EAST_ACTIVE, activeDirs.contains(Direction.EAST))
-                        .setValue(WarpFluxConduitBlock.WEST_ACTIVE, activeDirs.contains(Direction.WEST))
-                        .setValue(WarpFluxConduitBlock.UP_ACTIVE, activeDirs.contains(Direction.UP))
-                        .setValue(WarpFluxConduitBlock.DOWN_ACTIVE, activeDirs.contains(Direction.DOWN));
-
-                level.setBlock(current, state, 3);
-            }
-
-            // Refresh the cooldown timer
-            conduitTimers.put(current, 60);
-        }
-
-        return totalPushed;
-    }
-
-    // --- BREADTH-FIRST SEARCH PATHFINDING ---
-    private List<BlockPos> findShortestPath(BlockPos start, BlockPos end) {
-        Queue<BlockPos> queue = new LinkedList<>();
-        Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
-
-        queue.add(start);
-        cameFrom.put(start, null);
-
-        while (!queue.isEmpty()) {
-            BlockPos current = queue.poll();
-
-            // If we reached the receiver, trace our steps backwards
-            if (current.equals(end)) {
-                List<BlockPos> path = new ArrayList<>();
-                BlockPos step = end;
-                while (step != null) {
-                    // Only add the actual cables to our glow list
-                    if (conduits.contains(step)) {
-                        path.add(step);
-                    }
-                    step = cameFrom.get(step);
-                }
-                return path;
-            }
-
-            // Check neighbors
-            for (Direction dir : Direction.values()) {
-                BlockPos neighbor = current.relative(dir);
-                if (!cameFrom.containsKey(neighbor)) {
-                    // Only explore paths that are part of our conduits OR the final destination
-                    if (conduits.contains(neighbor) || neighbor.equals(end)) {
-                        cameFrom.put(neighbor, current);
-                        queue.add(neighbor);
-                    }
-                }
-            }
-        }
-        return Collections.emptyList(); // No path found
-    }
-
     public void scanForEndpoints(ServerLevel level) {
         this.endpoints.clear();
         for (BlockPos conduitPos : this.conduits) {
-
-            // 1. Scan for machines attached to the pipes
             for (Direction dir : Direction.values()) {
                 BlockPos neighborPos = conduitPos.relative(dir);
-                if (level.getCapability(ModCapabilities.WARP_FLUX, neighborPos, dir.getOpposite()) != null) {
-                    this.endpoints.add(neighborPos);
-                }
-            }
-
-            // --- 2. COOLDOWN RECOVERY ---
-            // If the network was just split/rebuilt, inherit the glow states from the physical blocks!
-            BlockState state = level.getBlockState(conduitPos);
-            if (state.getBlock() instanceof WarpFluxConduitBlock) {
-                int currentIntensity = state.getValue(WarpFluxConduitBlock.GLOW_INTENSITY);
-
-                // If it's glowing but not in our timer map yet, adopt it!
-                if (currentIntensity > 0 && !conduitTimers.containsKey(conduitPos)) {
-                    int timeToRecover = 0;
-                    if (currentIntensity == 3) timeToRecover = 60;
-                    else if (currentIntensity == 2) timeToRecover = 40;
-                    else if (currentIntensity == 1) timeToRecover = 20;
-
-                    conduitTimers.put(conduitPos, timeToRecover);
+                if (!this.conduits.contains(neighborPos)) {
+                    // Check if the adjacent block has our custom capability
+                    IWarpFluxStorage storage = level.getCapability(ModCapabilities.WARP_FLUX, neighborPos, dir.getOpposite());
+                    if (storage != null) {
+                        this.endpoints.add(neighborPos);
+                    }
                 }
             }
         }
     }
+
+    private void transferPower(List<EndpointData> sources, List<EndpointData> destinations, ServerLevel level) {
+        for (EndpointData dest : destinations) {
+            int needed = dest.storage().getMaxFlux() - dest.storage().getFlux();
+            if (needed <= 0) continue;
+
+            for (EndpointData src : sources) {
+                int available = src.storage().extractFlux(Integer.MAX_VALUE, true);
+                if (available <= 0) continue;
+
+                int accepted = dest.storage().receiveFlux(available, false);
+                if (accepted > 0) {
+                    src.storage().extractFlux(accepted, false);
+
+                    // Power successfully moved! Find and light up the exact path.
+                    triggerPathGlow(src.pos(), dest.pos(), accepted, level);
+                }
+
+                if (dest.storage().getFlux() >= dest.storage().getMaxFlux()) {
+                    break;
+                }
+            }
+        }
+    }
+
+    private void triggerPathGlow(BlockPos start, BlockPos end, int fluxAmount, ServerLevel level) {
+        Queue<BlockPos> queue = new LinkedList<>();
+        Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
+
+        for (Direction dir : Direction.values()) {
+            BlockPos adj = start.relative(dir);
+            if (this.conduits.contains(adj)) {
+                queue.add(adj);
+                cameFrom.put(adj, start);
+            }
+        }
+
+        BlockPos endConduit = null;
+
+        // BFS to find shortest path
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.poll();
+
+            boolean touchesEnd = false;
+            for (Direction dir : Direction.values()) {
+                if (current.relative(dir).equals(end)) {
+                    touchesEnd = true;
+                    break;
+                }
+            }
+
+            if (touchesEnd) {
+                endConduit = current;
+                break;
+            }
+
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = current.relative(dir);
+                if (this.conduits.contains(neighbor) && !cameFrom.containsKey(neighbor)) {
+                    cameFrom.put(neighbor, current);
+                    queue.add(neighbor);
+                }
+            }
+        }
+
+        // Trace the path backwards and update the block states
+        if (endConduit != null) {
+            BlockPos current = endConduit;
+            int maxNetworkCapacity = 1;
+
+            BlockPos nextBlockInPath = end;
+
+            while (current != null && !current.equals(start)) {
+                BlockPos previousBlockInPath = cameFrom.get(current); // Where power comes FROM
+
+                // 1. Tell BlockEntity to glow (Handles intensity)
+                BlockEntity be = level.getBlockEntity(current);
+                if (be instanceof org.ratden.skavenblight.block.entity.WarpFluxConduitBlockEntity conduitEntity) {
+                    conduitEntity.triggerTransferGlow(fluxAmount, maxNetworkCapacity);
+                }
+
+                // 2. Set the block states for directional flow arms
+                BlockState state = level.getBlockState(current);
+                BlockState originalState = state; // Track state to prevent laggy block updates if already glowing
+
+                // Activate arm pointing to the NEXT block (Consumer or next conduit)
+                Direction dirToNext = getDirectionTo(current, nextBlockInPath);
+                if (dirToNext != null) state = setDirectionActive(state, dirToNext, true);
+
+                // Activate arm pointing to the PREVIOUS block (Generator or previous conduit)
+                Direction dirToPrev = getDirectionTo(current, previousBlockInPath);
+                if (dirToPrev != null) state = setDirectionActive(state, dirToPrev, true);
+
+                // Only trigger a block update if the state actually changed!
+                if (state != originalState) {
+                    level.setBlock(current, state, 3);
+                }
+
+
+
+                // Move backwards up the chain
+                nextBlockInPath = current;
+                current = previousBlockInPath;
+            }
+        }
+    }
+
     private Direction getDirectionTo(BlockPos from, BlockPos to) {
         for (Direction dir : Direction.values()) {
             if (from.relative(dir).equals(to)) return dir;
@@ -315,4 +210,6 @@ public class WarpFluxNetwork {
             case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
         };
     }
+
+    private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
 }

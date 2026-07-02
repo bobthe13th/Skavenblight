@@ -59,7 +59,7 @@ public class ModEvents {
                 ModBlockEntities.WARP_FLUX_FURNACE.get(),
                 (blockEntity, side) -> {
                     if (blockEntity instanceof WarpFluxFurnaceBlockEntity furnace) {
-                        return furnace.getItemHandler();
+                        return furnace.getItemHandler(side); // only output out of hopper
                     }
                     return null;
                 }
