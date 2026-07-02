@@ -37,9 +37,7 @@ public class WarpFluxStorageBlock extends Block implements EntityBlock {
     @Nullable
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (level.isClientSide()) return null;
-        return type == ModBlockEntities.WARP_FLUX_STORAGE.get() ?
-                (lvl, pos, st, be) -> ((WarpFluxStorageBlockEntity) be).tick(lvl, pos, st) : null;
+        return null;
     }
 
     //we might want to replace this with a more advanced GUI eventually.

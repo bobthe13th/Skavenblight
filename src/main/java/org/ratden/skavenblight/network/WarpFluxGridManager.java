@@ -30,7 +30,7 @@ public class WarpFluxGridManager extends SavedData {
 
     public static WarpFluxGridManager get(ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(
+                new Factory<>(
                         WarpFluxGridManager::new,
                         WarpFluxGridManager::load,
                         null
@@ -145,7 +145,7 @@ public class WarpFluxGridManager extends SavedData {
 
         // 2. Look at the 6 blocks surrounding the broken conduit.
         // If there are surviving conduits, rebuild a new network from them.
-        for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+        for (Direction dir : Direction.values()) {
             BlockPos neighbor = pos.relative(dir);
             if (level.getBlockState(neighbor).getBlock() instanceof org.ratden.skavenblight.block.custom.WarpFluxConduitBlock) {
 
@@ -178,7 +178,7 @@ public class WarpFluxGridManager extends SavedData {
             positionToNetwork.put(current, newNetwork.getId());
 
             // Check neighbors to continue the flood fill
-            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+            for (Direction dir : Direction.values()) {
                 BlockPos neighbor = current.relative(dir);
 
                 if (level.getBlockState(neighbor).getBlock() instanceof org.ratden.skavenblight.block.custom.WarpFluxConduitBlock) {
@@ -187,7 +187,7 @@ public class WarpFluxGridManager extends SavedData {
                     }
                 }
                 // Re-discover endpoints (Nexuses and consumers)
-                else if (level.getCapability(org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX, neighbor, dir.getOpposite()) != null) {
+                else if (level.getCapability(ModCapabilities.WARP_FLUX, neighbor, dir.getOpposite()) != null) {
                     newNetwork.addEndpoint(neighbor);
                 }
             }
@@ -227,5 +227,11 @@ public class WarpFluxGridManager extends SavedData {
             }
         }
         return manager;
+    }
+
+    public void tickNetworks(ServerLevel level) {
+        for (WarpFluxNetwork network : networks.values()) {
+            network.tick(level);
+        }
     }
 }

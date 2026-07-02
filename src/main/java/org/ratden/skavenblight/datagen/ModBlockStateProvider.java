@@ -3,6 +3,7 @@ package org.ratden.skavenblight.datagen;
 import net.minecraft.core.Direction;
 import net.minecraft.data.DataGenerator;
 import net.minecraft.data.PackOutput;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.model.generators.BlockStateProvider;
@@ -64,35 +65,69 @@ public class ModBlockStateProvider extends BlockStateProvider {
         // 3. Generate the item model pointing to that same existing block model
         simpleBlockItem(ModBlocks.BASIC_WARP_FLUX_STORAGE.get(), basicWarpFluxStorageModel);
 
+        standardMachineBlock(ModBlocks.WARP_FLUX_FURNACE,
+                "warp_flux_furnace_side",
+                "warp_flux_furnace_top",
+                "warp_flux_furnace_front",
+                "warp_flux_furnace_front_on");
     }
 
     public void makeConduit(DeferredBlock<?> block, String baseName) {
         MultiPartBlockStateBuilder builder = getMultipartBuilder(block.get());
 
-        // 1. Define the models we expect to exist in assets/skavenblight/models/block/
-        // (You still need to create these geometry files in Blockbench!)
-        ModelFile coreOff = models().getExistingFile(modLoc("block/" + baseName + "_core_off"));
-        ModelFile corePale = models().getExistingFile(modLoc("block/" + baseName + "_core_pale"));
-        ModelFile coreMedium = models().getExistingFile(modLoc("block/" + baseName + "_core_medium"));
-        ModelFile coreStrong = models().getExistingFile(modLoc("block/" + baseName + "_core_strong"));
-        ModelFile arm = models().getExistingFile(modLoc("block/" + baseName + "_arm"));
+        ModelFile[] cores = new ModelFile[] {
+                models().getExistingFile(modLoc("block/" + baseName + "_core_off")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_pale")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_medium")),
+                models().getExistingFile(modLoc("block/" + baseName + "_core_strong"))
+        };
 
-        // 2. Generate the Core states based on glow intensity
-        builder.part().modelFile(coreOff).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 0).end();
-        builder.part().modelFile(corePale).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 1).end();
-        builder.part().modelFile(coreMedium).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 2).end();
-        builder.part().modelFile(coreStrong).addModel().condition(WarpFluxConduitBlock.GLOW_INTENSITY, 3).end();
+        ModelFile[] arms = new ModelFile[] {
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_off")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_pale")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_medium")),
+                models().getExistingFile(modLoc("block/" + baseName + "_arm_strong"))
+        };
 
-        // 3. Generate the connecting Arms based on boolean direction states
-        builder.part().modelFile(arm).addModel().condition(BlockStateProperties.NORTH, true).end();
-        builder.part().modelFile(arm).rotationY(90).addModel().condition(BlockStateProperties.EAST, true).end();
-        builder.part().modelFile(arm).rotationY(180).addModel().condition(BlockStateProperties.SOUTH, true).end();
-        builder.part().modelFile(arm).rotationY(270).addModel().condition(BlockStateProperties.WEST, true).end();
-        builder.part().modelFile(arm).rotationX(270).addModel().condition(BlockStateProperties.UP, true).end();
-        builder.part().modelFile(arm).rotationX(90).addModel().condition(BlockStateProperties.DOWN, true).end();
+        // 1. INACTIVE ARMS: Connected, but no power flowing. Always use the 'Off' arm!
+        builder.part().modelFile(arms[0]).addModel().condition(BlockStateProperties.NORTH, true).condition(WarpFluxConduitBlock.NORTH_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(90).addModel().condition(BlockStateProperties.EAST, true).condition(WarpFluxConduitBlock.EAST_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(180).addModel().condition(BlockStateProperties.SOUTH, true).condition(WarpFluxConduitBlock.SOUTH_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationY(270).addModel().condition(BlockStateProperties.WEST, true).condition(WarpFluxConduitBlock.WEST_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationX(270).addModel().condition(BlockStateProperties.UP, true).condition(WarpFluxConduitBlock.UP_ACTIVE, false).end();
+        builder.part().modelFile(arms[0]).rotationX(90).addModel().condition(BlockStateProperties.DOWN, true).condition(WarpFluxConduitBlock.DOWN_ACTIVE, false).end();
 
-        // 4. Generate the Item Model (usually just referencing a custom generated item texture or the core off model)
-        simpleBlockItem(block.get(), coreOff);
+        // 2. ACTIVE ARMS AND CORES: Tie them to the glow intensity!
+        for (int i = 0; i < 4; i++) {
+            builder.part().modelFile(cores[i]).addModel()
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).addModel()
+                    .condition(BlockStateProperties.NORTH, true).condition(WarpFluxConduitBlock.NORTH_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(90).addModel()
+                    .condition(BlockStateProperties.EAST, true).condition(WarpFluxConduitBlock.EAST_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(180).addModel()
+                    .condition(BlockStateProperties.SOUTH, true).condition(WarpFluxConduitBlock.SOUTH_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationY(270).addModel()
+                    .condition(BlockStateProperties.WEST, true).condition(WarpFluxConduitBlock.WEST_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationX(270).addModel()
+                    .condition(BlockStateProperties.UP, true).condition(WarpFluxConduitBlock.UP_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+
+            builder.part().modelFile(arms[i]).rotationX(90).addModel()
+                    .condition(BlockStateProperties.DOWN, true).condition(WarpFluxConduitBlock.DOWN_ACTIVE, true)
+                    .condition(WarpFluxConduitBlock.GLOW_INTENSITY, i).end();
+        }
+
+        simpleBlockItem(block.get(), cores[0]);
     }
 
     private void customSpawnerBlock(DeferredBlock<?> deferredBlock) {
@@ -134,6 +169,55 @@ public class ModBlockStateProvider extends BlockStateProvider {
                 .predicate(modLoc("is_active"), 1.0f)
                 .model(activeModel)
                 .end();
+    }
+
+    /**
+     * Creates standard blockstates and models for a horizontal-directional machine that can be turned on and off.
+     * Future machines can call this method with their respective textures to completely generate all models instantly.
+     */
+    private void standardMachineBlock(DeferredBlock<Block> block, String sideTex, String topTex, String frontInactiveTex, String frontActiveTex) {
+        // 1. Create the 3D model for the INACTIVE state
+        ModelFile inactiveModel = models().cube("block/" + block.getId().getPath(),
+                modLoc("block/" + sideTex),    // Bottom
+                modLoc("block/" + topTex),     // Top
+                modLoc("block/" + frontInactiveTex), // Front (North default)
+                modLoc("block/" + sideTex),    // South
+                modLoc("block/" + sideTex),    // West
+                modLoc("block/" + sideTex)     // East
+        ).renderType("minecraft:solid");
+
+        // 2. Create the 3D model for the ACTIVE state (with glowing front)
+        ModelFile activeModel = models().cube("block/" + block.getId().getPath() + "_on",
+                modLoc("block/" + sideTex),    // Bottom
+                modLoc("block/" + topTex),     // Top
+                modLoc("block/" + frontActiveTex), // Front (Glowing!)
+                modLoc("block/" + sideTex),    // South
+                modLoc("block/" + sideTex),    // West
+                modLoc("block/" + sideTex)     // East
+        ).renderType("minecraft:solid");
+
+        // 3. Assemble the variant map combining Facing and Lit properties
+        getVariantBuilder(block.get()).forAllStates(state -> {
+            Direction dir = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
+            boolean isLit = state.getValue(BlockStateProperties.LIT);
+
+            ModelFile currentModel = isLit ? activeModel : inactiveModel;
+
+            int yRot = switch (dir) {
+                case EAST -> 90;
+                case SOUTH -> 180;
+                case WEST -> 270;
+                default -> 0; // NORTH
+            };
+
+            return ConfiguredModel.builder()
+                    .modelFile(currentModel)
+                    .rotationY(yRot)
+                    .build();
+        });
+
+        // 4. Generate a clean 3D block item model for the player's hand/inventory (defaults to the inactive look)
+        simpleBlockItem(block.get(), inactiveModel);
     }
 
     private void blockWithItem(DeferredBlock<?> deferredBlock){

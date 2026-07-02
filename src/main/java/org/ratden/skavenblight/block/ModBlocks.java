@@ -12,12 +12,8 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 
-import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
-import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
+import org.ratden.skavenblight.block.custom.*;
 
-import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
-
-import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -101,12 +97,23 @@ public class ModBlocks {
                     .strength(2.0f)
                     .requiresCorrectToolForDrops()
                     .sound(SoundType.METAL)
-                    .noOcclusion())); // noOcclusion is important for pipes/cables to render nicely
+                    .noOcclusion() // Keeps your custom models from creating x-ray holes
+                    .lightLevel(WarpFluxConduitBlock::getLightEmission) // Links the dynamic light!
+            ));
 
     public static final DeferredBlock<Block> BASIC_WARP_FLUX_STORAGE = registerStorageBlock("basic_warp_flux_storage",
             () -> new org.ratden.skavenblight.block.custom.WarpFluxStorageBlock(
                     BlockBehaviour.Properties.of().strength(4.0f).sound(SoundType.METAL).requiresCorrectToolForDrops(),
                     50000, 500, 500
+            ));
+
+    public static final DeferredBlock<Block> WARP_FLUX_FURNACE = registerBlock("warp_flux_furnace",
+            () -> new WarpFluxFurnaceBlock(BlockBehaviour.Properties.of()
+                    .strength(3.5f)
+                    .requiresCorrectToolForDrops()
+                    .sound(SoundType.METAL)
+                    // Dynamically emit light when LIT is true
+                    .lightLevel(state -> state.getValue(WarpFluxFurnaceBlock.LIT) ? 13 : 0)
             ));
 
     // A specialized helper function just for your expandable storage block tiers

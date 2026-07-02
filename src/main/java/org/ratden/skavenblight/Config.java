@@ -29,7 +29,7 @@ public class Config {
     private static final ModConfigSpec.IntValue TIER_0_CAPACITY = BUILDER.comment("Tier 0 Nexus Flux Capacity")
             .defineInRange("tier0Capacity", 1000, 0, Integer.MAX_VALUE);
     private static final ModConfigSpec.IntValue TIER_0_GENERATION = BUILDER.comment("Tier 0 Nexus Flux Generation per tick")
-            .defineInRange("tier0Generation", 10, 0, Integer.MAX_VALUE);
+            .defineInRange("tier0Generation", 100, 0, Integer.MAX_VALUE);
 
     private static final ModConfigSpec.IntValue TIER_1_CAPACITY = BUILDER.comment("Tier 1 Nexus Flux Capacity")
             .defineInRange("tier1Capacity", 10000, 0, Integer.MAX_VALUE);

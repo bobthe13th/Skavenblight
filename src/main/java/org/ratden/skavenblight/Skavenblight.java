@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.level.block.Blocks;
@@ -26,6 +27,8 @@ import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.network.WarpFluxGridManager;
+import org.ratden.skavenblight.screen.ModMenus;
 import org.ratden.skavenblight.sound.ModSounds;
 import org.slf4j.Logger;
 
@@ -90,15 +93,15 @@ public class Skavenblight {
 
         // Register the entity attributes
         modEventBus.addListener(this::registerEntityAttributes);
-
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
 
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-        // >>> YOUR CODE GOES HERE <<<
+        modContainer.registerConfig(ModConfig.Type.SERVER, org.ratden.skavenblight.config.WarpFluxFurnaceConfig.SPEC, "skavenblight-furnace-server.toml");
         // Initialize our custom wealth values when the mod loads - if/when implemented
         //WealthRegistry.registerBaseValues();
         // Add this line right below your other addListener calls in the constructor!
         modEventBus.addListener(this::registerCapabilities);
+        ModMenus.register(modEventBus);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -129,7 +132,7 @@ public class Skavenblight {
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
         // Do something when the server starts
-        LOGGER.info("HELLO from server starting");
+        LOGGER.info("Rats, rats, we're the rats");
     }
 
     // You can use EventBusSubscriber to automatically register all static methods in the class annotated with @SubscribeEvent
@@ -139,7 +142,9 @@ public class Skavenblight {
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
             // Some client setup code
-            LOGGER.info("HELLO FROM CLIENT SETUP");
+            LOGGER.info("We prey at night, we stalk at night, we're the rats");
+            LOGGER.info("I'm the giant rat that makes all of the rules");
+            LOGGER.info("Let's see what kind of trouble we can get ourselves into");
             LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
         }
     }
@@ -158,12 +163,26 @@ public class Skavenblight {
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
 
-        // 2. Register the capability for the Nexus
+        // Register the capability for the Nexus
         event.registerBlockEntity(
                 org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
                 org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get(),
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
+
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_FURNACE.get(),
+                (blockEntity, side) -> blockEntity.getFluxStorage()
+        );
     }
 
+    //Warp flux network
+    @net.neoforged.bus.api.SubscribeEvent
+    public void onLevelTick(net.neoforged.neoforge.event.tick.LevelTickEvent.Post event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
+            manager.tickNetworks(serverLevel);
+        }
+    }
 }

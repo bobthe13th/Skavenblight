@@ -23,4 +23,7 @@ public interface IWarpFluxStorage {
      * @return The actual amount of flux that was (or would be) extracted.
      */
     int extractFlux(int maxExtract, boolean simulate);
+
+    /** Forcefully sets the flux amount, bypassing transfer limits. Used for network balancing. */
+    void setFlux(int amount);
 }

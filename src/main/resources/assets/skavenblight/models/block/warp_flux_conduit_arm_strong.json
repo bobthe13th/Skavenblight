@@ -1,0 +1,23 @@
+{
+	"format_version": "1.9.0",
+	"credit": "Made with Blockbench",
+	"render_type": "minecraft:translucent",
+	"textures": {
+		"3": "skavenblight:block/warp_flux_conduit_core_strong",
+		"4": "skavenblight:block/warp_flux_conduit_arm_strong",
+		"particle": "skavenblight:block/warp_flux_conduit_core_off"
+	},
+	"elements": [
+		{
+			"from": [5, 5, 0],
+			"to": [11, 11, 5],
+			"rotation": {"angle": 0, "axis": "y", "origin": [7, 7, 3]},
+			"faces": {
+				"east": {"uv": [3, 0, 5.5, 3], "texture": "#4"},
+				"west": {"uv": [3, 3, 5.5, 6], "texture": "#4"},
+				"up": {"uv": [8.5, 2.5, 5.5, 0], "texture": "#4"},
+				"down": {"uv": [8.5, 2.5, 5.5, 5], "texture": "#4"}
+			}
+		}
+	]
+}
