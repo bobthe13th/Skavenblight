@@ -115,7 +115,13 @@ public class ModBlocks {
                     // Dynamically emit light when LIT is true
                     .lightLevel(state -> state.getValue(WarpFluxFurnaceBlock.LIT) ? 13 : 0)
             ));
-
+    public static final DeferredBlock<Block> PISTON_SPIKE_TRAP = registerBlock("piston_spike_trap",
+            () -> new PistonSpikeTrapBlock(BlockBehaviour.Properties.of()
+                    .strength(3.5f)
+                    .requiresCorrectToolForDrops()
+                    .sound(SoundType.METAL)
+                    .noOcclusion() // Highly recommended for GeckoLib animated blocks!
+            ));
     // A specialized helper function just for your expandable storage block tiers
     private static <T extends Block> DeferredBlock<T> registerStorageBlock(String name, java.util.function.Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

@@ -60,6 +60,7 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                         .copy("flux", "flux")));
 
         dropSelf(ModBlocks.WARP_FLUX_FURNACE.get());
+        dropSelf(ModBlocks.PISTON_SPIKE_TRAP.get());
     }
 
     //Basically the createCopperOreDrops() vanilla method
