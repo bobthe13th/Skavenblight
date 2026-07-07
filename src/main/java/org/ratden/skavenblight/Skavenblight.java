@@ -17,12 +17,14 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.block.entity.ModBlockEntities;
+import org.ratden.skavenblight.block.entity.client.PistonSpikeTrapRenderer;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
@@ -102,6 +104,7 @@ public class Skavenblight {
         // Add this line right below your other addListener calls in the constructor!
         modEventBus.addListener(this::registerCapabilities);
         ModMenus.register(modEventBus);
+
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -175,6 +178,12 @@ public class Skavenblight {
                 org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_FURNACE.get(),
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
+        event.registerBlockEntity(
+                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
+                org.ratden.skavenblight.block.entity.ModBlockEntities.PISTON_SPIKE_TRAP.get(),
+                // This tells the network exactly how to access the trap's internal buffer:
+                (blockEntity, side) -> blockEntity.getFluxStorage()
+        );
     }
 
     //Warp flux network
@@ -185,4 +194,5 @@ public class Skavenblight {
             manager.tickNetworks(serverLevel);
         }
     }
+
 }

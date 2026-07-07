@@ -22,7 +22,8 @@ public class ModBlockTagProvider extends BlockTagsProvider {
                 .add(ModBlocks.BLOCK_OF_WARPSTONE.get())
                 .add(ModBlocks.WARPSTONE_ORE.get())
                 .add(ModBlocks.WARPSTONE_ORE_DEEPSLATE.get())
-                .add(ModBlocks.WARP_FLUX_CONDUIT.get());
+                .add(ModBlocks.WARP_FLUX_CONDUIT.get())
+                .add(ModBlocks.PISTON_SPIKE_TRAP.get());
 
         tag(BlockTags.NEEDS_DIAMOND_TOOL)
                 .add(ModBlocks.WARPSTONE_ORE.get())

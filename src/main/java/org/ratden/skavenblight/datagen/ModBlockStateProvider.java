@@ -70,6 +70,14 @@ public class ModBlockStateProvider extends BlockStateProvider {
                 "warp_flux_furnace_top",
                 "warp_flux_furnace_front",
                 "warp_flux_furnace_front_on");
+
+        // Create an empty "dummy" model for the Spike Trap since GeckoLib renders the real one.
+        // We assign a texture to it purely so Minecraft knows what particles to spawn when you break it!
+        ModelFile trapModel = models().getBuilder("piston_spike_trap")
+                .texture("particle", modLoc("block/spike_piston")); // Use the name of your trap's texture file!
+
+        // Generate the blockstate allowing it to face all 6 directions
+        directionalBlock(ModBlocks.PISTON_SPIKE_TRAP.get(), trapModel);
     }
 
     public void makeConduit(DeferredBlock<?> block, String baseName) {

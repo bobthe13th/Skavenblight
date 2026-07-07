@@ -49,6 +49,13 @@ public class ModBlockEntities {
                     BlockEntityType.Builder.of(WarpFluxFurnaceBlockEntity::new, ModBlocks.WARP_FLUX_FURNACE.get())
                             .build(null));
 
+    public static final java.util.function.Supplier<net.minecraft.world.level.block.entity.BlockEntityType<org.ratden.skavenblight.block.entity.PistonSpikeTrapBlockEntity>> PISTON_SPIKE_TRAP =
+            BLOCK_ENTITIES.register("piston_spike_trap", () ->
+                    net.minecraft.world.level.block.entity.BlockEntityType.Builder.of(
+                            org.ratden.skavenblight.block.entity.PistonSpikeTrapBlockEntity::new,
+                            org.ratden.skavenblight.block.ModBlocks.PISTON_SPIKE_TRAP.get()
+                    ).build(null));
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }
