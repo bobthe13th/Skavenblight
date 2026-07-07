@@ -31,7 +31,8 @@ public class DebugIncursionCommands {
                                                 context.getSource(),
                                                 StringArgumentType.getString(context, "scenario_id"),
                                                 IntegerArgumentType.getInteger(context, "count")
-                                        )))));
+                                        )))))
+                .then(DebugIncursionLoadTest.register());
     }
 
     private static int startScenario(CommandSourceStack source, String scenarioId, int count) {

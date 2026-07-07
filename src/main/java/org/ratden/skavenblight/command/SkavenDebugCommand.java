@@ -10,7 +10,6 @@ public class SkavenDebugCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
                 Commands.literal("skavendebug")
-                        .then(DebugSpawnCommands.register())
                         .then(DebugDifficultyCommands.register())
                         .then(DebugIncursionCommands.register())
                         .then(DebugCleanupCommands.register())
@@ -20,5 +19,3 @@ public class SkavenDebugCommand {
         );
     }
 }
-
-

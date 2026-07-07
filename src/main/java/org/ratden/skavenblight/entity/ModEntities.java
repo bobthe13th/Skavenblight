@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.entity;
 
+import net.minecraft.client.renderer.entity.CatRenderer;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
@@ -11,6 +12,7 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.entity.client.ClanratRenderer;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
+import org.ratden.skavenblight.entity.custom.wolfCat.WolfCat;
 import org.ratden.skavenblight.entity.custom.WolfRat;
 import org.ratden.skavenblight.Skavenblight;
 
@@ -24,6 +26,13 @@ public class ModEntities {
                     EntityType.Builder.<WolfRat>of(WolfRat::new, MobCategory.MONSTER)
                             .sized(0.5F, 0.7F)
                             .build(Skavenblight.MODID + ":rat_wolf")
+            );
+
+    public static final DeferredHolder<EntityType<?>, EntityType<WolfCat>> WOLF_CAT =
+            ENTITY_TYPES.register("wolf_cat", () ->
+                    EntityType.Builder.<WolfCat>of(WolfCat::new, MobCategory.MONSTER)
+                            .sized(0.6F, 0.7F)
+                            .build(Skavenblight.MODID + ":wolf_cat")
             );
 
 
@@ -43,6 +52,7 @@ public class ModEntities {
 
             // Registers the RatWolf renderer so it isn't invisible either!
             event.registerEntityRenderer(ModEntities.RAT_WOLF.get(), org.ratden.skavenblight.entity.client.RatWolfRenderer::new);
+            event.registerEntityRenderer(ModEntities.WOLF_CAT.get(), CatRenderer::new);
         }
     }
 }
