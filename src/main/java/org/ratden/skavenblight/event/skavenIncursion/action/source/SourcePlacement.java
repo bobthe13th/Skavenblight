@@ -1,9 +1,9 @@
-package org.ratden.skavenblight.event.skavenIncursion.action.source.generic;
+package org.ratden.skavenblight.event.skavenIncursion.action.source;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.block.ModBlocks;
-import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 
 public class SourcePlacement {
 

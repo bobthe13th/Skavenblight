@@ -6,6 +6,9 @@ public interface IncursionOwnedMob {
     void setScenarioId(UUID scenarioId);
     UUID getScenarioId();
 
+    void setSourceId(UUID sourceId);
+    UUID getSourceId();
+
     void setPackId(UUID packId);
     UUID getPackId();
 

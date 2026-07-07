@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.scenario.generic;
+package org.ratden.skavenblight.event.skavenIncursion.scenario.tutorial;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -9,7 +9,6 @@ import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWol
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SetSourceState;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SourcePlacement;
-import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.director.OverlapType;
 import org.ratden.skavenblight.event.skavenIncursion.director.PressureProfile;
@@ -21,30 +20,30 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
-import org.ratden.skavenblight.world.SkavenblightWorldData;
 
 import java.util.EnumSet;
 import java.util.UUID;
 
-public class WolfRatAssault implements SkavenScenario {
+public class TutorialCampAttack implements SkavenScenario {
     public static final ScenarioDefinition DEFINITION = new ScenarioDefinition(
-            "wolf_rat_assault",
-            ScenarioPattern.ASSAULT,
+            "tutorial_camp_attack",
+            ScenarioPattern.AMBUSH,
             ScenarioGoal.PRESSURE,
             OverlapType.MAJOR,
             PressureProfile.COMBAT,
             EnumSet.of(
-                    IncursionTargetType.PLAYER,
-                    IncursionTargetType.NEXUS
+                    IncursionTargetType.PLAYER
             ),
             0,
             -1,
-            100,
-            24000L,
-            true,
+            0,
+            0L,
+            false,
             true,
             false
     );
+
+    private static final int WOLF_RAT_COUNT = 3;
 
     private final UUID instanceId;
     private final LeadershipRegistry leadershipRegistry;
@@ -55,14 +54,11 @@ public class WolfRatAssault implements SkavenScenario {
     private final BlockPos sourcePos;
     private final IncursionTargetType targetType;
 
-    private final int wolfRatCount;
-    private final int poisonAttackChancePercent;
-
     private UUID sourceId;
     private int elapsedTicks;
     private boolean finished;
 
-    public WolfRatAssault(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
+    public TutorialCampAttack(ServerLevel level, BlockPos targetPos, IncursionTargetType targetType) {
         this.instanceId = UUID.randomUUID();
         this.leadershipRegistry = new LeadershipRegistry(instanceId);
 
@@ -73,11 +69,12 @@ public class WolfRatAssault implements SkavenScenario {
 
         this.level = level;
         this.targetPos = targetPos.immutable();
-        this.sourcePos = SourcePlacement.forAssault(level, targetPos, targetType).immutable();
-        this.targetType = targetType;
-
-        this.wolfRatCount = calculateWolfRatCount(level, targetType);
-        this.poisonAttackChancePercent = calculatePoisonAttackChancePercent(level);
+        this.targetType = IncursionTargetType.PLAYER;
+        this.sourcePos = SourcePlacement.forAssault(
+                level,
+                targetPos,
+                IncursionTargetType.PLAYER
+        ).immutable();
 
         this.sourceId = null;
         this.elapsedTicks = 0;
@@ -109,68 +106,24 @@ public class WolfRatAssault implements SkavenScenario {
     }
 
     public static String getDebugName() {
-        return "Wolf Rat Assault";
+        return "Tutorial Camp Attack";
     }
 
-    public static int getThreatBudgetMultiplierPercent(IncursionTargetType targetType) {
-        if (targetType == IncursionTargetType.NEXUS) {
-            return 20;
-        }
-
-        return 15;
-    }
-
-    public static int calculateThreatBudget(ServerLevel level, IncursionTargetType targetType) {
-        int threat = SkavenblightWorldData.get(level).getThreat();
-        int multiplierPercent = getThreatBudgetMultiplierPercent(targetType);
-
-        return Math.max(1, roundUpPercent(threat, multiplierPercent));
-    }
-
-    public static int calculateWolfRatCount(ServerLevel level, IncursionTargetType targetType) {
-        int threatBudget = calculateThreatBudget(level, targetType);
-
-        return Math.max(1, threatBudget / IncursionCosts.WOLF_RAT);
-    }
-
-    public static int getComplexityBudgetMultiplier() {
-        return 2;
-    }
-
-    public static int calculateComplexityBudget(ServerLevel level) {
-        int schemeComplexity = SkavenblightWorldData.get(level).getSchemeComplexity();
-
-        return schemeComplexity * getComplexityBudgetMultiplier();
-    }
-
-    public static int calculatePoisonAttackChancePercent(ServerLevel level) {
-        int complexityBudget = calculateComplexityBudget(level);
-
-        return Math.min(100, complexityBudget * 10);
-    }
-
-    private static int roundUpPercent(int value, int percent) {
-        return (value * percent + 99) / 100;
-    }
-
-    public static String getDebugSummary(ServerLevel level, IncursionTargetType targetType) {
-        return "Wolf Rat Assault"
-                + "\nTarget type: " + targetType
-                + "\nThreat budget: " + calculateThreatBudget(level, targetType)
-                + "\nWolf rat cost: " + IncursionCosts.WOLF_RAT
-                + "\nWolf rats: " + calculateWolfRatCount(level, targetType)
-                + "\nComplexity budget: " + calculateComplexityBudget(level)
-                + "\nPoison attack chance: " + calculatePoisonAttackChancePercent(level) + "%"
-                + "\nNote: poison attack chance is calculated but not implemented yet.";
+    public static String getDebugSummary() {
+        return "Tutorial Camp Attack"
+                + "\nTarget type: PLAYER"
+                + "\nWolf rats: " + WOLF_RAT_COUNT
+                + "\nScaling: none"
+                + "\nRepeat: advancement-limited / metadata says false";
     }
 
     public static String getDebugTimeline() {
         return "Timeline: "
                 + "tick 1 digging sound, "
-                + "tick 20 growl + tunnel appears, "
-                + "tick 100 wolf rats spawn, "
-                + "tick 160 tunnel collapses, "
-                + "tick 180 assault ends";
+                + "tick 30 tunnel appears, "
+                + "tick 70 wolf rats spawn, "
+                + "tick 150 tunnel collapses, "
+                + "tick 170 attack ends";
     }
 
     @Override
@@ -184,11 +137,11 @@ public class WolfRatAssault implements SkavenScenario {
                     SoundEvents.GRAVEL_BREAK,
                     SoundSource.HOSTILE,
                     2f,
-                    0.8f
+                    0.7f
             );
         }
 
-        if (elapsedTicks == 20) {
+        if (elapsedTicks == 30) {
             level.playSound(
                     null,
                     sourcePos,
@@ -206,21 +159,21 @@ public class WolfRatAssault implements SkavenScenario {
             );
         }
 
-        if (elapsedTicks == 100) {
+        if (elapsedTicks == 70) {
             SpawnWolfRats.execute(
                     level,
                     sourcePos,
-                    wolfRatCount,
+                    WOLF_RAT_COUNT,
                     leadershipRegistry.createPackContext(packGroup),
                     sourceId
             );
         }
 
-        if (elapsedTicks == 160) {
+        if (elapsedTicks == 150) {
             SetSourceState.execute(level, sourcePos, SourceState.COLLAPSED);
         }
 
-        if (elapsedTicks == 180) {
+        if (elapsedTicks == 170) {
             finished = true;
         }
     }

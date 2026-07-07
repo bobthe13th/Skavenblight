@@ -1,21 +1,23 @@
-package org.ratden.skavenblight.event.skavenIncursion.scheme.chieftainTest;
+package org.ratden.skavenblight.event.skavenIncursion.scheme.tutorial;
 
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.generic.WolfRatAssault;
 import org.ratden.skavenblight.event.skavenIncursion.scheme.SkavenScheme;
 
 import java.util.List;
 
-public class ChieftainTestScheme implements SkavenScheme {
+public class TutorialScheme implements SkavenScheme {
 
     // 1. Identity
 
     @Override
     public String getId() {
-        return "chieftain_test";
+        return "tutorial";
     }
 
     @Override
     public String getDisplayName() {
-        return "Warmongering Chieftain (Test)";
+        return "Tutorial";
     }
 
     @Override
@@ -62,27 +64,31 @@ public class ChieftainTestScheme implements SkavenScheme {
 
         if (schemeProgress >= 70) {
             return List.of(
-                    "chieftain_raid_late"
+                    "tutorial_raid_late"
             );
         }
 
         if (schemeProgress >= 46) {
             return List.of(
-                    "chieftain_assault_early",
-                    "chieftain_raid_early"
+                    "tutorial_assault_early"
             );
         }
 
         if (schemeProgress >= 23) {
             return List.of(
-                    "wolf_rat_assault",
-                    "chieftain_assault_early"
+                    WolfRatAssault.id(),
+                    "tutorial_assault_early"
             );
         }
 
         return List.of(
-                "wolf_rat_assault"
+                WolfRatAssault.id()
         );
+    }
+
+    @Override
+    public int getScenarioWeightModifierPercent(ScenarioDefinition scenarioDefinition) {
+        return 100;
     }
 
     // 5. Available events
@@ -110,6 +116,6 @@ public class ChieftainTestScheme implements SkavenScheme {
 
     @Override
     public String getFinalScenarioId() {
-        return "chieftain_finale";
+        return "tutorial_finale";
     }
 }

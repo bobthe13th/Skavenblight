@@ -9,12 +9,12 @@ import java.util.EnumSet;
 
 public class AttackBlockGoal extends Goal {
 
-    private final RatWolf ratwolf;
+    private final WolfRat ratwolf;
     private final Block targetBlock;
     private BlockPos targetPos;
     private int searchCooldown;
 
-    public AttackBlockGoal(RatWolf ratwolf) {
+    public AttackBlockGoal(WolfRat ratwolf) {
         this.ratwolf = ratwolf;
         this.targetBlock = Blocks.DIAMOND_BLOCK;
         // Stagger the first search across the cooldown window so a wave of

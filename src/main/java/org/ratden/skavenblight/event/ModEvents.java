@@ -7,7 +7,7 @@ import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.command.SkavenDebugCommand;
 import org.ratden.skavenblight.entity.ModEntities;
-import org.ratden.skavenblight.entity.custom.RatWolf;
+import org.ratden.skavenblight.entity.custom.WolfRat;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.capabilities.Capabilities; // Added for ItemHandler capability
 import org.ratden.skavenblight.capability.ModCapabilities;
@@ -27,7 +27,7 @@ public class ModEvents {
 
     @SubscribeEvent
     public static void onAttributeCreate(EntityAttributeCreationEvent event) {
-        event.put(ModEntities.RAT_WOLF.get(), RatWolf.createAttributes().build());
+        event.put(ModEntities.RAT_WOLF.get(), WolfRat.createAttributes().build());
     }
 
     @SubscribeEvent

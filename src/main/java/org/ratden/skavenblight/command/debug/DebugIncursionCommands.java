@@ -9,8 +9,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import org.ratden.skavenblight.event.skavenIncursion.ActiveIncursionManager;
-import org.ratden.skavenblight.event.skavenIncursion.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.director.ActiveIncursionManager;
+import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioRegistry;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.NexusTracker;
@@ -31,7 +31,8 @@ public class DebugIncursionCommands {
                                                 context.getSource(),
                                                 StringArgumentType.getString(context, "scenario_id"),
                                                 IntegerArgumentType.getInteger(context, "count")
-                                        )))));
+                                        )))))
+                .then(DebugIncursionLoadTest.register());
     }
 
     private static int startScenario(CommandSourceStack source, String scenarioId, int count) {

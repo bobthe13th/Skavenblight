@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.action.source.generic;
+package org.ratden.skavenblight.event.skavenIncursion.action.source;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
