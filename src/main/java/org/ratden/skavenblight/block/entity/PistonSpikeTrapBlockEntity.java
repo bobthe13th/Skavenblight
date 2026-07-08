@@ -58,14 +58,15 @@ public class PistonSpikeTrapBlockEntity extends BlockEntity implements GeoBlockE
 
     // --- MAIN TICK LOGIC ---
     public static void tick(Level level, BlockPos pos, BlockState state, PistonSpikeTrapBlockEntity entity) {
-        if (level.isClientSide()) return;
-
-        // Decrease the thrust animation delay
+        // Decrease the animation delay timer on BOTH the Server and the Client!
         if (entity.damageDelayTicks > 0) {
             entity.damageDelayTicks--;
         }
 
-        // Handle Cooldown & Retraction
+        // NOW we can stop the client from running the damage and power logic
+        if (level.isClientSide()) return;
+
+        // Handle Server Cooldown & Retraction logic
         if (entity.cooldown > 0) {
             entity.cooldown--;
             // Retract exactly when cooldown finishes

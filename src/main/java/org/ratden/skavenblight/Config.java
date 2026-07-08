@@ -12,8 +12,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-// An example config class. This is not required, but it's a good idea to have one to keep your config organized.
-// Demonstrates how to use Neo's config APIs
 @SuppressWarnings("removal")
 @EventBusSubscriber(modid = Skavenblight.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class Config {
@@ -41,6 +39,10 @@ public class Config {
     private static final ModConfigSpec.IntValue TIER_2_GENERATION = BUILDER.comment("Tier 2 Nexus Flux Generation per tick")
             .defineInRange("tier2Generation", 10000, 0, Integer.MAX_VALUE);
 
+    // --- AI and Incursions Configs ---
+    private static final ModConfigSpec.IntValue TERRITORY_CHUNK_RADIUS = BUILDER.comment("The radius (in chunks) around Warp Flux conduits that defines the base's territory for AI flow-field generation.")
+            .defineInRange("territoryChunkRadius", 2, 0, 16);
+
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
 
@@ -59,6 +61,9 @@ public class Config {
     public static int tier2Capacity;
     public static int tier2Generation;
 
+    // --- AI and Incursions Public Variables ---
+    public static int territoryChunkRadius;
+
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
     }
@@ -76,6 +81,9 @@ public class Config {
         tier1Generation = TIER_1_GENERATION.get();
         tier2Capacity = TIER_2_CAPACITY.get();
         tier2Generation = TIER_2_GENERATION.get();
+
+        // Load AI Configs
+        territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();
 
         // convert the list of strings into a set of items
         items = ITEM_STRINGS.get().stream().map(itemName -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemName))).collect(Collectors.toSet());
