@@ -234,7 +234,9 @@ public class WarpFluxGridManager extends SavedData {
         }
         return manager;
     }
-
+    public Collection<WarpFluxNetwork> getAllNetworks() {
+        return this.networks.values();
+    }
     public void tickNetworks(ServerLevel level) {
         for (WarpFluxNetwork network : networks.values()) {
             network.tick(level);

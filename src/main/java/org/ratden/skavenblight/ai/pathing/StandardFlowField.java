@@ -107,4 +107,7 @@ public class StandardFlowField {
         }
         return bestDir;
     }
+    public Map<BlockPos, Integer> getCostMap() {
+        return this.costMap;
+    }
 }
