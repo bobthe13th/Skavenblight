@@ -1,7 +1,6 @@
 package org.ratden.skavenblight.network.payload;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -16,7 +15,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, Direction> directions) implements CustomPacketPayload {
+// --- CHANGED: directions Map is now nodes Map<BlockPos, BlockPos> ---
+public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, BlockPos> nodes) implements CustomPacketPayload {
 
     public static final Type<SyncFlowFieldDebugPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "sync_flow_field_debug"));
 
@@ -25,7 +25,7 @@ public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, Dire
     );
 
     private SyncFlowFieldDebugPayload(FriendlyByteBuf buf) {
-        this(readChunks(buf), readDirections(buf));
+        this(readChunks(buf), readNodes(buf));
     }
 
     private void write(FriendlyByteBuf buf) {
@@ -34,10 +34,11 @@ public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, Dire
             buf.writeInt(chunk.x);
             buf.writeInt(chunk.z);
         }
-        buf.writeInt(directions.size());
-        for (Map.Entry<BlockPos, Direction> entry : directions.entrySet()) {
+        buf.writeInt(nodes.size());
+        // --- CHANGED: Write the target BlockPos instead of the Direction enum ---
+        for (Map.Entry<BlockPos, BlockPos> entry : nodes.entrySet()) {
             buf.writeBlockPos(entry.getKey());
-            buf.writeEnum(entry.getValue());
+            buf.writeBlockPos(entry.getValue());
         }
     }
 
@@ -50,11 +51,12 @@ public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, Dire
         return set;
     }
 
-    private static Map<BlockPos, Direction> readDirections(FriendlyByteBuf buf) {
-        Map<BlockPos, Direction> map = new HashMap<>();
+    // --- CHANGED: Read BlockPos from the buffer ---
+    private static Map<BlockPos, BlockPos> readNodes(FriendlyByteBuf buf) {
+        Map<BlockPos, BlockPos> map = new HashMap<>();
         int size = buf.readInt();
         for (int i = 0; i < size; i++) {
-            map.put(buf.readBlockPos(), buf.readEnum(Direction.class));
+            map.put(buf.readBlockPos(), buf.readBlockPos());
         }
         return map;
     }
@@ -63,6 +65,7 @@ public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, Dire
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
 
     public static void handle(final SyncFlowFieldDebugPayload payload, final IPayloadContext context) {
-        context.enqueueWork(() -> ClientDebugData.update(payload.chunks(), payload.directions()));
+        // Pass the updated payload.nodes() into ClientDebugData
+        context.enqueueWork(() -> ClientDebugData.update(payload.chunks(), payload.nodes()));
     }
 }

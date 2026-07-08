@@ -5,7 +5,6 @@ import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
@@ -13,8 +12,9 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.item.ModItems; // Adjust to your item registry path
+import org.ratden.skavenblight.item.ModItems;
 import net.minecraft.world.level.ChunkPos;
+import com.mojang.blaze3d.vertex.BufferUploader;
 
 import java.util.Map;
 
@@ -23,14 +23,16 @@ public class ClientRenderHandler {
 
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
-        // We render after all standard block outlines are drawn
+        var camera = net.minecraft.client.Minecraft.getInstance().gameRenderer.getMainCamera();
+        net.minecraft.world.phys.Vec3 camPos = camera.getPosition();
+        org.joml.Matrix4f pose = event.getPoseStack().last().pose();
+
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
 
         Minecraft mc = Minecraft.getInstance();
         Player player = mc.player;
         if (player == null) return;
 
-        // Only render if the player is holding our debug tool
         boolean holdingReader = player.getMainHandItem().is(ModItems.DEBUG_FLOW_FIELD_READER.get())
                 || player.getOffhandItem().is(ModItems.DEBUG_FLOW_FIELD_READER.get());
         if (!holdingReader) return;
@@ -41,92 +43,163 @@ public class ClientRenderHandler {
         poseStack.pushPose();
         poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
 
-        // Prepare our line rendering configurations
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.lineWidth(3.0F); // Nice thick lines
+        RenderSystem.lineWidth(3.0F);
 
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
 
         // 1. DRAW SUPERIMPOSED CHUNK BORDERS (Purple)
-        RenderSystem.disableDepthTest(); // This makes lines see-through/superimposed!
+        RenderSystem.disableDepthTest();
         for (ChunkPos chunk : ClientDebugData.territoryChunks) {
             if (player.chunkPosition().getChessboardDistance(chunk) <= 3) {
-                drawChunkColumns(buffer, chunk);
+                drawChunkColumns(pose, buffer, chunk, ClientDebugData.territoryChunks, camPos);
             }
         }
-        tesselator.clear(); // Flush buffer
+        var meshData = buffer.build();
+        if (meshData != null) {
+            BufferUploader.drawWithShader(meshData);
+        }
 
         // 2. DRAW FLOW FIELD ARROWS ON THE FLOOR (Green)
-        RenderSystem.enableDepthTest(); // Re-enable depth testing so arrows hide under blocks naturally
+        RenderSystem.enableDepthTest();
         buffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
 
-        for (Map.Entry<BlockPos, Direction> entry : ClientDebugData.flowFieldDirections.entrySet()) {
+        // --- CHANGED: Now iterates over a Map of <BlockPos, BlockPos> ---
+        for (Map.Entry<BlockPos, BlockPos> entry : ClientDebugData.flowFieldNodes.entrySet()) {
             BlockPos pos = entry.getKey();
             if (pos.closerThan(player.blockPosition(), 16)) {
-                drawFloorArrow(buffer, pos, entry.getValue());
+                drawFloorArrow(pose, buffer, pos, entry.getValue(), camPos);
             }
         }
-        tesselator.clear();
+
+        var arrowMeshData = buffer.build();
+        if (arrowMeshData != null) {
+            BufferUploader.drawWithShader(arrowMeshData);
+        }
 
         RenderSystem.disableBlend();
         poseStack.popPose();
     }
 
-    private static void drawChunkColumns(BufferBuilder buffer, ChunkPos chunk) {
-        int minX = chunk.getMinBlockX();
-        int minZ = chunk.getMinBlockZ();
-        int maxX = chunk.getMaxBlockX() + 1;
-        int maxZ = chunk.getMaxBlockZ() + 1;
+    private static void drawChunkColumns(org.joml.Matrix4f pose, com.mojang.blaze3d.vertex.BufferBuilder buffer, net.minecraft.world.level.ChunkPos chunk, java.util.Set<net.minecraft.world.level.ChunkPos> territoryChunks, net.minecraft.world.phys.Vec3 camPos) {
+        int rB = 150, gB = 0, bB = 255, aB = 255;
 
-        // Draw a transparent 3D bounding frame spanning from void to sky limit
-        int r = 150, g = 0, b = 255, a = 255; // Dark Magenta/Purple
+        float minY = (float) (-64 - camPos.y());
+        float maxY = (float) (320 - camPos.y());
 
-        for (int y = -64; y <= 320; y += 32) {
-            // Horizontal square rings every 32 blocks up
-            buffer.addVertex(minX, y, minZ).setColor(r, g, b, a); buffer.addVertex(maxX, y, minZ).setColor(r, g, b, a);
-            buffer.addVertex(maxX, y, minZ).setColor(r, g, b, maxZ).setColor(r, g, b, a);
-            buffer.addVertex(maxX, y, maxZ).setColor(r, g, b, a); buffer.addVertex(minX, y, maxZ).setColor(r, g, b, a);
-            buffer.addVertex(minX, y, maxZ).setColor(r, g, b, a); buffer.addVertex(minX, y, minZ).setColor(r, g, b, a);
+        float startX = (float) ((chunk.x * 16) - camPos.x());
+        float startZ = (float) ((chunk.z * 16) - camPos.z());
+        float endX = startX + 16f;
+        float endZ = startZ + 16f;
+
+        if (!territoryChunks.contains(new net.minecraft.world.level.ChunkPos(chunk.x, chunk.z - 1))) {
+            buffer.addVertex(pose, startX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, startZ).setColor(rB, gB, bB, aB);
         }
-        // Vertical corner columns
-        buffer.addVertex(minX, -64, minZ).setColor(r, g, b, a); buffer.addVertex(minX, 320, minZ).setColor(r, g, b, a);
-        buffer.addVertex(maxX, -64, minZ).setColor(r, g, b, a); buffer.addVertex(maxX, 320, minZ).setColor(r, g, b, a);
-        buffer.addVertex(maxX, -64, maxZ).setColor(r, g, b, a); buffer.addVertex(maxX, 320, maxZ).setColor(r, g, b, a);
-        buffer.addVertex(minX, -64, maxZ).setColor(r, g, b, a); buffer.addVertex(minX, 320, maxZ).setColor(r, g, b, a);
+
+        if (!territoryChunks.contains(new net.minecraft.world.level.ChunkPos(chunk.x, chunk.z + 1))) {
+            buffer.addVertex(pose, startX, minY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, minY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, endZ).setColor(rB, gB, bB, aB);
+        }
+
+        if (!territoryChunks.contains(new net.minecraft.world.level.ChunkPos(chunk.x - 1, chunk.z))) {
+            buffer.addVertex(pose, startX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, minY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, startX, minY, endZ).setColor(rB, gB, bB, aB);
+        }
+
+        if (!territoryChunks.contains(new net.minecraft.world.level.ChunkPos(chunk.x + 1, chunk.z))) {
+            buffer.addVertex(pose, endX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, maxY, endZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, startZ).setColor(rB, gB, bB, aB);
+            buffer.addVertex(pose, endX, minY, endZ).setColor(rB, gB, bB, aB);
+        }
     }
 
-    private static void drawFloorArrow(BufferBuilder buffer, BlockPos pos, Direction dir) {
-        double x = pos.getX() + 0.5;
-        double z = pos.getZ() + 0.5;
-        double y = pos.getY() + 1.02; // Elevated slightly above the block face to prevent z-fighting textures
+    private static void drawFloorArrow(org.joml.Matrix4f pose, BufferBuilder buffer, BlockPos pos, BlockPos targetNode, net.minecraft.world.phys.Vec3 camPos) {
+        // Find the difference vector between blocks
+        float dx = targetNode.getX() - pos.getX();
+        float dy = targetNode.getY() - pos.getY();
+        float dz = targetNode.getZ() - pos.getZ();
 
-        int r = 0, g = 255, b = 100, a = 255; // Bright Warpstone Green
+        float x = (float) ((pos.getX() + 0.5) - camPos.x());
+        float z = (float) ((pos.getZ() + 0.5) - camPos.z());
+        float y = (float) ((pos.getY() + 0.02) - camPos.y());
 
-        // Draw the main pointer stem line
-        double startX = x - (dir.getStepX() * 0.3);
-        double startZ = z - (dir.getStepZ() * 0.3);
-        double endX = x + (dir.getStepX() * 0.4);
-        double endZ = z + (dir.getStepZ() * 0.4);
+        int r = 0, g = 255, b = 100, a = 255;
 
-        buffer.addVertex((float) startX, (float) y, (float) startZ).setColor(r, g, b, a);
-        buffer.addVertex((float) endX, (float) y, (float) endZ).setColor(r, g, b, a);
+        // If it's a purely vertical drop/climb, draw an indicator
+        if (dx == 0 && dz == 0) {
+            float s = 0.2f;
+            if (dy > 0) {
+                buffer.addVertex(pose, x - s, y, z).setColor(r, g, b, a);
+                buffer.addVertex(pose, x + s, y, z).setColor(r, g, b, a);
+                buffer.addVertex(pose, x, y, z - s).setColor(r, g, b, a);
+                buffer.addVertex(pose, x, y, z + s).setColor(r, g, b, a);
+            } else {
+                buffer.addVertex(pose, x - s, y, z - s).setColor(r, g, b, a);
+                buffer.addVertex(pose, x + s, y, z + s).setColor(r, g, b, a);
+                buffer.addVertex(pose, x - s, y, z + s).setColor(r, g, b, a);
+                buffer.addVertex(pose, x + s, y, z - s).setColor(r, g, b, a);
+            }
+            return;
+        }
 
-        // Draw arrow wings pointing backwards from the tip
-        Direction leftWing = dir.getCounterClockWise();
-        double wingLeftX = endX - (dir.getStepX() * 0.2) + (leftWing.getStepX() * 0.2);
-        double wingLeftZ = endZ - (dir.getStepZ() * 0.2) + (leftWing.getStepZ() * 0.2);
+        // Normalize the vector so the arrow is a consistent length regardless of distance
+        float lengthXZ = (float) Math.sqrt(dx * dx + dz * dz);
+        float nx = dx / lengthXZ;
+        float nz = dz / lengthXZ;
 
-        buffer.addVertex((float) endX, (float) y, (float) endZ).setColor(r, g, b, a);
-        buffer.addVertex((float) wingLeftX, (float) y, (float) wingLeftZ).setColor(r, g, b, a);
+        float startX = x - (nx * 0.3f);
+        float startZ = z - (nz * 0.3f);
+        float endX = x + (nx * 0.4f);
+        float endZ = z + (nz * 0.4f);
 
-        Direction rightWing = dir.getClockWise();
-        double wingRightX = endX - (dir.getStepX() * 0.2) + (rightWing.getStepX() * 0.2);
-        double wingRightZ = endZ - (dir.getStepZ() * 0.2) + (rightWing.getStepZ() * 0.2);
+        // Draw the main shaft of the arrow
+        buffer.addVertex(pose, startX, y, startZ).setColor(r, g, b, a);
+        buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
 
-        buffer.addVertex((float) endX, (float) y, (float) endZ).setColor(r, g, b, a);
-        buffer.addVertex((float) wingRightX, (float) y, (float) wingRightZ).setColor(r, g, b, a);
+        // Calculate wings using a 2D rotation matrix (swept back 135 degrees)
+        float wingLength = 0.25f;
+        float cos135 = -0.7071f;
+        float sin135 = 0.7071f;
+
+        // Left Wing
+        float leftWingX = endX + (nx * cos135 - nz * sin135) * wingLength;
+        float leftWingZ = endZ + (nx * sin135 + nz * cos135) * wingLength;
+
+        buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
+        buffer.addVertex(pose, leftWingX, y, leftWingZ).setColor(r, g, b, a);
+
+        // Right Wing
+        float rightWingX = endX + (nx * cos135 - nz * -sin135) * wingLength;
+        float rightWingZ = endZ + (nx * -sin135 + nz * cos135) * wingLength;
+
+        buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
+        buffer.addVertex(pose, rightWingX, y, rightWingZ).setColor(r, g, b, a);
     }
 }

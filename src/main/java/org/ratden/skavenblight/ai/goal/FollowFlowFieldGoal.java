@@ -1,7 +1,6 @@
 package org.ratden.skavenblight.ai.goal;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
@@ -11,70 +10,45 @@ import java.util.EnumSet;
 public class FollowFlowFieldGoal extends Goal {
     private final PathfinderMob mob;
     private final double speedModifier;
-
-    // We leave this null until an Incursion assigns it
     private StandardFlowField flowField;
-    private int recalculateTimer;
+    private int recalculateCooldown = 0;
 
     public FollowFlowFieldGoal(PathfinderMob mob, double speedModifier) {
         this.mob = mob;
         this.speedModifier = speedModifier;
-        // This tells Minecraft this goal controls movement,
-        // preventing other movement goals from running at the same time.
+        // Flag this as a movement goal so it doesn't conflict with wandering
         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
     }
 
-    /**
-     * Called by the Incursion Manager to assign the map to this specific rat.
-     */
     public void setFlowField(StandardFlowField flowField) {
         this.flowField = flowField;
     }
 
     @Override
     public boolean canUse() {
-        // The mob will only try to follow a flow field if it actually has one.
-        // Otherwise, it falls back to its other goals (like wandering or attacking).
-        return this.flowField != null;
-    }
-
-    @Override
-    public boolean canContinueToUse() {
-        return this.flowField != null && this.mob.isAlive();
-    }
-
-    @Override
-    public void start() {
-        this.recalculateTimer = 0;
+        // Only run if we have a field and aren't currently fighting a player/golem
+        return this.flowField != null && this.mob.getTarget() == null;
     }
 
     @Override
     public void tick() {
-        if (this.flowField == null) return;
+        // We don't need to spam the navigator every single tick.
+        // Updating the path every 10 ticks (half a second) is plenty fast and saves CPU.
+        if (--this.recalculateCooldown <= 0) {
+            this.recalculateCooldown = 10;
 
-        // We only update the navigation target every 5 ticks (1/4th of a second).
-        // Recalculating every single tick causes mobs to stutter.
-        if (--this.recalculateTimer <= 0) {
-            this.recalculateTimer = 5;
+            // Get the exact 3D node from our upgraded Flow Field
+            BlockPos nextNode = this.flowField.getBestNextNode(this.mob.blockPosition());
 
-            BlockPos currentPos = this.mob.blockPosition();
-            Direction bestDir = this.flowField.getBestDirection(currentPos);
-
-            if (bestDir != null) {
-                // Determine the exact center of the block we need to step into
-                BlockPos targetPos = currentPos.relative(bestDir);
-
-                // We use vanilla navigation here so the mob still auto-jumps up stairs
-                // and steps over slabs naturally.
+            if (nextNode != null) {
+                // Tell the vanilla navigator to handle the smooth diagonal walking!
+                // We add 0.5 to X and Z to make them walk to the center of the block.
                 this.mob.getNavigation().moveTo(
-                        targetPos.getX() + 0.5,
-                        targetPos.getY(),
-                        targetPos.getZ() + 0.5,
+                        nextNode.getX() + 0.5D,
+                        nextNode.getY(),
+                        nextNode.getZ() + 0.5D,
                         this.speedModifier
                 );
-            } else {
-                // If there is no arrow (either they reached the target or got stuck), stop walking.
-                this.mob.getNavigation().stop();
             }
         }
     }

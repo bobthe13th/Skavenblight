@@ -33,12 +33,12 @@ public class ClanratAssault implements SkavenIncursion {
         this.elapsedTicks = 0;
         this.finished = false;
 
-        // --- NEW: INITIALIZE THE MAP BOUNDARIES ---
         WarpFluxNetwork network = WarpFluxGridManager.get(level).getNetworkAt(targetPos);
         if (network != null) {
-            this.flowField = new StandardFlowField(targetPos, network.getTerritoryChunks());
+            // Fetch the shared instance instead of using 'new'
+            this.flowField = network.getSharedFlowField(targetPos);
         } else {
-            // Safe fallback if somehow triggered without a network
+            // Fallback (Ideally this shouldn't happen)
             this.flowField = new StandardFlowField(targetPos, Collections.emptySet());
         }
     }
@@ -63,6 +63,9 @@ public class ClanratAssault implements SkavenIncursion {
     public void tick() {
         elapsedTicks++;
 
+        if (this.flowField != null) {
+            this.flowField.calculateMapIfNeeded(level);
+        }
         // --- NEW: UPDATE THE MAP EVERY SECOND ---
         // If a player builds a wall during the raid, the flow field adapts!
         if (elapsedTicks % 20 == 0) {

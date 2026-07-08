@@ -1,11 +1,9 @@
 package org.ratden.skavenblight.item.custom;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -28,8 +26,8 @@ public class DebugFlowFieldReaderItem extends Item {
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slotId, boolean isSelected) {
         if (!level.isClientSide() && isSelected && entity instanceof ServerPlayer serverPlayer) {
 
-            // Sync information twice a second (every 10 ticks)
-            if (level.getGameTime() % 10 == 0) {
+            // Sync information once a second (every 20 ticks) to reduce server/network load
+            if (level.getGameTime() % 20 == 0) {
                 ServerLevel serverLevel = (ServerLevel) level;
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
                 BlockPos playerPos = serverPlayer.blockPosition();
@@ -47,24 +45,29 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (activeNexus != null) {
-                            StandardFlowField debugField = new StandardFlowField(activeNexus, network.getTerritoryChunks());
-                            debugField.calculateMap(serverLevel);
+                            // Grab the shared instance from the network instead of creating a new one
+                            StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
 
-                            Map<BlockPos, Direction> localDirections = new HashMap<>();
-                            for (BlockPos pos : debugField.getCostMap().keySet()) {
+                            // Ask it to update (it will only do so if it hasn't updated recently)
+                            sharedField.calculateMapIfNeeded(serverLevel);
+
+                            // --- CHANGED: Map now tracks <BlockPos, BlockPos> instead of <BlockPos, Direction> ---
+                            Map<BlockPos, BlockPos> localNodes = new HashMap<>();
+                            for (BlockPos pos : sharedField.getCostMap().keySet()) {
                                 // Filter vectors strictly to a 16-block box around the player to keep payloads small
                                 if (pos.closerThan(playerPos, 16)) {
-                                    Direction bestDir = debugField.getBestDirection(pos);
-                                    if (bestDir != null) {
-                                        localDirections.put(pos, bestDir);
+                                    // --- CHANGED: Grab the next 3D pathing coordinate block ---
+                                    BlockPos nextNode = sharedField.getBestNextNode(pos);
+                                    if (nextNode != null) {
+                                        localNodes.put(pos, nextNode);
                                     }
                                 }
                             }
 
-                            // Dispatched straight to our client renderer!
+                            // Dispatched straight to our client renderer with the upgraded map!
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
-                                    localDirections
+                                    localNodes
                             ));
                             return;
                         }

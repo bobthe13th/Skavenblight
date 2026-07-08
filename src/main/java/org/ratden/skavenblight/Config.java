@@ -41,7 +41,7 @@ public class Config {
 
     // --- AI and Incursions Configs ---
     private static final ModConfigSpec.IntValue TERRITORY_CHUNK_RADIUS = BUILDER.comment("The radius (in chunks) around Warp Flux conduits that defines the base's territory for AI flow-field generation.")
-            .defineInRange("territoryChunkRadius", 2, 0, 16);
+            .defineInRange("territoryChunkRadius", 2, 0, 8);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);

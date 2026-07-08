@@ -11,7 +11,8 @@ import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
 import org.ratden.skavenblight.capability.ModCapabilities;
 import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
-
+import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import net.minecraft.core.BlockPos;
 import java.util.*;
 
 public class WarpFluxNetwork {
@@ -241,6 +242,25 @@ public class WarpFluxNetwork {
             case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
         };
     }
+    // Cache mapping a target Nexus to its specific flow field
+    private final Map<BlockPos, StandardFlowField> flowFields = new HashMap<>();
 
+    /**
+     * Gets the shared flow field for a specific Nexus.
+     * Everything (Rats, Debug Item, Incursions) should use this single instance.
+     */
+    public StandardFlowField getSharedFlowField(BlockPos targetNexus) {
+        return flowFields.computeIfAbsent(targetNexus, pos ->
+                new StandardFlowField(pos, this.getTerritoryChunks())
+        );
+    }
+
+    /**
+     * Call this whenever your base territory expands or shrinks
+     * so the maps know they need to be rebuilt!
+     */
+    public void clearFlowFields() {
+        this.flowFields.clear();
+    }
     private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
 }

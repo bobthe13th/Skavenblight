@@ -1,7 +1,6 @@
 package org.ratden.skavenblight.ai.goal;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -35,11 +34,12 @@ public class SmartBreachGoal extends Goal {
         if (this.flowField == null) return false;
 
         BlockPos currentPos = this.mob.blockPosition();
-        Direction bestDir = this.flowField.getBestDirection(currentPos);
 
-        if (bestDir == null) return false;
+        // --- CHANGED: Get the exact 3D node instead of a cardinal Direction ---
+        BlockPos nextFootPos = this.flowField.getBestNextNode(currentPos);
 
-        BlockPos nextFootPos = currentPos.relative(bestDir);
+        if (nextFootPos == null) return false;
+
         BlockPos nextHeadPos = nextFootPos.above();
 
         boolean footBlocked = this.mob.level().getBlockState(nextFootPos).blocksMotion();
