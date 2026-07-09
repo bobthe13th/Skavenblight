@@ -1,10 +1,13 @@
 package org.ratden.skavenblight.entity.custom;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
@@ -20,11 +23,17 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.player.Player;
+import org.ratden.skavenblight.network.WarpFluxGridManager;
+import org.ratden.skavenblight.network.WarpFluxNetwork;
+import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
-    // References to our Blockbench animation keys
+    // --- NEW: Track the current field locally and set up a scan interval ---
+    private StandardFlowField currentFlowField = null;
+    private int territoryCheckCooldown = 0;
+
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
     protected static final RawAnimation FALL = RawAnimation.begin().thenLoop("animation.clanrat.fall");
@@ -34,29 +43,60 @@ public class ClanratEntity extends Monster implements GeoEntity {
         super(type, level);
     }
 
-    // --- NEW: AI GOAL REGISTRATION ---
     @Override
     protected void registerGoals() {
         super.registerGoals();
 
-        // 1. Core Survival Goals (Priority 0-1)
-        this.goalSelector.addGoal(0, new FloatGoal(this)); // Swim if in water
-        this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false)); // Attack if close to target
+        this.goalSelector.addGoal(0, new FloatGoal(this));
+        this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
 
-        // 2. Custom Flow Field Goal (Priority 2)
-        // High priority so it overrides wandering when assigned during an incursion.
         this.goalSelector.addGoal(2, new SmartBreachGoal(this));
         this.goalSelector.addGoal(2, new FollowFlowFieldGoal(this, 1.2D));
 
-        // 3. Fallback Vanilla Goals (Priority 7-8)
-        // If the rat spawns naturally (not in a raid), it will just wander around.
         this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
     }
 
-    // --- INCURSION MANAGER HELPER ---
+    // --- NEW: Dynamic Territory Hijacking ---
+    @Override
+    protected void customServerAiStep() {
+        super.customServerAiStep();
+
+        // Only run scanner if the rat is wild / not actively driven by an incursion field
+        if (this.currentFlowField == null && --this.territoryCheckCooldown <= 0) {
+            this.territoryCheckCooldown = 40; // Scan every 2 seconds (40 ticks) to save CPU
+
+            if (this.level() instanceof ServerLevel serverLevel) {
+                WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
+                ChunkPos currentChunk = this.chunkPosition();
+
+                for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+                    // Check if this random rat wandered into a base's territory
+                    if (network.getTerritoryChunks().contains(currentChunk)) {
+                        BlockPos activeNexus = null;
+
+                        for (BlockPos endpoint : network.getEndpoints()) {
+                            if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
+                                activeNexus = endpoint;
+                                break;
+                            }
+                        }
+
+                        // If the base has an active Nexus, hijack its flow field and attack!
+                        if (activeNexus != null) {
+                            StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
+                            this.assignFlowField(sharedField);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public void assignFlowField(StandardFlowField field) {
+        this.currentFlowField = field; // --- NEW: Store reference locally ---
         this.goalSelector.getAvailableGoals().forEach(wrappedGoal -> {
             if (wrappedGoal.getGoal() instanceof FollowFlowFieldGoal flowGoal) {
                 flowGoal.setFlowField(field);
