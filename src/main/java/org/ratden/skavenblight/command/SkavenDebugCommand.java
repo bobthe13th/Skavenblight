@@ -16,6 +16,7 @@ public class SkavenDebugCommand {
                         .then(DebugCleanupCommands.register())
                         .then(DebugSourceCommands.register())
                         .then(DebugNexusCommands.register())
+                        .then(DebugPathingCommands.register())
         );
     }
 }

@@ -34,20 +34,24 @@ public class SmartBreachGoal extends Goal {
         if (this.flowField == null) return false;
 
         BlockPos currentPos = this.mob.blockPosition();
-
-        // --- CHANGED: Get the exact 3D node instead of a cardinal Direction ---
         BlockPos nextFootPos = this.flowField.getBestNextNode(currentPos);
 
         if (nextFootPos == null) return false;
 
         BlockPos nextHeadPos = nextFootPos.above();
 
-        boolean footBlocked = this.mob.level().getBlockState(nextFootPos).blocksMotion();
-        boolean headBlocked = this.mob.level().getBlockState(nextHeadPos).blocksMotion();
+        // --- FIXED: Do not mine blocks that are meant for walking on! ---
+        BlockState footState = this.mob.level().getBlockState(nextFootPos);
+        boolean footBlocked = footState.blocksMotion()
+                && !footState.is(net.minecraft.world.level.block.Blocks.COBBLESTONE_STAIRS)
+                && !footState.is(net.minecraft.world.level.block.Blocks.COBBLESTONE);
 
-        // If either block is solid, we need to mine!
+        BlockState headState = this.mob.level().getBlockState(nextHeadPos);
+        boolean headBlocked = headState.blocksMotion()
+                && !headState.is(net.minecraft.world.level.block.Blocks.COBBLESTONE_STAIRS)
+                && !headState.is(net.minecraft.world.level.block.Blocks.COBBLESTONE);
+
         if (footBlocked || headBlocked) {
-            // Always mine the head block first to prevent suffocating if they step forward
             this.targetBlock = headBlocked ? nextHeadPos : nextFootPos;
             return true;
         }

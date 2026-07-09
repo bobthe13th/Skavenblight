@@ -3,45 +3,50 @@ package org.ratden.skavenblight.command.debug;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import org.ratden.skavenblight.event.skavenIncursion.SkavenDifficultyTracker;
 import org.ratden.skavenblight.event.skavenIncursion.SkavenIncursionHandler;
-import org.ratden.skavenblight.event.skavenIncursion.scenario.WolfRatAssault;
 
 public class DebugIncursionCommands {
 
     public static LiteralArgumentBuilder<CommandSourceStack> register() {
         return Commands.literal("incursion")
-                .then(Commands.literal("start_wolfrat_assault")
-                        .executes(context -> startWolfRatAssault(context.getSource())));
-    }
 
-    private static int startWolfRatAssault(CommandSourceStack source)
-            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+                // Command: /skavendebug incursion start clanrat_assault
+                .then(Commands.literal("start")
+                        .then(Commands.literal("clanrat_assault")
+                                .executes(context -> {
+                                    CommandSourceStack source = context.getSource();
+                                    ServerPlayer player = source.getPlayerOrException();
+                                    ServerLevel level = source.getLevel();
+                                    BlockPos pos = player.blockPosition();
 
-        ServerPlayer player = source.getPlayerOrException();
+                                    // Hand the assault off to the central ticking handler
+                                    SkavenIncursionHandler.startClanratAssault(level, pos);
 
-        int threat = SkavenDifficultyTracker.getThreat();
-        int complexity = SkavenDifficultyTracker.getComplexity();
-        int expectedWolfRats = WolfRatAssault.calculateWolfRatCount();
+                                    source.sendSuccess(() -> Component.literal(
+                                            "Initiated Clanrat Assault at " + pos.toShortString()
+                                    ), false);
+                                    return 1;
+                                }))
 
-        SkavenIncursionHandler.startWolfRatAssault(
-                player.serverLevel(),
-                player.blockPosition()
-        );
+                        // Command: /skavendebug incursion start wolf_rat_assault
+                        .then(Commands.literal("wolf_rat_assault")
+                                .executes(context -> {
+                                    CommandSourceStack source = context.getSource();
+                                    ServerPlayer player = source.getPlayerOrException();
+                                    ServerLevel level = source.getLevel();
+                                    BlockPos pos = player.blockPosition();
 
-        source.sendSuccess(
-                () -> Component.literal(
-                        "Started Wolf Rat Assault | Threat: " + threat
-                                + " | Complexity: " + complexity
-                                + " | Formula: 2 + threat/10"
-                                + " + 1 complexity bonus when complexity >= 1"
-                                + " | Expected wolf rats: " + expectedWolfRats
-                ),
-                false
-        );
+                                    // Hand the assault off to the central ticking handler
+                                    SkavenIncursionHandler.startWolfRatAssault(level, pos);
 
-        return 1;
+                                    source.sendSuccess(() -> Component.literal(
+                                            "Initiated Wolf Rat Assault at " + pos.toShortString()
+                                    ), false);
+                                    return 1;
+                                })));
     }
 }

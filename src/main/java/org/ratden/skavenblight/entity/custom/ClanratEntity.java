@@ -9,6 +9,7 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
+import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal; // --- NEW: Import the building goal ---
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -30,7 +31,6 @@ import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
-    // --- NEW: Track the current field locally and set up a scan interval ---
     private StandardFlowField currentFlowField = null;
     private int territoryCheckCooldown = 0;
 
@@ -50,29 +50,31 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
 
+        // --- FIXED: Stagger the priorities and inject the building goal ---
+        // 2: Breaching takes absolute precedence if blocked
         this.goalSelector.addGoal(2, new SmartBreachGoal(this));
-        this.goalSelector.addGoal(2, new FollowFlowFieldGoal(this, 1.2D));
+        // 3: Building takes precedence if there is a gap
+        this.goalSelector.addGoal(3, new BuildFlowFieldGoal(this));
+        // 4: Movement is the fallback priority when the path is clear
+        this.goalSelector.addGoal(4, new FollowFlowFieldGoal(this, 1.2D));
 
         this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
     }
 
-    // --- NEW: Dynamic Territory Hijacking ---
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
 
-        // Only run scanner if the rat is wild / not actively driven by an incursion field
         if (this.currentFlowField == null && --this.territoryCheckCooldown <= 0) {
-            this.territoryCheckCooldown = 40; // Scan every 2 seconds (40 ticks) to save CPU
+            this.territoryCheckCooldown = 40;
 
             if (this.level() instanceof ServerLevel serverLevel) {
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
                 ChunkPos currentChunk = this.chunkPosition();
 
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
-                    // Check if this random rat wandered into a base's territory
                     if (network.getTerritoryChunks().contains(currentChunk)) {
                         BlockPos activeNexus = null;
 
@@ -83,7 +85,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
                             }
                         }
 
-                        // If the base has an active Nexus, hijack its flow field and attack!
                         if (activeNexus != null) {
                             StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
                             this.assignFlowField(sharedField);
@@ -96,12 +97,16 @@ public class ClanratEntity extends Monster implements GeoEntity {
     }
 
     public void assignFlowField(StandardFlowField field) {
-        this.currentFlowField = field; // --- NEW: Store reference locally ---
+        this.currentFlowField = field;
         this.goalSelector.getAvailableGoals().forEach(wrappedGoal -> {
             if (wrappedGoal.getGoal() instanceof FollowFlowFieldGoal flowGoal) {
                 flowGoal.setFlowField(field);
             } else if (wrappedGoal.getGoal() instanceof SmartBreachGoal breachGoal) {
                 breachGoal.setFlowField(field);
+            }
+            // --- FIXED: Make sure the building goal receives the flow field map! ---
+            else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
+                buildGoal.setFlowField(field);
             }
         });
     }

@@ -3,6 +3,7 @@ package org.ratden.skavenblight.event.skavenIncursion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.ratden.skavenblight.event.skavenIncursion.scenario.ClanratAssault;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.WolfRatAssault;
 
 import java.util.ArrayList;
@@ -14,6 +15,11 @@ public class SkavenIncursionHandler {
 
     public static void startWolfRatAssault(ServerLevel level, BlockPos targetPos) {
         ACTIVE_INCURSIONS.add(new WolfRatAssault(level, targetPos));
+    }
+
+    // --- NEW: Add Clanrat Assault to the handler ---
+    public static void startClanratAssault(ServerLevel level, BlockPos targetPos) {
+        ACTIVE_INCURSIONS.add(new ClanratAssault(level, targetPos));
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -29,11 +35,10 @@ public class SkavenIncursionHandler {
             }
         }
     }
+
     public static int clearIncursions() {
         int count = ACTIVE_INCURSIONS.size();
-
         ACTIVE_INCURSIONS.clear();
-
         return count;
     }
 }

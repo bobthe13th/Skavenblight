@@ -63,15 +63,6 @@ public class ClanratAssault implements SkavenIncursion {
     public void tick() {
         elapsedTicks++;
 
-        if (this.flowField != null) {
-            this.flowField.calculateMapIfNeeded(level);
-        }
-        // --- NEW: UPDATE THE MAP EVERY SECOND ---
-        // If a player builds a wall during the raid, the flow field adapts!
-        if (elapsedTicks % 20 == 0) {
-            flowField.calculateMap(level);
-        }
-
         if (elapsedTicks == 1) {
             level.playSound(null, targetPos, SoundEvents.GRAVEL_BREAK, SoundSource.HOSTILE, 2f, 0.8f);
         }

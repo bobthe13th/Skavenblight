@@ -72,6 +72,12 @@ public class WarpFluxNetwork {
         transferPower(generators, consumers, level);
         transferPower(batteries, consumers, level);
         transferPower(generators, batteries, level);
+
+        // This ticks every flow field tied to this network.
+        // It safely respects the 40-tick cooldown built into calculateMapIfNeeded!
+        for (StandardFlowField field : this.flowFields.values()) {
+            field.calculateMapIfNeeded(level);
+        }
     }
     public void scanForEndpoints(ServerLevel level) {
         this.endpoints.clear();

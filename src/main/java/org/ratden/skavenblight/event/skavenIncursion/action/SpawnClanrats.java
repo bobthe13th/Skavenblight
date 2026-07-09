@@ -12,7 +12,6 @@ public class SpawnClanrats {
         int spawned = 0;
 
         for (int i = 0; i < count; i++) {
-            // Assuming your ModEntities has CLANRAT defined
             var clanrat = ModEntities.CLANRAT.get().create(level);
 
             if (clanrat == null) {
