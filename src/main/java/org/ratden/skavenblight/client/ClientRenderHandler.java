@@ -14,7 +14,7 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.item.ModItems;
 import net.minecraft.world.level.ChunkPos;
-import com.mojang.blaze3d.vertex.BufferUploader;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 
 import java.util.Map;
 
@@ -51,7 +51,6 @@ public class ClientRenderHandler {
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
 
-        // 1. DRAW SUPERIMPOSED CHUNK BORDERS (Purple)
         RenderSystem.disableDepthTest();
         for (ChunkPos chunk : ClientDebugData.territoryChunks) {
             if (player.chunkPosition().getChessboardDistance(chunk) <= 3) {
@@ -63,15 +62,16 @@ public class ClientRenderHandler {
             BufferUploader.drawWithShader(meshData);
         }
 
-        // 2. DRAW FLOW FIELD ARROWS ON THE FLOOR (Green)
         RenderSystem.enableDepthTest();
         buffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
 
-        // --- CHANGED: Now iterates over a Map of <BlockPos, BlockPos> ---
-        for (Map.Entry<BlockPos, BlockPos> entry : ClientDebugData.flowFieldNodes.entrySet()) {
+        for (Map.Entry<BlockPos, SiegeNode> entry : ClientDebugData.flowFieldNodes.entrySet()) {
             BlockPos pos = entry.getKey();
-            if (pos.closerThan(player.blockPosition(), 16)) {
-                drawFloorArrow(pose, buffer, pos, entry.getValue(), camPos);
+            SiegeNode node = entry.getValue();
+
+            // Render ALL nodes now, including the pre-planned Cyan BUILD arrows and Magenta MINE arrows
+            if (pos.closerThan(player.blockPosition(), 24)) {
+                drawFloorArrow(pose, buffer, pos, node, camPos);
             }
         }
 
@@ -140,8 +140,9 @@ public class ClientRenderHandler {
         }
     }
 
-    private static void drawFloorArrow(org.joml.Matrix4f pose, BufferBuilder buffer, BlockPos pos, BlockPos targetNode, net.minecraft.world.phys.Vec3 camPos) {
-        // Find the difference vector between blocks
+    private static void drawFloorArrow(org.joml.Matrix4f pose, BufferBuilder buffer, BlockPos pos, SiegeNode node, net.minecraft.world.phys.Vec3 camPos) {
+        BlockPos targetNode = node.pos();
+
         float dx = targetNode.getX() - pos.getX();
         float dy = targetNode.getY() - pos.getY();
         float dz = targetNode.getZ() - pos.getZ();
@@ -150,9 +151,51 @@ public class ClientRenderHandler {
         float z = (float) ((pos.getZ() + 0.5) - camPos.z());
         float y = (float) ((pos.getY() + 0.02) - camPos.y());
 
-        int r = 0, g = 255, b = 100, a = 255;
+        int r = 0, g = 255, b = 0, a = 255;
 
-        // If it's a purely vertical drop/climb, draw an indicator
+        switch (node.action()) {
+            case MINE -> { r = 255; g = 0; b = 255; }
+            case BUILD_BRIDGE, BUILD_STAIR -> { r = 0; g = 255; b = 255; }
+            case WALK -> {
+                int traffic = ClientDebugData.trafficMap.getOrDefault(pos, 1);
+
+                float ratio = (float) (Math.log(traffic) / Math.log(Math.max(2, ClientDebugData.maxTraffic)));
+                ratio = Math.min(1.0f, Math.max(0.0f, ratio));
+
+                if (ratio < 0.5f) {
+                    float normalized = ratio * 2.0f;
+                    r = (int) (255 * normalized);
+                    g = 255;
+                    b = 0;
+                } else {
+                    float normalized = (ratio - 0.5f) * 2.0f;
+                    r = 255;
+                    g = (int) (255 * (1.0f - normalized));
+                    b = 0;
+                }
+            }
+        }
+
+        // Draw bounding box highlights for terraforming actions
+        if (node.action() != SiegeNode.SiegeAction.WALK) {
+            float minX = (float) (targetNode.getX() + 0.1 - camPos.x());
+            float minY = (float) (targetNode.getY() + 0.1 - camPos.y());
+            float minZ = (float) (targetNode.getZ() + 0.1 - camPos.z());
+            float maxX = (float) (targetNode.getX() + 0.9 - camPos.x());
+            float maxY = (float) (targetNode.getY() + 0.9 - camPos.y());
+            float maxZ = (float) (targetNode.getZ() + 0.9 - camPos.z());
+
+            buffer.addVertex(pose, minX, minY, minZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, maxX, minY, minZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, minX, maxY, minZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, maxX, maxY, minZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, minX, minY, maxZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, maxX, minY, maxZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, minX, maxY, maxZ).setColor(r, g, b, 150);
+            buffer.addVertex(pose, maxX, maxY, maxZ).setColor(r, g, b, 150);
+        }
+
+        // Draw a static cross if it's an action taking place on the same block
         if (dx == 0 && dz == 0) {
             float s = 0.2f;
             if (dy > 0) {
@@ -169,7 +212,7 @@ public class ClientRenderHandler {
             return;
         }
 
-        // Normalize the vector so the arrow is a consistent length regardless of distance
+        // Draw directional pointer for paths
         float lengthXZ = (float) Math.sqrt(dx * dx + dz * dz);
         float nx = dx / lengthXZ;
         float nz = dz / lengthXZ;
@@ -179,23 +222,19 @@ public class ClientRenderHandler {
         float endX = x + (nx * 0.4f);
         float endZ = z + (nz * 0.4f);
 
-        // Draw the main shaft of the arrow
         buffer.addVertex(pose, startX, y, startZ).setColor(r, g, b, a);
         buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
 
-        // Calculate wings using a 2D rotation matrix (swept back 135 degrees)
         float wingLength = 0.25f;
         float cos135 = -0.7071f;
         float sin135 = 0.7071f;
 
-        // Left Wing
         float leftWingX = endX + (nx * cos135 - nz * sin135) * wingLength;
         float leftWingZ = endZ + (nx * sin135 + nz * cos135) * wingLength;
 
         buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
         buffer.addVertex(pose, leftWingX, y, leftWingZ).setColor(r, g, b, a);
 
-        // Right Wing
         float rightWingX = endX + (nx * cos135 - nz * -sin135) * wingLength;
         float rightWingZ = endZ + (nx * -sin135 + nz * cos135) * wingLength;
 

@@ -6,66 +6,73 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.ChunkPos;
-import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.client.ClientDebugData;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-// --- CHANGED: directions Map is now nodes Map<BlockPos, BlockPos> ---
-public record SyncFlowFieldDebugPayload(Set<ChunkPos> chunks, Map<BlockPos, BlockPos> nodes) implements CustomPacketPayload {
+public record SyncFlowFieldDebugPayload(Set<ChunkPos> territoryChunks, Map<BlockPos, SiegeNode> flowFieldMap) implements CustomPacketPayload {
 
-    public static final Type<SyncFlowFieldDebugPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "sync_flow_field_debug"));
+    // 1. Declare the Payload Type
+    public static final CustomPacketPayload.Type<SyncFlowFieldDebugPayload> TYPE =
+            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("skavenblight", "sync_flow_field_debug"));
 
-    public static final StreamCodec<FriendlyByteBuf, SyncFlowFieldDebugPayload> CODEC = CustomPacketPayload.codec(
-            SyncFlowFieldDebugPayload::write, SyncFlowFieldDebugPayload::new
-    );
+    // 2. Declare the CODEC
+    public static final StreamCodec<FriendlyByteBuf, SyncFlowFieldDebugPayload> CODEC =
+            StreamCodec.ofMember(SyncFlowFieldDebugPayload::write, SyncFlowFieldDebugPayload::new);
 
-    private SyncFlowFieldDebugPayload(FriendlyByteBuf buf) {
-        this(readChunks(buf), readNodes(buf));
+    public SyncFlowFieldDebugPayload(FriendlyByteBuf buffer) {
+        this(readChunks(buffer), readMap(buffer));
     }
 
-    private void write(FriendlyByteBuf buf) {
-        buf.writeInt(chunks.size());
-        for (ChunkPos chunk : chunks) {
-            buf.writeInt(chunk.x);
-            buf.writeInt(chunk.z);
+    public void write(FriendlyByteBuf buffer) {
+        buffer.writeInt(this.territoryChunks.size());
+        for (ChunkPos chunkPos : this.territoryChunks) {
+            buffer.writeLong(chunkPos.toLong());
         }
-        buf.writeInt(nodes.size());
-        // --- CHANGED: Write the target BlockPos instead of the Direction enum ---
-        for (Map.Entry<BlockPos, BlockPos> entry : nodes.entrySet()) {
-            buf.writeBlockPos(entry.getKey());
-            buf.writeBlockPos(entry.getValue());
+
+        buffer.writeInt(this.flowFieldMap.size());
+        for (Map.Entry<BlockPos, SiegeNode> entry : this.flowFieldMap.entrySet()) {
+            buffer.writeBlockPos(entry.getKey());
+            buffer.writeBlockPos(entry.getValue().pos());
+            buffer.writeEnum(entry.getValue().action());
         }
     }
 
-    private static Set<ChunkPos> readChunks(FriendlyByteBuf buf) {
-        Set<ChunkPos> set = new HashSet<>();
-        int size = buf.readInt();
+    private static Set<ChunkPos> readChunks(FriendlyByteBuf buffer) {
+        int size = buffer.readInt();
+        Set<ChunkPos> chunks = new HashSet<>();
         for (int i = 0; i < size; i++) {
-            set.add(new ChunkPos(buf.readInt(), buf.readInt()));
+            chunks.add(new ChunkPos(buffer.readLong()));
         }
-        return set;
+        return chunks;
     }
 
-    // --- CHANGED: Read BlockPos from the buffer ---
-    private static Map<BlockPos, BlockPos> readNodes(FriendlyByteBuf buf) {
-        Map<BlockPos, BlockPos> map = new HashMap<>();
-        int size = buf.readInt();
+    private static Map<BlockPos, SiegeNode> readMap(FriendlyByteBuf buffer) {
+        int size = buffer.readInt();
+        Map<BlockPos, SiegeNode> map = new HashMap<>();
         for (int i = 0; i < size; i++) {
-            map.put(buf.readBlockPos(), buf.readBlockPos());
+            BlockPos currentPos = buffer.readBlockPos();
+            BlockPos targetPos = buffer.readBlockPos();
+            SiegeNode.SiegeAction action = buffer.readEnum(SiegeNode.SiegeAction.class);
+
+            map.put(currentPos, new SiegeNode(targetPos, action));
         }
         return map;
     }
 
     @Override
-    public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
+    }
 
-    public static void handle(final SyncFlowFieldDebugPayload payload, final IPayloadContext context) {
-        // Pass the updated payload.nodes() into ClientDebugData
-        context.enqueueWork(() -> ClientDebugData.update(payload.chunks(), payload.nodes()));
+    // 3. THIS is where the handle method lives!
+    public void handle(IPayloadContext context) {
+        context.enqueueWork(() -> {
+            org.ratden.skavenblight.client.ClientDebugData.update(this.territoryChunks, this.flowFieldMap);
+        });
     }
 }

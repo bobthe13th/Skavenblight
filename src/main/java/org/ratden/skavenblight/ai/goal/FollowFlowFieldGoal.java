@@ -1,10 +1,12 @@
 package org.ratden.skavenblight.ai.goal;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 
 import java.util.EnumSet;
 
@@ -29,7 +31,17 @@ public class FollowFlowFieldGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return this.flowField != null && this.mob.getTarget() == null;
+        if (this.flowField == null || this.mob.getTarget() != null) return false;
+
+        BlockPos pos = this.mob.blockPosition();
+        SiegeNode node = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), pos);
+
+        // --- CHANGED: Off-path fallback ---
+        if (node == null && this.mob.level() instanceof ServerLevel serverLevel) {
+            node = this.flowField.getDynamicWildernessNode(serverLevel, pos);
+        }
+
+        return node != null && node.action() == SiegeNode.SiegeAction.WALK;
     }
 
     @Override
@@ -38,6 +50,7 @@ public class FollowFlowFieldGoal extends Goal {
         this.escapeHatchTicks = 0;
         this.pathingUpdateTimer = 0;
     }
+
     @Override
     public void tick() {
         if (this.escapeHatchTicks > 0) {
@@ -52,16 +65,15 @@ public class FollowFlowFieldGoal extends Goal {
             this.pathingUpdateTimer = 10;
             Vec3 currentPosition = this.mob.position();
 
-            // 1. STUCK DETECTION (If they still manage to snag, force an escape)
             if (this.lastPosition != null && this.mob.getNavigation().isInProgress()) {
                 double distanceMovedSqr = currentPosition.distanceToSqr(this.lastPosition);
                 if (distanceMovedSqr < 0.04) {
-                    BlockPos escapeNode = findEscapeNode(this.mob.blockPosition());
-                    if (escapeNode != null) {
+                    BlockPos escapePos = findEscapePos(this.mob.blockPosition());
+                    if (escapePos != null) {
                         this.mob.getNavigation().moveTo(
-                                escapeNode.getX() + 0.5D,
-                                escapeNode.getY(),
-                                escapeNode.getZ() + 0.5D,
+                                escapePos.getX() + 0.5D,
+                                escapePos.getY(),
+                                escapePos.getZ() + 0.5D,
                                 this.speedModifier
                         );
                         this.escapeHatchTicks = 60;
@@ -72,12 +84,14 @@ public class FollowFlowFieldGoal extends Goal {
             }
             this.lastPosition = currentPosition;
 
-            // 2. PATHING (Short-chaining for smooth, safe corners)
             BlockPos currentPos = this.mob.blockPosition();
-            BlockPos targetNode = this.flowField.getBestNextNode(currentPos);
+            SiegeNode targetNode = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), currentPos);
 
-            // --- NEW: FALLBACK HOMING ---
-            // If the rat is completely off the map, walk blindly toward the Nexus!
+            // Dynamically retrieve node if in wilderness
+            if (targetNode == null && this.mob.level() instanceof ServerLevel serverLevel) {
+                targetNode = this.flowField.getDynamicWildernessNode(serverLevel, currentPos);
+            }
+
             if (targetNode == null) {
                 this.mob.getNavigation().moveTo(
                         this.flowField.getTargetPos().getX() + 0.5D,
@@ -88,28 +102,20 @@ public class FollowFlowFieldGoal extends Goal {
                 return;
             }
 
-            // If the immediate next node requires building or mining, stop moving and wait!
-            if (this.mob.level().getBlockState(targetNode.below()).canBeReplaced() ||
-                    this.mob.level().getBlockState(targetNode).blocksMotion() ||
-                    this.mob.level().getBlockState(targetNode.above()).blocksMotion()) {
+            if (targetNode.action() != SiegeNode.SiegeAction.WALK) {
                 this.mob.getNavigation().stop();
                 return;
             }
 
-            BlockPos nextInChain = targetNode;
-            int maxLookAhead = 3; // Short look-ahead prevents raycast clipping!
+            BlockPos nextInChain = targetNode.pos();
+            int maxLookAhead = 3;
 
             for (int i = 0; i < maxLookAhead; i++) {
-                BlockPos next = this.flowField.getBestNextNode(nextInChain);
-                if (next == null || next.equals(nextInChain)) break;
-
-                // Stop chaining if we hit a future gap or wall
-                if (this.mob.level().getBlockState(next.below()).canBeReplaced() ||
-                        this.mob.level().getBlockState(next).blocksMotion() ||
-                        this.mob.level().getBlockState(next.above()).blocksMotion()) {
+                SiegeNode next = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), nextInChain);
+                if (next == null || next.pos().equals(nextInChain) || next.action() != SiegeNode.SiegeAction.WALK) {
                     break;
                 }
-                nextInChain = next;
+                nextInChain = next.pos();
             }
 
             this.mob.getNavigation().moveTo(
@@ -121,12 +127,12 @@ public class FollowFlowFieldGoal extends Goal {
         }
     }
 
-    private BlockPos findEscapeNode(BlockPos startPos) {
+    private BlockPos findEscapePos(BlockPos startPos) {
         BlockPos current = startPos;
         for (int i = 0; i < 6; i++) {
-            BlockPos next = this.flowField.getBestNextNode(current);
-            if (next == null || next.equals(current)) break;
-            current = next;
+            SiegeNode next = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), current);
+            if (next == null || next.pos().equals(current)) break;
+            current = next.pos();
         }
         return current.equals(startPos) ? null : current;
     }

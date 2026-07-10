@@ -7,6 +7,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
@@ -45,26 +46,25 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (activeNexus != null) {
-                            // Grab the shared instance from the network instead of creating a new one
+                            // Grab the shared instance from the network
                             StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
-
-                            // Ask it to update (it will only do so if it hasn't updated recently)
                             sharedField.calculateMapIfNeeded(serverLevel);
 
-                            // --- CHANGED: Map now tracks <BlockPos, BlockPos> instead of <BlockPos, Direction> ---
-                            Map<BlockPos, BlockPos> localNodes = new HashMap<>();
-                            for (BlockPos pos : sharedField.getCostMap().keySet()) {
-                                // Filter vectors strictly to a 16-block box around the player to keep payloads small
+                            // --- CHANGED: Map now tracks <BlockPos, SiegeNode> to include actions for tinting ---
+                            Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+
+                            // Iterate over the new instruction map
+                            for (BlockPos pos : sharedField.getInstructionMap().keySet()) {
+                                // Keep the 16-block radius to prevent payload overflow
                                 if (pos.closerThan(playerPos, 16)) {
-                                    // --- CHANGED: Grab the next 3D pathing coordinate block ---
-                                    BlockPos nextNode = sharedField.getBestNextNode(pos);
+                                    SiegeNode nextNode = sharedField.getNextSiegeNode(serverLevel, pos);
                                     if (nextNode != null) {
                                         localNodes.put(pos, nextNode);
                                     }
                                 }
                             }
 
-                            // Dispatched straight to our client renderer with the upgraded map!
+                            // Send the upgraded map containing full instructions to the client
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
                                     localNodes

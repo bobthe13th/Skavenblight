@@ -10,6 +10,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
 import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal; // --- NEW: Import the building goal ---
+import org.ratden.skavenblight.ai.goal.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -55,8 +56,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(2, new SmartBreachGoal(this));
         // 3: Building takes precedence if there is a gap
         this.goalSelector.addGoal(3, new BuildFlowFieldGoal(this));
+        this.goalSelector.addGoal(4, new WidenStairsGoal(this));
         // 4: Movement is the fallback priority when the path is clear
-        this.goalSelector.addGoal(4, new FollowFlowFieldGoal(this, 1.2D));
+        this.goalSelector.addGoal(5, new FollowFlowFieldGoal(this, 1.2D));
 
         this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
@@ -104,9 +106,13 @@ public class ClanratEntity extends Monster implements GeoEntity {
             } else if (wrappedGoal.getGoal() instanceof SmartBreachGoal breachGoal) {
                 breachGoal.setFlowField(field);
             }
-            // --- FIXED: Make sure the building goal receives the flow field map! ---
+            // --- Make sure the building goal receives the flow field map! ---
             else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
                 buildGoal.setFlowField(field);
+            }
+            // --- Inject the WidenStairsGoal flow field assignment here! ---
+            else if (wrappedGoal.getGoal() instanceof WidenStairsGoal widenGoal) {
+                widenGoal.setFlowField(field);
             }
         });
     }
