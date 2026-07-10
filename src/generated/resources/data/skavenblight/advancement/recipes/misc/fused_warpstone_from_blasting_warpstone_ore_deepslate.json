@@ -1,0 +1,32 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_the_recipe": {
+      "conditions": {
+        "recipe": "skavenblight:fused_warpstone_from_blasting_warpstone_ore_deepslate"
+      },
+      "trigger": "minecraft:recipe_unlocked"
+    },
+    "has_warpstone_ore_deepslate": {
+      "conditions": {
+        "items": [
+          {
+            "items": "skavenblight:warpstone_ore_deepslate"
+          }
+        ]
+      },
+      "trigger": "minecraft:inventory_changed"
+    }
+  },
+  "requirements": [
+    [
+      "has_the_recipe",
+      "has_warpstone_ore_deepslate"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "skavenblight:fused_warpstone_from_blasting_warpstone_ore_deepslate"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "redstone",
+  "group": "bismuth",
+  "ingredients": [
+    {
+      "item": "skavenblight:fused_warpstone"
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "skavenblight:warpstone_button"
+  }
+}

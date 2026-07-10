@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/wall_inventory",
+  "textures": {
+    "wall": "skavenblight:block/block_of_warpstone"
+  }
+}
