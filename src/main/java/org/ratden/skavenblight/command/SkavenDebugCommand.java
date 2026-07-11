@@ -11,7 +11,6 @@ public class SkavenDebugCommand {
         dispatcher.register(
                 Commands.literal("skavendebug")
                         .then(DebugDifficultyCommands.register())
-                        .then(DebugIncursionCommands.register())
                         .then(DebugCleanupCommands.register())
                         .then(DebugSourceCommands.register())
                         .then(DebugNexusCommands.register())
