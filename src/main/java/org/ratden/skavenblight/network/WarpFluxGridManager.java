@@ -123,7 +123,8 @@ public class WarpFluxGridManager extends SavedData {
         for (BlockPos endpoint : adjacentEndpoints) {
             targetNetwork.addEndpoint(endpoint);
         }
-
+        // Update the territory bounding box
+        targetNetwork.updateTerritory(org.ratden.skavenblight.Config.territoryChunkRadius);
         this.setDirty(); // Tells Minecraft to save the GridManager to the world file
     }
 
@@ -194,6 +195,10 @@ public class WarpFluxGridManager extends SavedData {
         }
         // Call this after the grid manager finishes identifying the cables for a rebuilt network
         newNetwork.scanForEndpoints(level);
+
+        // Update the territory bounding box based on the newly rebuilt network
+        newNetwork.updateTerritory(org.ratden.skavenblight.Config.territoryChunkRadius);
+
         this.setDirty();
     }
 
@@ -224,11 +229,14 @@ public class WarpFluxGridManager extends SavedData {
                 }
 
                 manager.networks.put(network.getId(), network);
+                network.updateTerritory(org.ratden.skavenblight.Config.territoryChunkRadius);
             }
         }
         return manager;
     }
-
+    public Collection<WarpFluxNetwork> getAllNetworks() {
+        return this.networks.values();
+    }
     public void tickNetworks(ServerLevel level) {
         for (WarpFluxNetwork network : networks.values()) {
             network.tick(level);

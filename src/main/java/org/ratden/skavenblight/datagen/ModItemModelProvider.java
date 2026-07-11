@@ -58,7 +58,9 @@ public class ModItemModelProvider extends ItemModelProvider {
         trimmedArmorItem(ModItems.WARPSTONE_LEGGINGS);
         trimmedArmorItem(ModItems.WARPSTONE_BOOTS);
 
-        basicItem(ModBlocks.PISTON_SPIKE_TRAP.get().asItem());
+        basicItem(ModBlocks.PISTON_SPIKE_TRAP.asItem());
+
+        basicItem(ModItems.DEBUG_FLOW_FIELD_READER.asItem());
     }
 
 

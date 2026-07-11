@@ -22,6 +22,6 @@ public class PistonSpikeTrapModel extends GeoModel<PistonSpikeTrapBlockEntity> {
 
     @Override
     public ResourceLocation getAnimationResource(PistonSpikeTrapBlockEntity animatable) {
-        return ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "animations/spike_piston_animation.json");
+        return ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "animations/spike_piston.animation.json");
     }
 }

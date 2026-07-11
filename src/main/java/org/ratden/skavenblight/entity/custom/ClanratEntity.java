@@ -1,22 +1,40 @@
 package org.ratden.skavenblight.entity.custom;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ChunkPos;
+import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
+import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal; // --- NEW: Import the building goal ---
+import org.ratden.skavenblight.ai.goal.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationController;
 import software.bernie.geckolib.animation.RawAnimation;
-import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
+import org.ratden.skavenblight.ai.goal.FollowFlowFieldGoal;
+import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import net.minecraft.world.entity.ai.goal.FloatGoal;
+import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
+import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
+import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
+import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.player.Player;
+import org.ratden.skavenblight.network.WarpFluxGridManager;
+import org.ratden.skavenblight.network.WarpFluxNetwork;
+import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
-    // References to our Blockbench animation keys
+    private StandardFlowField currentFlowField = null;
+    private int territoryCheckCooldown = 0;
+
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
     protected static final RawAnimation FALL = RawAnimation.begin().thenLoop("animation.clanrat.fall");
@@ -24,6 +42,79 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
     public ClanratEntity(EntityType<? extends Monster> type, Level level) {
         super(type, level);
+    }
+
+    @Override
+    protected void registerGoals() {
+        super.registerGoals();
+
+        this.goalSelector.addGoal(0, new FloatGoal(this));
+        this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
+
+        // --- FIXED: Stagger the priorities and inject the building goal ---
+        // 2: Breaching takes absolute precedence if blocked
+        this.goalSelector.addGoal(2, new SmartBreachGoal(this));
+        // 3: Building takes precedence if there is a gap
+        this.goalSelector.addGoal(3, new BuildFlowFieldGoal(this));
+        this.goalSelector.addGoal(4, new WidenStairsGoal(this));
+        // 4: Movement is the fallback priority when the path is clear
+        this.goalSelector.addGoal(5, new FollowFlowFieldGoal(this, 1.2D));
+
+        this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
+        this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+    }
+
+    @Override
+    protected void customServerAiStep() {
+        super.customServerAiStep();
+
+        if (this.currentFlowField == null && --this.territoryCheckCooldown <= 0) {
+            this.territoryCheckCooldown = 40;
+
+            if (this.level() instanceof ServerLevel serverLevel) {
+                WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
+                ChunkPos currentChunk = this.chunkPosition();
+
+                for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+                    if (network.getTerritoryChunks().contains(currentChunk)) {
+                        BlockPos activeNexus = null;
+
+                        for (BlockPos endpoint : network.getEndpoints()) {
+                            if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
+                                activeNexus = endpoint;
+                                break;
+                            }
+                        }
+
+                        if (activeNexus != null) {
+                            StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
+                            this.assignFlowField(sharedField);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void assignFlowField(StandardFlowField field) {
+        this.currentFlowField = field;
+        this.goalSelector.getAvailableGoals().forEach(wrappedGoal -> {
+            if (wrappedGoal.getGoal() instanceof FollowFlowFieldGoal flowGoal) {
+                flowGoal.setFlowField(field);
+            } else if (wrappedGoal.getGoal() instanceof SmartBreachGoal breachGoal) {
+                breachGoal.setFlowField(field);
+            }
+            // --- Make sure the building goal receives the flow field map! ---
+            else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
+                buildGoal.setFlowField(field);
+            }
+            // --- Inject the WidenStairsGoal flow field assignment here! ---
+            else if (wrappedGoal.getGoal() instanceof WidenStairsGoal widenGoal) {
+                widenGoal.setFlowField(field);
+            }
+        });
     }
 
     public static AttributeSupplier.Builder createAttributes() {

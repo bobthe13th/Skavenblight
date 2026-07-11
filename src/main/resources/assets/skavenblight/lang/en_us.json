@@ -35,5 +35,13 @@
 
   "block.skavenblight.spawn_tunnel_small_active": "Small Spawn Tunnel (Active)",
 
+  "block.skavenblight.warp_flux_storage": "Basic WF Capacitor",
+  "block.skavenblight.warp_flux_conduit": "Warp Flux Conduit",
+  "block.skavenblight.warp_flux_furnace": "Warp Flux Furnace",
+  "block.skavenblight.piston_spike_trap": "Piston Spike Trap",
+
+  "sounds.skavenblight.game_over": "Ominous squeaking echoes",
+  "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
+
   "creativetab.skavenblight": "Skavenblight"
 }

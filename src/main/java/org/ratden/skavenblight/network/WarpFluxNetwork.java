@@ -3,6 +3,7 @@ package org.ratden.skavenblight.network;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
@@ -10,7 +11,8 @@ import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
 import org.ratden.skavenblight.capability.ModCapabilities;
 import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
-
+import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import net.minecraft.core.BlockPos;
 import java.util.*;
 
 public class WarpFluxNetwork {
@@ -18,6 +20,7 @@ public class WarpFluxNetwork {
 
     private final Set<BlockPos> conduits = new HashSet<>();
     private final Set<BlockPos> endpoints = new HashSet<>();
+    private final Set<ChunkPos> territoryChunks = new HashSet<>();
 
     public WarpFluxNetwork() {
         this.networkId = UUID.randomUUID();
@@ -69,6 +72,12 @@ public class WarpFluxNetwork {
         transferPower(generators, consumers, level);
         transferPower(batteries, consumers, level);
         transferPower(generators, batteries, level);
+
+        // This ticks every flow field tied to this network.
+        // It safely respects the 40-tick cooldown built into calculateMapIfNeeded!
+        for (StandardFlowField field : this.flowFields.values()) {
+            field.calculateMapIfNeeded(level);
+        }
     }
     public void scanForEndpoints(ServerLevel level) {
         this.endpoints.clear();
@@ -81,6 +90,35 @@ public class WarpFluxNetwork {
                     if (storage != null) {
                         this.endpoints.add(neighborPos);
                     }
+                }
+            }
+        }
+    }
+
+    public Set<ChunkPos> getTerritoryChunks() {
+        return this.territoryChunks;
+    }
+
+    /**
+     * Generates a "bubble" of valid chunks around the base's infrastructure.
+     * @param chunkRadius The number of extra chunks to buffer outward from the base.
+     */
+    public void updateTerritory(int chunkRadius) {
+        this.territoryChunks.clear();
+
+        // We combine conduits and endpoints just in case a network
+        // is incredibly small (e.g., just a Nexus and a Battery).
+        Set<BlockPos> allBaseBlocks = new HashSet<>();
+        allBaseBlocks.addAll(this.conduits);
+        allBaseBlocks.addAll(this.endpoints);
+
+        for (BlockPos pos : allBaseBlocks) {
+            ChunkPos centerChunk = new ChunkPos(pos);
+
+            // Flood the area around this chunk based on the configured radius
+            for (int x = -chunkRadius; x <= chunkRadius; x++) {
+                for (int z = -chunkRadius; z <= chunkRadius; z++) {
+                    this.territoryChunks.add(new ChunkPos(centerChunk.x + x, centerChunk.z + z));
                 }
             }
         }
@@ -210,6 +248,25 @@ public class WarpFluxNetwork {
             case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
         };
     }
+    // Cache mapping a target Nexus to its specific flow field
+    private final Map<BlockPos, StandardFlowField> flowFields = new HashMap<>();
 
+    /**
+     * Gets the shared flow field for a specific Nexus.
+     * Everything (Rats, Debug Item, Incursions) should use this single instance.
+     */
+    public StandardFlowField getSharedFlowField(BlockPos targetNexus) {
+        return flowFields.computeIfAbsent(targetNexus, pos ->
+                new StandardFlowField(pos, this.getTerritoryChunks())
+        );
+    }
+
+    /**
+     * Call this whenever your base territory expands or shrinks
+     * so the maps know they need to be rebuilt!
+     */
+    public void clearFlowFields() {
+        this.flowFields.clear();
+    }
     private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
 }
