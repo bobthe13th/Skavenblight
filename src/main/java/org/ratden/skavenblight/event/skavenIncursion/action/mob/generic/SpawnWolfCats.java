@@ -39,12 +39,12 @@ public class SpawnWolfCats {
                 continue;
             }
 
-            wolfCat.setScenarioId(leadershipContext.getScenarioId());
+            wolfCat.setScenarioId(leadershipContext.scenarioId());
             wolfCat.setSourceId(sourceId);
-            wolfCat.setVermintideId(leadershipContext.getVermintideId());
-            wolfCat.setFangId(leadershipContext.getFangId());
-            wolfCat.setClawId(leadershipContext.getClawId());
-            wolfCat.setPackId(leadershipContext.getPackId());
+            wolfCat.setVermintideId(leadershipContext.vermintideId());
+            wolfCat.setFangId(leadershipContext.fangId());
+            wolfCat.setClawId(leadershipContext.clawId());
+            wolfCat.setPackId(leadershipContext.packId());
 
             wolfCat.moveTo(
                     spawnPos.getX() + 0.5D,

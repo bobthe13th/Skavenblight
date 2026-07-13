@@ -27,7 +27,7 @@ public class ModItemModelProvider extends ItemModelProvider {
     }
 
 //The tutorial made the example armor trimmable, so i guess ill make ours trimmable too
-    private static LinkedHashMap<ResourceKey<TrimMaterial>, Float> trimMaterials = new LinkedHashMap<>();
+    private static final LinkedHashMap<ResourceKey<TrimMaterial>, Float> trimMaterials = new LinkedHashMap<>();
     static {
         trimMaterials.put(TrimMaterials.QUARTZ, 0.1F);
         trimMaterials.put(TrimMaterials.IRON, 0.2F);

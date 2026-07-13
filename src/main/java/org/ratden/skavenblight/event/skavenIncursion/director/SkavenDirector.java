@@ -169,7 +169,7 @@ public class SkavenDirector {
         );
 
         SkavenScenario incursion = ScenarioRegistry.createScenario(
-                definition.getId(),
+                definition.id(),
                 level,
                 targetPos,
                 targetType
@@ -182,8 +182,8 @@ public class SkavenDirector {
         ActiveIncursionManager.addIncursion(incursion);
 
         SkavenblightWorldData.get(level).recordScenarioStarted(
-                definition.getId(),
-                definition.getPattern(),
+                definition.id(),
+                definition.pattern(),
                 level.getGameTime()
         );
 
@@ -285,20 +285,20 @@ public class SkavenDirector {
             ScenarioDefinition definition,
             long currentGameTime
     ) {
-        if (definition.getCooldownTicks() <= 0) {
+        if (definition.cooldownTicks() <= 0) {
             return true;
         }
 
         String lastScenarioId = worldData.getLastScenarioId();
 
-        if (lastScenarioId == null || !lastScenarioId.equals(definition.getId())) {
+        if (lastScenarioId == null || !lastScenarioId.equals(definition.id())) {
             return true;
         }
 
         long ticksSinceLastScenario =
                 currentGameTime - worldData.getLastGlobalIncursionGameTime();
 
-        return ticksSinceLastScenario >= definition.getCooldownTicks();
+        return ticksSinceLastScenario >= definition.cooldownTicks();
     }
 
     private static boolean isOverlapAllowed(
@@ -306,20 +306,20 @@ public class SkavenDirector {
             TempoBracketRules tempoRules
     ) {
         if (ActiveIncursionManager.hasActiveSetPiece()) {
-            return definition.getOverlapType() == OverlapType.BACKGROUND
-                    && definition.getPressureProfile() == PressureProfile.AMBIENT;
+            return definition.overlapType() == OverlapType.BACKGROUND
+                    && definition.pressureProfile() == PressureProfile.AMBIENT;
         }
 
-        if (definition.getOverlapType() == OverlapType.EXCLUSIVE) {
+        if (definition.overlapType() == OverlapType.EXCLUSIVE) {
             return !ActiveIncursionManager.hasActiveIncursions();
         }
 
-        if (definition.getOverlapType() == OverlapType.MAJOR) {
+        if (definition.overlapType() == OverlapType.MAJOR) {
             return ActiveIncursionManager.getActiveMajorIncursionCount()
                     < tempoRules.getMaxActiveMajorIncursions();
         }
 
-        if (definition.getOverlapType() == OverlapType.MINOR) {
+        if (definition.overlapType() == OverlapType.MINOR) {
             if (!tempoRules.allowsMinorIncursionOverlap()) {
                 return !ActiveIncursionManager.hasActiveIncursions();
             }
@@ -328,20 +328,16 @@ public class SkavenDirector {
                     < tempoRules.getMaxActiveMinorIncursions();
         }
 
-        if (definition.getOverlapType() == OverlapType.BACKGROUND) {
-            if (definition.getPressureProfile() == PressureProfile.SUBTLE
+        if (definition.overlapType() == OverlapType.BACKGROUND) {
+            if (definition.pressureProfile() == PressureProfile.SUBTLE
                     && ActiveIncursionManager.hasActiveCombatPressure()
                     && !tempoRules.allowsSubtleEffectsDuringCombat()) {
                 return false;
             }
 
-            if (definition.getPressureProfile() == PressureProfile.AMBIENT
-                    && ActiveIncursionManager.hasActiveCombatPressure()
-                    && !tempoRules.allowsBackgroundEffectsDuringCombat()) {
-                return false;
-            }
-
-            return true;
+            return definition.pressureProfile() != PressureProfile.AMBIENT
+                    || !ActiveIncursionManager.hasActiveCombatPressure()
+                    || tempoRules.allowsBackgroundEffectsDuringCombat();
         }
 
         return false;
@@ -355,12 +351,8 @@ public class SkavenDirector {
             return true;
         }
 
-        if (definition.allowsTargetType(IncursionTargetType.NEXUS)
-                && NexusTracker.hasActiveNexus(level)) {
-            return true;
-        }
-
-        return false;
+        return definition.allowsTargetType(IncursionTargetType.NEXUS)
+                && NexusTracker.hasActiveNexus(level);
     }
 
     private static ScenarioDefinition chooseScenarioDefinition(
@@ -401,7 +393,7 @@ public class SkavenDirector {
             SkavenScheme currentScheme,
             ScenarioDefinition definition
     ) {
-        int baseWeight = definition.getBaseWeight();
+        int baseWeight = definition.baseWeight();
         int modifierPercent = currentScheme.getScenarioWeightModifierPercent(definition);
 
         return Math.max(0, (baseWeight * modifierPercent) / 100);

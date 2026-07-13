@@ -55,7 +55,7 @@ public class ScenarioRegistry {
     }
 
     private static void registerDefinition(ScenarioDefinition scenarioDefinition) {
-        SCENARIO_DEFINITIONS.put(scenarioDefinition.getId(), scenarioDefinition);
+        SCENARIO_DEFINITIONS.put(scenarioDefinition.id(), scenarioDefinition);
     }
 
     private ScenarioRegistry() {

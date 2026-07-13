@@ -16,6 +16,7 @@ public class SkavenDebugCommand {
                         .then(DebugNexusCommands.register())
                         .then(DebugMobCommands.register())
                         .then(DebugPathingCommands.register())
+                        .then(DebugIncursionLoadTest.register())
         );
     }
 }
