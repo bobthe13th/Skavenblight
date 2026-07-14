@@ -80,6 +80,7 @@ public class DebugFlowFieldReaderItem extends Item {
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slotId, boolean isSelected) {
         if (!level.isClientSide() && isSelected && entity instanceof ServerPlayer serverPlayer) {
 
+            // Throttle updates to once per second (20 ticks)
             if (level.getGameTime() % 20 == 0) {
                 ServerLevel serverLevel = (ServerLevel) level;
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
@@ -105,28 +106,23 @@ public class DebugFlowFieldReaderItem extends Item {
                             StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
                             sharedField.calculateMapIfNeeded(serverLevel);
 
+                            // --- THE FIX: Initialize map and delegate data collection to the active Strategy ---
                             Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+                            currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, localNodes);
 
-                            // OPTIMIZATION: Only parse the intense block-level map if the player is actually in detailed mode
-                            if (currentMode == DebugMode.DETAILED_NODES) {
-                                for (BlockPos pos : sharedField.getInstructionMap().keySet()) {
-                                    if (pos.closerThan(playerPos, 16)) {
-                                        SiegeNode nextNode = sharedField.getNextSiegeNode(serverLevel, pos);
-                                        if (nextNode != null) {
-                                            localNodes.put(pos, nextNode);
-                                        }
-                                    }
-                                }
-                            }
+                            // --- TEMPORARY DEBUG LOG ---
+                            System.out.println("[Skavenblight Debug] Active Mode: " + currentMode.name()
+                                    + " | Nodes Collected: " + localNodes.size()
+                                    + " | Sent to Client!");
 
-                            // Send the updated payload mapping
+                            // Send the updated payload mapping to the client
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
                                     localNodes,
-                                    sharedField.getMappedChunks(), // Pass the Macro NavMesh data
-                                    currentMode.ordinal()          // Pass the state to the client
+                                    sharedField.getMappedChunks(),
+                                    currentMode.ordinal()
                             ));
-                            return;
+                            return; // Exit early once the payload for the active network is sent
                         }
                     }
                 }

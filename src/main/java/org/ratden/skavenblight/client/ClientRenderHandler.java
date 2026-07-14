@@ -20,6 +20,11 @@ public class ClientRenderHandler {
 
     // Note: Call this method from your Forge/NeoForge RenderLevelStageEvent subscriber
     public static void renderFlowFieldDebug(Matrix4f pose, Vec3 camPos) {
+        // Abort early if we have NO data at all
+        if (ClientDebugData.territoryChunks.isEmpty() && ClientDebugData.flowFieldNodes.isEmpty() && ClientDebugData.macroArrows.isEmpty()) {
+            return;
+        }
+
         Minecraft mc = Minecraft.getInstance();
         Player player = mc.player;
         if (player == null) return;
@@ -33,8 +38,14 @@ public class ClientRenderHandler {
         RenderSystem.disableDepthTest();
         RenderSystem.lineWidth(2.0f);
 
+        // Bind the color shader so OpenGL knows how to draw the lines
+        RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+
         // Tesselator.begin() initializes and returns the BufferBuilder directly
         BufferBuilder buffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+
+        // --- LAYER 1: Draw Territory Borders (Perimeter Walls) ---
+        drawTerritoryBorders(pose, buffer, camPos, player.getY());
 
         // --- LAYER 2: Mode Specific Data ---
         if (ClientDebugData.currentMode == 0) {
@@ -66,6 +77,62 @@ public class ClientRenderHandler {
         RenderSystem.enableCull();
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
+    }
+
+    // --------------------------------------------------------
+    // 0. TERRITORY BORDERS (Vertical Perimeter Walls)
+    // --------------------------------------------------------
+    private static void drawTerritoryBorders(Matrix4f pose, BufferBuilder buffer, Vec3 camPos, double playerY) {
+        int r = 128, g = 0, b = 128, a = 150; // Purple outline for Nexus Territory
+
+        // Draw walls from bedrock to sky limit
+        float bottomY = (float) (-64 - camPos.y());
+        float topY = (float) (320 - camPos.y());
+        float midY = (float) (playerY + 1.0 - camPos.y()); // Eye-level tracking line
+
+        for (ChunkPos chunk : ClientDebugData.territoryChunks) {
+            float minX = (float) (chunk.getMinBlockX() - camPos.x());
+            float minZ = (float) (chunk.getMinBlockZ() - camPos.z());
+            float maxX = (float) (chunk.getMaxBlockX() + 1 - camPos.x());
+            float maxZ = (float) (chunk.getMaxBlockZ() + 1 - camPos.z());
+
+            // Check North (Z - 1)
+            if (!ClientDebugData.territoryChunks.contains(new ChunkPos(chunk.x, chunk.z - 1))) {
+                drawWall(pose, buffer, minX, minZ, maxX, minZ, bottomY, topY, midY, r, g, b, a);
+            }
+            // Check South (Z + 1)
+            if (!ClientDebugData.territoryChunks.contains(new ChunkPos(chunk.x, chunk.z + 1))) {
+                drawWall(pose, buffer, minX, maxZ, maxX, maxZ, bottomY, topY, midY, r, g, b, a);
+            }
+            // Check West (X - 1)
+            if (!ClientDebugData.territoryChunks.contains(new ChunkPos(chunk.x - 1, chunk.z))) {
+                drawWall(pose, buffer, minX, minZ, minX, maxZ, bottomY, topY, midY, r, g, b, a);
+            }
+            // Check East (X + 1)
+            if (!ClientDebugData.territoryChunks.contains(new ChunkPos(chunk.x + 1, chunk.z))) {
+                drawWall(pose, buffer, maxX, minZ, maxX, maxZ, bottomY, topY, midY, r, g, b, a);
+            }
+        }
+    }
+
+    private static void drawWall(Matrix4f pose, BufferBuilder buffer, float x1, float z1, float x2, float z2, float bottomY, float topY, float midY, int r, int g, int b, int a) {
+        // Vertical Pillars at the corners
+        buffer.addVertex(pose, x1, bottomY, z1).setColor(r, g, b, a);
+        buffer.addVertex(pose, x1, topY, z1).setColor(r, g, b, a);
+
+        buffer.addVertex(pose, x2, bottomY, z2).setColor(r, g, b, a);
+        buffer.addVertex(pose, x2, topY, z2).setColor(r, g, b, a);
+
+        // Horizontal connecting lines (Top and Bottom)
+        buffer.addVertex(pose, x1, bottomY, z1).setColor(r, g, b, a);
+        buffer.addVertex(pose, x2, bottomY, z2).setColor(r, g, b, a);
+
+        buffer.addVertex(pose, x1, topY, z1).setColor(r, g, b, a);
+        buffer.addVertex(pose, x2, topY, z2).setColor(r, g, b, a);
+
+        // Horizontal center-line tracking the player's eye level
+        buffer.addVertex(pose, x1, midY, z1).setColor(r, g, b, a);
+        buffer.addVertex(pose, x2, midY, z2).setColor(r, g, b, a);
     }
 
     // --------------------------------------------------------
@@ -178,9 +245,8 @@ public class ClientRenderHandler {
         float endZ = (float) (to.getMiddleBlockZ() - camPos.z());
         float y = (float) (yLevel - camPos.y());
 
-        int r = 255, g = 128, b = 0, a = 255; // Big Orange Arrow
+        int r = 255, g = 128, b = 0, a = 255;
 
-        // Main chunk connector line
         buffer.addVertex(pose, startX, y, startZ).setColor(r, g, b, a);
         buffer.addVertex(pose, endX, y, endZ).setColor(r, g, b, a);
 
@@ -191,7 +257,7 @@ public class ClientRenderHandler {
         if (length > 0) {
             float nx = dx / length;
             float nz = dz / length;
-            float wingLength = 4.0f; // Scale wings up drastically for chunk size
+            float wingLength = 4.0f;
             float cos135 = -0.7071f;
             float sin135 = 0.7071f;
 
@@ -237,7 +303,6 @@ public class ClientRenderHandler {
         float maxX = minX + 1.0f;
         float maxZ = minZ + 1.0f;
 
-        // Thin white bounding box showing evaluated wilderness grid slots
         buffer.addVertex(pose, minX, minY, minZ).setColor(255, 255, 255, 60);
         buffer.addVertex(pose, maxX, minY, minZ).setColor(255, 255, 255, 60);
         buffer.addVertex(pose, minX, minY, minZ).setColor(255, 255, 255, 60);
@@ -251,7 +316,6 @@ public class ClientRenderHandler {
             float ny = dy / length;
             float nz = dz / length;
 
-            // Vector ray out to target
             buffer.addVertex(pose, x, y, z).setColor(r, g, b, a);
             buffer.addVertex(pose, x + nx * 0.5f, y + ny * 0.5f, z + nz * 0.5f).setColor(r, g, b, a);
         }
