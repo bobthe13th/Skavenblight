@@ -38,13 +38,27 @@ public class DebugPathingCommands {
                                     return 1;
                                 })))
 
+                // Command: /skavendebug pathing set_max_nodes <value>
+                .then(Commands.literal("set_max_nodes")
+                        .then(Commands.argument("value", IntegerArgumentType.integer(1000))
+                                .executes(context -> {
+                                    int val = IntegerArgumentType.getInteger(context, "value");
+                                    // Update the live variable for immediate testing
+                                    Config.maxFlowFieldNodes = val;
+                                    context.getSource().sendSuccess(() -> Component.literal(
+                                            "Max Flow Field nodes temporarily set to " + val
+                                    ), false);
+                                    return 1;
+                                })))
+
                 // Command: /skavendebug pathing info
                 .then(Commands.literal("info")
                         .executes(context -> {
                             context.getSource().sendSuccess(() -> Component.literal(
-                                    "Flow Field Pathing Costs"
+                                    "Flow Field Pathing Info"
                                             + "\nMultiplier: " + Config.miningPenaltyMultiplier
                                             + "\nBase Penalty: " + Config.miningBasePenalty
+                                            + "\nMax Nodes (Field Size): " + Config.maxFlowFieldNodes
                             ), false);
                             return 1;
                         }));

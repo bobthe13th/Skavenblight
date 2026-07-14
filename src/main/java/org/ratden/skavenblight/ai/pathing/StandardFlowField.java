@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import org.ratden.skavenblight.Config;
 import org.slf4j.Logger;
 
 import java.util.*;
@@ -24,6 +25,10 @@ public class StandardFlowField {
 
     private final List<BlockPos> plannedProjects = new ArrayList<>();
 
+    // --- Persistent Blueprint Memory ---
+    private final List<SiegeProject> activeProjects = new ArrayList<>();
+    private final Set<BlockPos> lockedPositions = new HashSet<>();
+
     private final BlockPos targetPos;
     private final Set<ChunkPos> territoryChunks;
 
@@ -41,15 +46,61 @@ public class StandardFlowField {
     };
 
     private static final int MAX_PROJECT_LENGTH = 32;
-    private static final int PROJECT_BASE_COST = 80;
-    private static final int TERRAFORM_COST_PER_BLOCK = 2;
 
+    // --- Throttling & Performance ---
     private long lastTickRealTime = System.currentTimeMillis();
     private float smoothedMSPT = 50.0f;
     private int currentRefreshRate = 80;
-    private int currentMaxNodes = 2000;
+    private int currentNodesPerTick = 2000;
+    private long lastThrottleUpdateTime = 0;
 
     private boolean isDirty = true;
+
+    private class SiegeProject {
+        // Now maps the exact block the rat stands in to the instruction it needs
+        private final Map<BlockPos, SiegeNode> instructions;
+
+        public SiegeProject(Map<BlockPos, SiegeNode> instructions) {
+            this.instructions = instructions;
+        }
+
+        public boolean isStarted(ServerLevel level) {
+            for (SiegeNode node : instructions.values()) {
+                if (isNodeCompleted(level, node)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public boolean isCompleted(ServerLevel level) {
+            for (SiegeNode node : instructions.values()) {
+                if (!isNodeCompleted(level, node)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public Map<BlockPos, SiegeNode> getRemainingInstructions(ServerLevel level) {
+            Map<BlockPos, SiegeNode> remaining = new HashMap<>();
+            for (Map.Entry<BlockPos, SiegeNode> entry : instructions.entrySet()) {
+                if (!isNodeCompleted(level, entry.getValue())) {
+                    remaining.put(entry.getKey(), entry.getValue());
+                }
+            }
+            return remaining;
+        }
+
+        private boolean isNodeCompleted(ServerLevel level, SiegeNode node) {
+            BlockState targetState = level.getBlockState(node.pos());
+            if (node.action() == SiegeNode.SiegeAction.MINE) {
+                return !targetState.blocksMotion() || isWalkableScaffold(targetState);
+            } else {
+                return !targetState.canBeReplaced();
+            }
+        }
+    }
 
     public StandardFlowField(BlockPos targetPos, Set<ChunkPos> territoryChunks) {
         this.targetPos = targetPos;
@@ -65,30 +116,32 @@ public class StandardFlowField {
 
     public void calculateMapIfNeeded(ServerLevel level) {
         long currentTime = level.getGameTime();
-        long currentRealTime = System.currentTimeMillis();
 
-        long timeDelta = currentRealTime - lastTickRealTime;
-        this.lastTickRealTime = currentRealTime;
+        // Throttle updates: Check the server's ACTUAL native MSPT every 10 seconds
+        if (currentTime - lastThrottleUpdateTime >= 200) {
+            this.lastThrottleUpdateTime = currentTime;
 
-        this.smoothedMSPT = (this.smoothedMSPT * 0.9f) + (timeDelta * 0.1f);
+            // Pull the true average tick time directly from the Minecraft Server
+            float realMSPT = level.getServer().getAverageTickTimeNanos() / 1000000.0f;
 
-        int targetRefreshRate = 80;
-        int targetMaxNodes = 2000;
+            int targetRefreshRate = 80;
+            int targetNodesPerTick = 2000;
 
-        if (this.smoothedMSPT >= 50.0f) {
-            targetRefreshRate = 300;
-            targetMaxNodes = 500;
-        } else if (this.smoothedMSPT >= 40.0f) {
-            targetRefreshRate = 160;
-            targetMaxNodes = 1000;
-        }
+            if (realMSPT >= 50.0f) {
+                targetRefreshRate = 300;
+                targetNodesPerTick = 500;
+            } else if (realMSPT >= 40.0f) {
+                targetRefreshRate = 160;
+                targetNodesPerTick = 1000;
+            }
 
-        if (targetRefreshRate != this.currentRefreshRate || targetMaxNodes != this.currentMaxNodes) {
-            this.currentRefreshRate = targetRefreshRate;
-            this.currentMaxNodes = targetMaxNodes;
+            if (targetRefreshRate != this.currentRefreshRate || targetNodesPerTick != this.currentNodesPerTick) {
+                this.currentRefreshRate = targetRefreshRate;
+                this.currentNodesPerTick = targetNodesPerTick;
 
-            LOGGER.info("[Skavenblight AI] Lag Mitigation adjusted! MSPT: {}ms | New Refresh Rate: {} ticks | Max Nodes/Tick: {}",
-                    String.format("%.2f", this.smoothedMSPT), this.currentRefreshRate, this.currentMaxNodes);
+                LOGGER.info("[Skavenblight AI] Lag Mitigation adjusted! MSPT: {}ms | New Refresh Rate: {} ticks | Max Nodes/Tick: {}",
+                        String.format("%.2f", realMSPT), this.currentRefreshRate, this.currentNodesPerTick);
+            }
         }
 
         if (!isCalculating && (this.instructionMap.isEmpty() || (this.isDirty && currentTime - lastCalculationStart >= this.currentRefreshRate))) {
@@ -104,12 +157,32 @@ public class StandardFlowField {
             calcQueue.add(targetPos);
             nextCostMap.put(targetPos, 0);
             nextInstructionMap.put(targetPos, new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK));
+
+            lockedPositions.clear();
+
+            activeProjects.removeIf(project -> !project.isStarted(level) || project.isCompleted(level));
+
+            for (SiegeProject project : activeProjects) {
+                for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(level).entrySet()) {
+                    BlockPos pos = entry.getKey(); // Inject perfectly back into ratPos
+                    lockedPositions.add(pos);
+                    nextInstructionMap.put(pos, entry.getValue());
+                    nextCostMap.put(pos, 10);
+                    calcQueue.add(pos);
+                }
+            }
         }
 
         if (isCalculating) {
             int nodesProcessed = 0;
 
-            while (!calcQueue.isEmpty() && nodesProcessed < this.currentMaxNodes) {
+            while (!calcQueue.isEmpty() && nodesProcessed < this.currentNodesPerTick) {
+
+                if (nextCostMap.size() >= Config.maxFlowFieldNodes) {
+                    calcQueue.clear();
+                    break;
+                }
+
                 BlockPos current = calcQueue.poll();
                 nodesProcessed++;
 
@@ -124,7 +197,6 @@ public class StandardFlowField {
                         if (isWalkableTerrain(level, neighbor)) {
                             if (evaluateSimpleStep(level, neighbor, current, dy)) {
 
-                                // --- NEW: LEAP logic integration ---
                                 boolean isGap = !level.getBlockState(current.offset(offset[0], 0, offset[1]).below()).blocksMotion();
                                 boolean targetIsSolid = level.getBlockState(neighbor.below()).blocksMotion();
 
@@ -133,15 +205,17 @@ public class StandardFlowField {
 
                                 if (isGap && targetIsSolid && dy == 0) {
                                     stepAction = SiegeNode.SiegeAction.LEAP;
-                                    stepCost += 1; // Leaping is slightly slower/costlier than walking
+                                    stepCost += 1;
                                 }
 
                                 int totalCost = currentCost + stepCost;
 
                                 if (totalCost < nextCostMap.getOrDefault(neighbor, Integer.MAX_VALUE)) {
-                                    nextCostMap.put(neighbor, totalCost);
-                                    nextInstructionMap.put(neighbor, new SiegeNode(current, stepAction));
-                                    calcQueue.add(neighbor);
+                                    if (!lockedPositions.contains(neighbor)) {
+                                        nextCostMap.put(neighbor, totalCost);
+                                        nextInstructionMap.put(neighbor, new SiegeNode(current, stepAction));
+                                        calcQueue.add(neighbor);
+                                    }
                                 }
                             }
                         }
@@ -161,7 +235,6 @@ public class StandardFlowField {
                 isCalculating = false;
                 this.instructionMap = new HashMap<>(nextInstructionMap);
 
-                // Rebuild the Macro NavMesh Indexes
                 this.mappedChunks.clear();
                 this.chunkToBlocksIndex.clear();
                 for (BlockPos pos : this.instructionMap.keySet()) {
@@ -176,22 +249,22 @@ public class StandardFlowField {
     }
 
     private void evaluateMacroProject(ServerLevel level, BlockPos anchorPos, int anchorCost, int dx, int dy, int dz) {
-        for (BlockPos existing : plannedProjects) {
-            if (existing.distSqr(anchorPos) < 100) {
-                return;
-            }
-        }
-
-        int projectCost = PROJECT_BASE_COST;
+        int projectCost = Config.buildingBasePenalty;
         BlockPos currentTarget = anchorPos;
 
         Map<BlockPos, Integer> tempCostMap = new HashMap<>();
         Map<BlockPos, SiegeNode> tempInstructionMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> currentProjectInstructions = new HashMap<>();
 
         for (int i = 1; i <= MAX_PROJECT_LENGTH; i++) {
             BlockPos ratPos = currentTarget.offset(-dx, -dy, -dz);
 
             if (isOutOfBounds(level, ratPos)) break;
+            if (lockedPositions.contains(ratPos)) return;
+
+            for (BlockPos existing : plannedProjects) {
+                if (existing.distSqr(ratPos) < 256) return;
+            }
 
             BlockState targetFoot = level.getBlockState(currentTarget);
             BlockState targetHead = level.getBlockState(currentTarget.above());
@@ -212,25 +285,23 @@ public class StandardFlowField {
             if (needsMiningFoot) {
                 float hardness = level.getBlockState(currentTarget).getDestroySpeed(level, currentTarget);
                 if (hardness < 0) return;
-                projectCost += TERRAFORM_COST_PER_BLOCK;
+                projectCost += (int)(hardness * Config.miningPenaltyMultiplier) + Config.miningBasePenalty;
                 actionNode = new SiegeNode(currentTarget, SiegeNode.SiegeAction.MINE);
             } else if (needsMiningHead) {
                 float hardness = level.getBlockState(currentTarget.above()).getDestroySpeed(level, currentTarget.above());
                 if (hardness < 0) return;
-                projectCost += TERRAFORM_COST_PER_BLOCK;
+                projectCost += (int)(hardness * Config.miningPenaltyMultiplier) + Config.miningBasePenalty;
                 actionNode = new SiegeNode(currentTarget.above(), SiegeNode.SiegeAction.MINE);
             } else if (needsMiningCeiling) {
                 float hardness = level.getBlockState(currentTarget.above(2)).getDestroySpeed(level, currentTarget.above(2));
                 if (hardness < 0) return;
-                projectCost += TERRAFORM_COST_PER_BLOCK;
+                projectCost += (int)(hardness * Config.miningPenaltyMultiplier) + Config.miningBasePenalty;
                 actionNode = new SiegeNode(currentTarget.above(2), SiegeNode.SiegeAction.MINE);
             } else if (dy != 0 && i % 10 == 0) {
-                // --- NEW: BUILD_LANDING injection every 10 blocks of verticality ---
-                projectCost += 20; // Landings are expensive
+                projectCost += Config.buildingBasePenalty;
                 actionNode = new SiegeNode(currentTarget, SiegeNode.SiegeAction.BUILD_LANDING);
             } else if (needsSupport) {
                 SiegeNode.SiegeAction buildAction;
-                // --- NEW: BUILD_PILLAR logic ---
                 if (dx == 0 && dz == 0 && dy > 0) {
                     buildAction = SiegeNode.SiegeAction.BUILD_PILLAR;
                 } else if (dy != 0) {
@@ -238,22 +309,38 @@ public class StandardFlowField {
                 } else {
                     buildAction = SiegeNode.SiegeAction.BUILD_BRIDGE;
                 }
-                projectCost += TERRAFORM_COST_PER_BLOCK;
+                projectCost += Config.buildingBasePenalty;
                 actionNode = new SiegeNode(currentTarget.below(), buildAction);
             } else {
                 projectCost += 1;
                 actionNode = new SiegeNode(currentTarget, SiegeNode.SiegeAction.WALK);
             }
 
-            int totalCost = anchorCost + projectCost;
+            int evaluatedProjectCost = projectCost * 2;
+            int totalCost = anchorCost + evaluatedProjectCost;
 
             if (totalCost < nextCostMap.getOrDefault(ratPos, Integer.MAX_VALUE)) {
+
+                // Assign to ratPos AND ratPos.below() so half-block rounding won't confuse the AI
                 tempCostMap.put(ratPos, totalCost);
                 tempInstructionMap.put(ratPos, actionNode);
+
+                tempCostMap.put(ratPos.below(), totalCost);
+                tempInstructionMap.put(ratPos.below(), actionNode);
+
+                if (actionNode.action() != SiegeNode.SiegeAction.WALK) {
+                    currentProjectInstructions.put(ratPos, actionNode);
+                    currentProjectInstructions.put(ratPos.below(), actionNode);
+                }
 
                 if (isWalkableTerrain(level, ratPos)) {
                     nextCostMap.putAll(tempCostMap);
                     nextInstructionMap.putAll(tempInstructionMap);
+
+                    if (!currentProjectInstructions.isEmpty()) {
+                        activeProjects.add(new SiegeProject(currentProjectInstructions));
+                    }
+
                     calcQueue.add(ratPos);
                     plannedProjects.add(anchorPos);
                     return;
@@ -297,25 +384,21 @@ public class StandardFlowField {
         return !territoryChunks.isEmpty() && !territoryChunks.contains(chunk);
     }
 
-    // High Performance Hierarchical NavMesh Fallback System
     public SiegeNode getDynamicWildernessNode(ServerLevel level, BlockPos ratPos) {
         if (instructionMap.isEmpty()) return new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK);
 
         ChunkPos ratChunk = new ChunkPos(ratPos);
         BlockPos targetHeadingBlock = null;
 
-        // Tier 1: Localized Precision Scanning
         if (mappedChunks.contains(ratChunk)) {
             targetHeadingBlock = findClosestBlockInChunk(ratPos, ratChunk);
         } else {
-            // Tier 2: Macro NavMesh Chunk BFS Routing
             ChunkPos nextStepChunk = findMacroNavMeshRoute(ratChunk);
             if (nextStepChunk != null) {
                 targetHeadingBlock = new BlockPos((nextStepChunk.x << 4) + 8, ratPos.getY(), (nextStepChunk.z << 4) + 8);
             }
         }
 
-        // Ultimate safety backup
         if (targetHeadingBlock == null) {
             targetHeadingBlock = this.targetPos;
         }
@@ -337,7 +420,6 @@ public class StandardFlowField {
         if (dy != 0 && ceiling.blocksMotion() && !isWalkableScaffold(ceiling)) return new SiegeNode(nextPos.above(2), SiegeNode.SiegeAction.MINE);
 
         if (!support.blocksMotion() && !isWalkableScaffold(support)) {
-            // --- NEW: BUILD_PILLAR safety net for vertical wilderness recovery ---
             SiegeNode.SiegeAction action = (dx == 0 && dz == 0 && dy > 0) ? SiegeNode.SiegeAction.BUILD_PILLAR :
                     ((dy != 0) ? SiegeNode.SiegeAction.BUILD_STAIR : SiegeNode.SiegeAction.BUILD_BRIDGE);
             return new SiegeNode(nextPos.below(), action);
@@ -346,9 +428,6 @@ public class StandardFlowField {
         return new SiegeNode(nextPos, SiegeNode.SiegeAction.WALK);
     }
 
-    /**
-     * Scans only the nodes assigned to a specific chunk. O(Hundreds) instead of O(Hundreds of Thousands).
-     */
     private BlockPos findClosestBlockInChunk(BlockPos ratPos, ChunkPos chunk) {
         List<BlockPos> blocks = chunkToBlocksIndex.get(chunk);
         if (blocks == null || blocks.isEmpty()) return null;
@@ -365,9 +444,6 @@ public class StandardFlowField {
         return closest;
     }
 
-    /**
-     * Performs a fast macro-graph BFS pathing routine over the base's registered chunk footprint.
-     */
     private ChunkPos findMacroNavMeshRoute(ChunkPos startChunk) {
         if (mappedChunks.isEmpty()) return null;
 
@@ -448,6 +524,7 @@ public class StandardFlowField {
         this.isDirty = true;
         this.lastCalculationStart = 0;
     }
+
     public Set<ChunkPos> getMappedChunks() {
         return this.mappedChunks;
     }

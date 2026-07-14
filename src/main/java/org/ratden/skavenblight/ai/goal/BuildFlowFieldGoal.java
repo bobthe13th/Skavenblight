@@ -34,13 +34,10 @@ public class BuildFlowFieldGoal extends Goal {
     }
 
     // --- NEW: Peek Ahead Helper Method ---
+    // --- UPDATED: Removed getDynamicWildernessNode Fallback ---
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
-
-        if (node == null) {
-            node = this.flowField.getDynamicWildernessNode(serverLevel, currentPos);
-        }
 
         // Overcome vanilla boundary limits by adopting the next block's build action early
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
@@ -51,7 +48,7 @@ public class BuildFlowFieldGoal extends Goal {
                 }
             }
         }
-        return node;
+        return node; // Will return null if in the wilderness, preventing building
     }
 
     @Override

@@ -29,14 +29,10 @@ public class SmartBreachGoal extends Goal {
         this.flowField = flowField;
     }
 
-    // --- NEW: Peek Ahead Helper Method ---
+    // --- UPDATED: Removed getDynamicWildernessNode Fallback ---
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
-
-        if (node == null) {
-            node = this.flowField.getDynamicWildernessNode(serverLevel, currentPos);
-        }
 
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
@@ -46,7 +42,7 @@ public class SmartBreachGoal extends Goal {
                 }
             }
         }
-        return node;
+        return node; // Will return null if in the wilderness, preventing mining
     }
 
     @Override

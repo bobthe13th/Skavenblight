@@ -29,6 +29,14 @@ public class ClientRenderHandler {
         Player player = mc.player;
         if (player == null) return;
 
+        // --- NEW: Check if the player is actually holding the reader ---
+        boolean holdingMain = player.getMainHandItem().getItem() instanceof org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
+        boolean holdingOff = player.getOffhandItem().getItem() instanceof org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
+
+        if (!holdingMain && !holdingOff) {
+            return; // Abort rendering completely if the item is not in hand!
+        }
+
         Tesselator tesselator = Tesselator.getInstance();
 
         // Setup RenderSystem for drawing translucent debug lines through terrain

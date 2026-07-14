@@ -48,6 +48,9 @@ public class Config {
     private static final ModConfigSpec.IntValue BUILDING_BASE_PENALTY = BUILDER.comment("Flat pathfinding cost added when a rat has to place a block to move forward.")
             .defineInRange("buildingBasePenalty", 150, 1, 1000);
 
+    private static final ModConfigSpec.IntValue MAX_FLOW_FIELD_NODES = BUILDER.comment("Maximum total nodes a Flow Field is allowed to map, acting as a hard limit on pathfinding range.")
+            .defineInRange("maxFlowFieldNodes", 15000, 1000, 1000000);
+
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
 
@@ -73,6 +76,7 @@ public class Config {
     public static int miningPenaltyMultiplier;
     public static int miningBasePenalty;
     public static int buildingBasePenalty;
+    public static int maxFlowFieldNodes;
 
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
@@ -99,6 +103,7 @@ public class Config {
         miningPenaltyMultiplier = MINING_PENALTY_MULTIPLIER.get();
         miningBasePenalty = MINING_BASE_PENALTY.get();
         buildingBasePenalty = BUILDING_BASE_PENALTY.get();
+        maxFlowFieldNodes = MAX_FLOW_FIELD_NODES.get();
 
         // convert the list of strings into a set of items
         items = ITEM_STRINGS.get().stream().map(itemName -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemName))).collect(Collectors.toSet());

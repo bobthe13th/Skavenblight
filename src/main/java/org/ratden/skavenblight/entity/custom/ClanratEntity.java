@@ -9,7 +9,7 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
-import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal; // --- NEW: Import the building goal ---
+import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
@@ -50,16 +50,10 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
-
-        // --- FIXED: Stagger the priorities and inject the building goal ---
-        // 2: Breaching takes absolute precedence if blocked
         this.goalSelector.addGoal(2, new SmartBreachGoal(this));
-        // 3: Building takes precedence if there is a gap
         this.goalSelector.addGoal(3, new BuildFlowFieldGoal(this));
         this.goalSelector.addGoal(4, new WidenStairsGoal(this));
-        // 4: Movement is the fallback priority when the path is clear
         this.goalSelector.addGoal(5, new FollowFlowFieldGoal(this, 1.2D));
-
         this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -76,22 +70,40 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
                 ChunkPos currentChunk = this.chunkPosition();
 
+                WarpFluxNetwork closestNetwork = null;
+                double closestDist = Double.MAX_VALUE;
+
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+                    // If we spawned inside a territory, lock on immediately and break
                     if (network.getTerritoryChunks().contains(currentChunk)) {
-                        BlockPos activeNexus = null;
+                        closestNetwork = network;
+                        break;
+                    }
 
-                        for (BlockPos endpoint : network.getEndpoints()) {
-                            if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                                activeNexus = endpoint;
-                                break;
-                            }
+                    // Otherwise, find the closest base by checking distance to its Nexus endpoints
+                    for (BlockPos endpoint : network.getEndpoints()) {
+                        double dist = this.blockPosition().distSqr(endpoint);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestNetwork = network;
                         }
+                    }
+                }
 
-                        if (activeNexus != null) {
-                            StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
-                            this.assignFlowField(sharedField);
+                // Assign the flow field from the network we selected
+                if (closestNetwork != null) {
+                    BlockPos activeNexus = null;
+
+                    for (BlockPos endpoint : closestNetwork.getEndpoints()) {
+                        if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
+                            activeNexus = endpoint;
                             break;
                         }
+                    }
+
+                    if (activeNexus != null) {
+                        StandardFlowField sharedField = closestNetwork.getSharedFlowField(activeNexus);
+                        this.assignFlowField(sharedField);
                     }
                 }
             }
@@ -105,13 +117,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 flowGoal.setFlowField(field);
             } else if (wrappedGoal.getGoal() instanceof SmartBreachGoal breachGoal) {
                 breachGoal.setFlowField(field);
-            }
-            // --- Make sure the building goal receives the flow field map! ---
-            else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
+            } else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
                 buildGoal.setFlowField(field);
-            }
-            // --- Inject the WidenStairsGoal flow field assignment here! ---
-            else if (wrappedGoal.getGoal() instanceof WidenStairsGoal widenGoal) {
+            } else if (wrappedGoal.getGoal() instanceof WidenStairsGoal widenGoal) {
                 widenGoal.setFlowField(field);
             }
         });

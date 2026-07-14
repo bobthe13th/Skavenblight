@@ -110,11 +110,6 @@ public class DebugFlowFieldReaderItem extends Item {
                             Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
                             currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, localNodes);
 
-                            // --- TEMPORARY DEBUG LOG ---
-                            System.out.println("[Skavenblight Debug] Active Mode: " + currentMode.name()
-                                    + " | Nodes Collected: " + localNodes.size()
-                                    + " | Sent to Client!");
-
                             // Send the updated payload mapping to the client
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
