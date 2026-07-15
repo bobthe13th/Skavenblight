@@ -47,6 +47,12 @@ public class Config {
             .defineInRange("miningBasePenalty", 50, 0, 500);
     private static final ModConfigSpec.IntValue BUILDING_BASE_PENALTY = BUILDER.comment("Flat pathfinding cost added when a rat has to place a block to move forward.")
             .defineInRange("buildingBasePenalty", 150, 1, 1000);
+    private static final ModConfigSpec.IntValue MAX_FLOW_FIELD_NODES = BUILDER.comment("Maximum total nodes a Flow Field is allowed to map, acting as a hard limit on pathfinding range.")
+            .defineInRange("maxFlowFieldNodes", 15000, 1000, 1000000);
+
+    // NEW: The settle delay config
+    private static final ModConfigSpec.IntValue MINIMUM_SETTLE_DELAY_MS = BUILDER.comment("The minimum time in milliseconds the flow field pathfinder will wait after a block change before recalculating.")
+            .defineInRange("minimumSettleDelayMs", 1000, 0, 10000);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -69,10 +75,12 @@ public class Config {
     // --- AI and Incursions Public Variables ---
     public static int territoryChunkRadius;
 
-    // --- NEW: Flow Field Pathfinding Public Variables ---
+    // --- Flow Field Pathfinding Public Variables ---
     public static int miningPenaltyMultiplier;
     public static int miningBasePenalty;
     public static int buildingBasePenalty;
+    public static int maxFlowFieldNodes;
+    public static int minimumSettleDelayMs;
 
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
@@ -95,10 +103,12 @@ public class Config {
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();
 
-        // --- Load Pathfinding Configs ---
+        // Load Pathfinding Configs
         miningPenaltyMultiplier = MINING_PENALTY_MULTIPLIER.get();
         miningBasePenalty = MINING_BASE_PENALTY.get();
         buildingBasePenalty = BUILDING_BASE_PENALTY.get();
+        maxFlowFieldNodes = MAX_FLOW_FIELD_NODES.get();
+        minimumSettleDelayMs = MINIMUM_SETTLE_DELAY_MS.get();
 
         // convert the list of strings into a set of items
         items = ITEM_STRINGS.get().stream().map(itemName -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemName))).collect(Collectors.toSet());

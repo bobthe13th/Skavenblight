@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.block.entity.state.SourceState;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnClanrats;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfCats;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.BasePlacementContext;
@@ -59,6 +60,12 @@ public class DebugIncursionLoadTest {
                                 context.getSource(),
                                 loadTestSize,
                                 LoadTestMobType.WOLF_CAT
+                        )))
+                .then(Commands.literal("clanrat")
+                        .executes(context -> runLoadTest(
+                                context.getSource(),
+                                loadTestSize,
+                                LoadTestMobType.CLANRAT
                         )));
     }
 
@@ -97,21 +104,26 @@ public class DebugIncursionLoadTest {
             int plannedSources = countPlannedSources(sourceGroups);
 
             if (plannedSources <= 0) {
-                source.sendFailure(Component.literal("Load test failed: no sources were planned."));
+                source.sendFailure(Component.literal(
+                        "Load test failed: no sources were planned."
+                ));
                 return 0;
             }
 
-            LeadershipRegistry leadershipRegistry = new LeadershipRegistry(UUID.randomUUID());
+            LeadershipRegistry leadershipRegistry =
+                    new LeadershipRegistry(UUID.randomUUID());
 
-            LeaderGroup vermintideGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.VERMINTIDE,
-                    LeaderRank.NONE
-            );
+            LeaderGroup vermintideGroup =
+                    leadershipRegistry.createLeaderGroup(
+                            LeaderGroupType.VERMINTIDE,
+                            LeaderRank.NONE
+                    );
 
-            LeaderGroup fangGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.FANG,
-                    LeaderRank.NONE
-            );
+            LeaderGroup fangGroup =
+                    leadershipRegistry.createLeaderGroup(
+                            LeaderGroupType.FANG,
+                            LeaderRank.NONE
+                    );
 
             int createdSources = 0;
             int spawnedMobs = 0;
@@ -141,21 +153,27 @@ public class DebugIncursionLoadTest {
                     .append("\nRequested mobs: ")
                     .append(loadTestSize.mobCount);
 
-            for (int groupIndex = 0; groupIndex < sourceGroups.size(); groupIndex++) {
+            for (
+                    int groupIndex = 0;
+                    groupIndex < sourceGroups.size();
+                    groupIndex++
+            ) {
                 SourceGroupPlan sourceGroup = sourceGroups.get(groupIndex);
 
-                LeaderGroup clawGroup = leadershipRegistry.createLeaderGroup(
-                        LeaderGroupType.CLAW,
-                        LeaderRank.NONE
-                );
+                LeaderGroup clawGroup =
+                        leadershipRegistry.createLeaderGroup(
+                                LeaderGroupType.CLAW,
+                                LeaderRank.NONE
+                        );
 
                 for (SourcePlan sourcePlan : sourceGroup.getSourcePlans()) {
                     sourceNumber++;
 
-                    LeaderGroup packGroup = leadershipRegistry.createLeaderGroup(
-                            LeaderGroupType.PACK,
-                            LeaderRank.NONE
-                    );
+                    LeaderGroup packGroup =
+                            leadershipRegistry.createLeaderGroup(
+                                    LeaderGroupType.PACK,
+                                    LeaderRank.NONE
+                            );
 
                     BlockPos placementPos = sourcePlan.hasPlacedPos()
                             ? sourcePlan.getPlacedPos()
@@ -184,7 +202,8 @@ public class DebugIncursionLoadTest {
 
                     createdSources++;
 
-                    int mobsForThisSource = mobsPerSource[sourceNumber - 1];
+                    int mobsForThisSource =
+                            mobsPerSource[sourceNumber - 1];
 
                     int spawnedFromThisSource = spawnMobsForLoadTest(
                             level,
@@ -244,7 +263,9 @@ public class DebugIncursionLoadTest {
             return spawnedMobs;
 
         } catch (Exception exception) {
-            source.sendFailure(Component.literal("Load test failed: " + exception.getMessage()));
+            source.sendFailure(Component.literal(
+                    "Load test failed: " + exception.getMessage()
+            ));
             return 0;
         }
     }
@@ -287,10 +308,25 @@ public class DebugIncursionLoadTest {
                     ),
                     createdSourceId
             ).size();
+
+            case CLANRAT -> SpawnClanrats.execute(
+                    level,
+                    placementPos,
+                    count,
+                    leadershipRegistry.createContext(
+                            vermintideGroup,
+                            fangGroup,
+                            clawGroup,
+                            packGroup
+                    ),
+                    createdSourceId
+            ).size();
         };
     }
 
-    private static IncursionTargetType chooseDebugTargetType(ServerLevel level) {
+    private static IncursionTargetType chooseDebugTargetType(
+            ServerLevel level
+    ) {
         if (NexusTracker.hasActiveNexus(level)) {
             return IncursionTargetType.NEXUS;
         }
@@ -387,6 +423,10 @@ public class DebugIncursionLoadTest {
         WOLF_CAT(
                 "wolf_cat",
                 "wolf cats"
+        ),
+        CLANRAT(
+                "clanrat",
+                "clanrats"
         );
 
         private final String commandName;
@@ -404,3 +444,4 @@ public class DebugIncursionLoadTest {
     private DebugIncursionLoadTest() {
     }
 }
+

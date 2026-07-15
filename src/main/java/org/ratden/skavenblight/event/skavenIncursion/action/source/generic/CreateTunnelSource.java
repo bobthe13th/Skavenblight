@@ -36,11 +36,11 @@ public class CreateTunnelSource {
         BlockEntity blockEntity = level.getBlockEntity(pos);
 
         if (blockEntity instanceof SkavenTunnelSourceEntity tunnelSource) {
-            tunnelSource.setScenarioId(leadershipContext.getScenarioId());
-            tunnelSource.setVermintideId(leadershipContext.getVermintideId());
-            tunnelSource.setFangId(leadershipContext.getFangId());
-            tunnelSource.setClawId(leadershipContext.getClawId());
-            tunnelSource.setPackId(leadershipContext.getPackId());
+            tunnelSource.setScenarioId(leadershipContext.scenarioId());
+            tunnelSource.setVermintideId(leadershipContext.vermintideId());
+            tunnelSource.setFangId(leadershipContext.fangId());
+            tunnelSource.setClawId(leadershipContext.clawId());
+            tunnelSource.setPackId(leadershipContext.packId());
             tunnelSource.setCreatedGameTime(level.getGameTime());
 
             return tunnelSource.getSourceId();

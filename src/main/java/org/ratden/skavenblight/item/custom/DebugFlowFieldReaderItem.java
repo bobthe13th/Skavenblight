@@ -1,15 +1,26 @@
 package org.ratden.skavenblight.item.custom;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
+import org.ratden.skavenblight.debug.mode.server.DetailedServerMode;
+import org.ratden.skavenblight.debug.mode.server.IServerDebugMode;
+import org.ratden.skavenblight.debug.mode.server.MacroServerMode;
+import org.ratden.skavenblight.debug.mode.server.WildernessServerMode;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.network.WarpFluxNetwork;
 import org.ratden.skavenblight.network.payload.SyncFlowFieldDebugPayload;
@@ -19,22 +30,68 @@ import java.util.Map;
 
 public class DebugFlowFieldReaderItem extends Item {
 
+    // --- NEW: Expandable Mode Enum ---
+    public enum DebugMode {
+        DETAILED_NODES("Detailed Block Paths", new DetailedServerMode()),
+        MACRO_NAVMESH("Macro NavMesh (Chunk Routing)", new MacroServerMode()),
+        WILDERNESS_PATH("Wilderness Dynamic Routing", new WildernessServerMode());
+
+        private final String displayName;
+        private final IServerDebugMode serverLogic;
+
+        DebugMode(String displayName, IServerDebugMode serverLogic) {
+            this.displayName = displayName;
+            this.serverLogic = serverLogic;
+        }
+
+        public String getDisplayName() { return displayName; }
+        public IServerDebugMode getServerLogic() { return serverLogic; }
+        public DebugMode next() { return values()[(this.ordinal() + 1) % values().length]; }
+    }
+
     public DebugFlowFieldReaderItem(Properties properties) {
         super(properties);
+    }
+
+    // --- NEW: Right-Click to cycle modes ---
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+
+        if (!level.isClientSide()) {
+            CustomData customData = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+            CompoundTag tag = customData.copyTag();
+
+            int currentModeIndex = tag.getInt("DebugMode");
+            DebugMode currentMode = DebugMode.values()[currentModeIndex % DebugMode.values().length];
+            DebugMode nextMode = currentMode.next();
+
+            tag.putInt("DebugMode", nextMode.ordinal());
+            stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+
+            // Inform the player
+            player.displayClientMessage(Component.literal("§a[Skavenblight] §fVisualizer Mode: §e" + nextMode.getDisplayName()), true);
+        }
+
+        return InteractionResultHolder.success(stack);
     }
 
     @Override
     public void inventoryTick(ItemStack stack, Level level, Entity entity, int slotId, boolean isSelected) {
         if (!level.isClientSide() && isSelected && entity instanceof ServerPlayer serverPlayer) {
 
-            // Sync information once a second (every 20 ticks) to reduce server/network load
+            // Throttle updates to once per second (20 ticks)
             if (level.getGameTime() % 20 == 0) {
                 ServerLevel serverLevel = (ServerLevel) level;
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
                 BlockPos playerPos = serverPlayer.blockPosition();
 
+                // Read the item's current active mode
+                CustomData customData = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+                int currentModeIndex = customData.copyTag().getInt("DebugMode");
+                DebugMode currentMode = DebugMode.values()[currentModeIndex % DebugMode.values().length];
+
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
-                    // Find the network local to where the player is looking/standing
                     if (network.getTerritoryChunks().contains(serverPlayer.chunkPosition())) {
 
                         BlockPos activeNexus = null;
@@ -46,30 +103,21 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (activeNexus != null) {
-                            // Grab the shared instance from the network
                             StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
                             sharedField.calculateMapIfNeeded(serverLevel);
 
-                            // --- CHANGED: Map now tracks <BlockPos, SiegeNode> to include actions for tinting ---
+                            // --- THE FIX: Initialize map and delegate data collection to the active Strategy ---
                             Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+                            currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, localNodes);
 
-                            // Iterate over the new instruction map
-                            for (BlockPos pos : sharedField.getInstructionMap().keySet()) {
-                                // Keep the 16-block radius to prevent payload overflow
-                                if (pos.closerThan(playerPos, 16)) {
-                                    SiegeNode nextNode = sharedField.getNextSiegeNode(serverLevel, pos);
-                                    if (nextNode != null) {
-                                        localNodes.put(pos, nextNode);
-                                    }
-                                }
-                            }
-
-                            // Send the upgraded map containing full instructions to the client
+                            // Send the updated payload mapping to the client
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
-                                    localNodes
+                                    localNodes,
+                                    sharedField.getMappedChunks(),
+                                    currentMode.ordinal()
                             ));
-                            return;
+                            return; // Exit early once the payload for the active network is sent
                         }
                     }
                 }

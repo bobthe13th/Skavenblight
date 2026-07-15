@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.network;
 
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -7,7 +8,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.network.payload.SyncFlowFieldDebugPayload;
 
-@EventBusSubscriber(modid = Skavenblight.MODID, bus = EventBusSubscriber.Bus.MOD)
+@EventBusSubscriber(modid = Skavenblight.MODID, value = Dist.CLIENT)
 public class ModNetwork {
 
     @SubscribeEvent

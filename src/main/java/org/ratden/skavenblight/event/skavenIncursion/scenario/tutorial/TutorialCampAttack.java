@@ -82,7 +82,7 @@ public class TutorialCampAttack implements SkavenScenario {
     }
 
     public static String id() {
-        return DEFINITION.getId();
+        return DEFINITION.id();
     }
 
     @Override
@@ -92,12 +92,12 @@ public class TutorialCampAttack implements SkavenScenario {
 
     @Override
     public String getId() {
-        return DEFINITION.getId();
+        return DEFINITION.id();
     }
 
     @Override
     public ScenarioPattern getPattern() {
-        return DEFINITION.getPattern();
+        return DEFINITION.pattern();
     }
 
     @Override
