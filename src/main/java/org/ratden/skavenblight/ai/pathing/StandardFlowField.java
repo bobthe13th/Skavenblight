@@ -51,13 +51,13 @@ public class StandardFlowField {
     private long lastTickRealTime = System.currentTimeMillis();
     private float smoothedMSPT = 50.0f;
     private int currentRefreshRate = 80;
-    private int currentNodesPerTick = 2000;
+    private int currentNodesPerTick = 1000;
     private long lastThrottleUpdateTime = 0;
+    private long lastBlockChangeTime = 0;
 
     private boolean isDirty = true;
 
     private class SiegeProject {
-        // Now maps the exact block the rat stands in to the instruction it needs
         private final Map<BlockPos, SiegeNode> instructions;
 
         public SiegeProject(Map<BlockPos, SiegeNode> instructions) {
@@ -108,113 +108,117 @@ public class StandardFlowField {
     }
 
     public void onBlockChanged(BlockPos pos) {
-        if (this.isDirty) return;
         if (!isOutOfBounds(null, pos)) {
             this.isDirty = true;
+            this.lastBlockChangeTime = System.currentTimeMillis(); // Log the time of the edit
         }
     }
 
     public void calculateMapIfNeeded(ServerLevel level) {
-        long currentTime = level.getGameTime();
+        long currentTime = level.getGameTime(); //[cite: 21]
 
-        // Throttle updates: Check the server's ACTUAL native MSPT every 10 seconds
-        if (currentTime - lastThrottleUpdateTime >= 200) {
-            this.lastThrottleUpdateTime = currentTime;
+        // 1. Dynamic Throttling - Drastically reduced node limits to prevent massive server lag spikes
+        if (currentTime - lastThrottleUpdateTime >= 200) { //[cite: 21]
+            this.lastThrottleUpdateTime = currentTime; //[cite: 21]
+            float realMSPT = level.getServer().getAverageTickTimeNanos() / 1000000.0f; //[cite: 21]
 
-            // Pull the true average tick time directly from the Minecraft Server
-            float realMSPT = level.getServer().getAverageTickTimeNanos() / 1000000.0f;
+            int targetRefreshRate = 80; //[cite: 21]
+            int targetNodesPerTick = 250; // Normal load: Process 250 nodes per tick (reduced from 2000)
 
-            int targetRefreshRate = 80;
-            int targetNodesPerTick = 2000;
-
-            if (realMSPT >= 50.0f) {
-                targetRefreshRate = 300;
-                targetNodesPerTick = 500;
-            } else if (realMSPT >= 40.0f) {
-                targetRefreshRate = 160;
-                targetNodesPerTick = 1000;
+            if (realMSPT >= 50.0f) { //[cite: 21]
+                targetRefreshRate = 300; //[cite: 21]
+                targetNodesPerTick = 50;  // Heavy lag: Trickle at 50 nodes per tick (reduced from 500)
+            } else if (realMSPT >= 40.0f) { //[cite: 21]
+                targetRefreshRate = 160; //[cite: 21]
+                targetNodesPerTick = 100; // Moderate lag: Process 100 nodes per tick (reduced from 1000)
             }
 
-            if (targetRefreshRate != this.currentRefreshRate || targetNodesPerTick != this.currentNodesPerTick) {
-                this.currentRefreshRate = targetRefreshRate;
-                this.currentNodesPerTick = targetNodesPerTick;
-
-                LOGGER.info("[Skavenblight AI] Lag Mitigation adjusted! MSPT: {}ms | New Refresh Rate: {} ticks | Max Nodes/Tick: {}",
-                        String.format("%.2f", realMSPT), this.currentRefreshRate, this.currentNodesPerTick);
+            if (targetRefreshRate != this.currentRefreshRate || targetNodesPerTick != this.currentNodesPerTick) { //[cite: 21]
+                this.currentRefreshRate = targetRefreshRate; //[cite: 21]
+                this.currentNodesPerTick = targetNodesPerTick; //[cite: 21]
             }
         }
 
-        if (!isCalculating && (this.instructionMap.isEmpty() || (this.isDirty && currentTime - lastCalculationStart >= this.currentRefreshRate))) {
-            isCalculating = true;
-            lastCalculationStart = currentTime;
+        // 2. The Settle Delay: Ensure 1 full second (1000ms) has passed since the player last touched a block
+        boolean terrainHasSettled = (System.currentTimeMillis() - this.lastBlockChangeTime) >= Config.minimumSettleDelayMs;
 
-            nextCostMap.clear();
-            nextInstructionMap.clear();
-            plannedProjects.clear();
+        // 3. Start calculation sequence only if dirty, settled, and off cooldown
+        if (!isCalculating && (this.instructionMap.isEmpty() || (this.isDirty && terrainHasSettled && currentTime - lastCalculationStart >= this.currentRefreshRate))) { //[cite: 21]
+            isCalculating = true; //[cite: 21]
+            this.isDirty = false; //[cite: 21]
+            lastCalculationStart = currentTime; //[cite: 21]
 
-            calcQueue = new PriorityQueue<>(Comparator.comparingInt(pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE)));
+            // --- DIAGNOSTIC LOG START ---
+            System.out.println("[Skavenblight] FlowField calculation STARTED! Target: " + this.targetPos + " | FlowField Hash: " + System.identityHashCode(this)); //[cite: 21]
 
-            calcQueue.add(targetPos);
-            nextCostMap.put(targetPos, 0);
-            nextInstructionMap.put(targetPos, new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK));
+            nextCostMap.clear(); //[cite: 21]
+            nextInstructionMap.clear(); //[cite: 21]
+            plannedProjects.clear(); //[cite: 21]
 
-            lockedPositions.clear();
+            calcQueue = new PriorityQueue<>(Comparator.comparingInt(pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE))); //[cite: 21]
 
-            activeProjects.removeIf(project -> !project.isStarted(level) || project.isCompleted(level));
+            calcQueue.add(targetPos); //[cite: 21]
+            nextCostMap.put(targetPos, 0); //[cite: 21]
+            nextInstructionMap.put(targetPos, new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK)); //[cite: 21]
 
-            for (SiegeProject project : activeProjects) {
-                for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(level).entrySet()) {
-                    BlockPos pos = entry.getKey(); // Inject perfectly back into ratPos
-                    lockedPositions.add(pos);
-                    nextInstructionMap.put(pos, entry.getValue());
-                    nextCostMap.put(pos, 10);
-                    calcQueue.add(pos);
+            lockedPositions.clear(); //[cite: 21]
+
+            activeProjects.removeIf(project -> !project.isStarted(level) || project.isCompleted(level)); //[cite: 21]
+
+            for (SiegeProject project : activeProjects) { //[cite: 21]
+                for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(level).entrySet()) { //[cite: 21]
+                    BlockPos pos = entry.getKey(); //[cite: 21]
+                    lockedPositions.add(pos); //[cite: 21]
+                    nextInstructionMap.put(pos, entry.getValue()); //[cite: 21]
+                    nextCostMap.put(pos, 10); //[cite: 21]
+                    calcQueue.add(pos); //[cite: 21]
                 }
             }
         }
 
-        if (isCalculating) {
-            int nodesProcessed = 0;
+        // 4. Spread calculation logic over multiple ticks to prevent freezing the server thread
+        if (isCalculating) { //[cite: 21]
+            int nodesProcessed = 0; //[cite: 21]
 
-            while (!calcQueue.isEmpty() && nodesProcessed < this.currentNodesPerTick) {
+            while (!calcQueue.isEmpty() && nodesProcessed < this.currentNodesPerTick) { //[cite: 21]
 
-                if (nextCostMap.size() >= Config.maxFlowFieldNodes) {
-                    calcQueue.clear();
-                    break;
+                if (nextCostMap.size() >= Config.maxFlowFieldNodes) { //[cite: 21]
+                    calcQueue.clear(); //[cite: 21]
+                    break; //[cite: 21]
                 }
 
-                BlockPos current = calcQueue.poll();
-                nodesProcessed++;
+                BlockPos current = calcQueue.poll(); //[cite: 21]
+                nodesProcessed++; //[cite: 21]
 
-                int currentCost = nextCostMap.get(current);
+                int currentCost = nextCostMap.get(current); //[cite: 21]
 
-                for (int[] offset : HORIZONTAL_OFFSETS) {
-                    for (int dy = -1; dy <= 4; dy++) {
-                        BlockPos neighbor = current.offset(offset[0], dy, offset[1]);
+                for (int[] offset : HORIZONTAL_OFFSETS) { //[cite: 21]
+                    for (int dy = -1; dy <= 4; dy++) { //[cite: 21]
+                        BlockPos neighbor = current.offset(offset[0], dy, offset[1]); //[cite: 21]
 
-                        if (isOutOfBounds(level, neighbor)) continue;
+                        if (isOutOfBounds(level, neighbor)) continue; //[cite: 21]
 
-                        if (isWalkableTerrain(level, neighbor)) {
-                            if (evaluateSimpleStep(level, neighbor, current, dy)) {
+                        if (isWalkableTerrain(level, neighbor)) { //[cite: 21]
+                            if (evaluateSimpleStep(level, neighbor, current, dy)) { //[cite: 21]
 
-                                boolean isGap = !level.getBlockState(current.offset(offset[0], 0, offset[1]).below()).blocksMotion();
-                                boolean targetIsSolid = level.getBlockState(neighbor.below()).blocksMotion();
+                                boolean isGap = !level.getBlockState(current.offset(offset[0], 0, offset[1]).below()).blocksMotion(); //[cite: 21]
+                                boolean targetIsSolid = level.getBlockState(neighbor.below()).blocksMotion(); //[cite: 21]
 
-                                int stepCost = (offset[0] != 0 && offset[1] != 0) ? 2 : 1;
-                                SiegeNode.SiegeAction stepAction = SiegeNode.SiegeAction.WALK;
+                                int stepCost = (offset[0] != 0 && offset[1] != 0) ? 2 : 1; //[cite: 21]
+                                SiegeNode.SiegeAction stepAction = SiegeNode.SiegeAction.WALK; //[cite: 21]
 
-                                if (isGap && targetIsSolid && dy == 0) {
-                                    stepAction = SiegeNode.SiegeAction.LEAP;
-                                    stepCost += 1;
+                                if (isGap && targetIsSolid && dy == 0) { //[cite: 21]
+                                    stepAction = SiegeNode.SiegeAction.LEAP; //[cite: 21]
+                                    stepCost += 1; //[cite: 21]
                                 }
 
-                                int totalCost = currentCost + stepCost;
+                                int totalCost = currentCost + stepCost; //[cite: 21]
 
-                                if (totalCost < nextCostMap.getOrDefault(neighbor, Integer.MAX_VALUE)) {
-                                    if (!lockedPositions.contains(neighbor)) {
-                                        nextCostMap.put(neighbor, totalCost);
-                                        nextInstructionMap.put(neighbor, new SiegeNode(current, stepAction));
-                                        calcQueue.add(neighbor);
+                                if (totalCost < nextCostMap.getOrDefault(neighbor, Integer.MAX_VALUE)) { //[cite: 21]
+                                    if (!lockedPositions.contains(neighbor)) { //[cite: 21]
+                                        nextCostMap.put(neighbor, totalCost); //[cite: 21]
+                                        nextInstructionMap.put(neighbor, new SiegeNode(current, stepAction)); //[cite: 21]
+                                        calcQueue.add(neighbor); //[cite: 21]
                                     }
                                 }
                             }
@@ -222,28 +226,30 @@ public class StandardFlowField {
                     }
                 }
 
-                if (isWalkableTerrain(level, current) || current.equals(targetPos)) {
-                    for (int[] dir : CARDINAL_OFFSETS) {
-                        for (int dy = -1; dy <= 1; dy++) {
-                            evaluateMacroProject(level, current, currentCost, dir[0], dy, dir[1]);
+                if (isWalkableTerrain(level, current) || current.equals(targetPos)) { //[cite: 21]
+                    for (int[] dir : CARDINAL_OFFSETS) { //[cite: 21]
+                        for (int dy = -1; dy <= 1; dy++) { //[cite: 21]
+                            evaluateMacroProject(level, current, currentCost, dir[0], dy, dir[1]); //[cite: 21]
                         }
                     }
                 }
             }
 
-            if (calcQueue.isEmpty()) {
-                isCalculating = false;
-                this.instructionMap = new HashMap<>(nextInstructionMap);
+            // Calculations are finished! Assign values to the active map
+            if (calcQueue.isEmpty()) { //[cite: 21]
+                isCalculating = false; //[cite: 21]
+                this.instructionMap = new HashMap<>(nextInstructionMap); //[cite: 21]
 
-                this.mappedChunks.clear();
-                this.chunkToBlocksIndex.clear();
-                for (BlockPos pos : this.instructionMap.keySet()) {
-                    ChunkPos cp = new ChunkPos(pos);
-                    this.mappedChunks.add(cp);
-                    this.chunkToBlocksIndex.computeIfAbsent(cp, k -> new ArrayList<>()).add(pos);
+                this.mappedChunks.clear(); //[cite: 21]
+                this.chunkToBlocksIndex.clear(); //[cite: 21]
+                for (BlockPos pos : this.instructionMap.keySet()) { //[cite: 21]
+                    ChunkPos cp = new ChunkPos(pos); //[cite: 21]
+                    this.mappedChunks.add(cp); //[cite: 21]
+                    this.chunkToBlocksIndex.computeIfAbsent(cp, k -> new ArrayList<>()).add(pos); //[cite: 21]
                 }
 
-                this.isDirty = false;
+                // --- DIAGNOSTIC LOG END ---
+                System.out.println("[Skavenblight] FlowField calculation FINISHED! Total Nodes: " + this.instructionMap.size() + " | FlowField Hash: " + System.identityHashCode(this)); //[cite: 21]
             }
         }
     }
@@ -321,7 +327,6 @@ public class StandardFlowField {
 
             if (totalCost < nextCostMap.getOrDefault(ratPos, Integer.MAX_VALUE)) {
 
-                // Assign to ratPos AND ratPos.below() so half-block rounding won't confuse the AI
                 tempCostMap.put(ratPos, totalCost);
                 tempInstructionMap.put(ratPos, actionNode);
 

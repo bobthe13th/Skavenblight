@@ -27,9 +27,12 @@ public class SmartBreachGoal extends Goal {
 
     public void setFlowField(StandardFlowField flowField) {
         this.flowField = flowField;
+        // --- DIAGNOSTIC LOG ---
+        if (this.flowField != null) {
+            System.out.println("[SmartBreachGoal] Assigned FlowField Hash to Mob " + this.mob.getUUID() + ": " + System.identityHashCode(this.flowField));
+        }
     }
 
-    // --- UPDATED: Removed getDynamicWildernessNode Fallback ---
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
@@ -42,7 +45,7 @@ public class SmartBreachGoal extends Goal {
                 }
             }
         }
-        return node; // Will return null if in the wilderness, preventing mining
+        return node;
     }
 
     @Override
@@ -103,8 +106,9 @@ public class SmartBreachGoal extends Goal {
                 serverLevel.destroyBlock(this.targetBlock, true, this.mob);
                 this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, -1);
 
-                // --- NEW: Trigger instant Flow Field map refresh! ---
                 this.flowField.forceRecalculation();
+                // --- DIAGNOSTIC LOG ---
+                System.out.println("[SmartBreachGoal] Triggered Recalculation! Mob's FlowField Hash: " + System.identityHashCode(this.flowField));
             }
         }
     }

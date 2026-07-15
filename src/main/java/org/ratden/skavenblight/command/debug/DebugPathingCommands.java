@@ -17,7 +17,6 @@ public class DebugPathingCommands {
                         .then(Commands.argument("value", IntegerArgumentType.integer(1))
                                 .executes(context -> {
                                     int val = IntegerArgumentType.getInteger(context, "value");
-                                    // Update the live variable for immediate testing
                                     Config.miningPenaltyMultiplier = val;
                                     context.getSource().sendSuccess(() -> Component.literal(
                                             "Mining penalty multiplier temporarily set to " + val
@@ -30,7 +29,6 @@ public class DebugPathingCommands {
                         .then(Commands.argument("value", IntegerArgumentType.integer(0))
                                 .executes(context -> {
                                     int val = IntegerArgumentType.getInteger(context, "value");
-                                    // Update the live variable for immediate testing
                                     Config.miningBasePenalty = val;
                                     context.getSource().sendSuccess(() -> Component.literal(
                                             "Mining base penalty temporarily set to " + val
@@ -43,10 +41,21 @@ public class DebugPathingCommands {
                         .then(Commands.argument("value", IntegerArgumentType.integer(1000))
                                 .executes(context -> {
                                     int val = IntegerArgumentType.getInteger(context, "value");
-                                    // Update the live variable for immediate testing
                                     Config.maxFlowFieldNodes = val;
                                     context.getSource().sendSuccess(() -> Component.literal(
                                             "Max Flow Field nodes temporarily set to " + val
+                                    ), false);
+                                    return 1;
+                                })))
+
+                // Command: /skavendebug pathing set_settle_delay <value>
+                .then(Commands.literal("set_settle_delay")
+                        .then(Commands.argument("value", IntegerArgumentType.integer(0))
+                                .executes(context -> {
+                                    int val = IntegerArgumentType.getInteger(context, "value");
+                                    Config.minimumSettleDelayMs = val;
+                                    context.getSource().sendSuccess(() -> Component.literal(
+                                            "Minimum settle delay temporarily set to " + val + "ms"
                                     ), false);
                                     return 1;
                                 })))
@@ -59,6 +68,7 @@ public class DebugPathingCommands {
                                             + "\nMultiplier: " + Config.miningPenaltyMultiplier
                                             + "\nBase Penalty: " + Config.miningBasePenalty
                                             + "\nMax Nodes (Field Size): " + Config.maxFlowFieldNodes
+                                            + "\nMinimum Settle Delay: " + Config.minimumSettleDelayMs + "ms"
                             ), false);
                             return 1;
                         }));
