@@ -425,17 +425,24 @@ public class SourceGroupPlacement {
             List<BlockPos> reservedAnchors
     ) {
         int reservationRadius = getReservationRadiusForSourceCount(sourceCount);
-        RandomSource random = level.getRandom();
+        net.minecraft.util.RandomSource random = level.getRandom();
 
         for (int attempt = 0; attempt < MAX_GROUP_ANCHOR_ATTEMPTS; attempt++) {
-            int expansion = attempt / 6;
-            int jitterRadius = GROUP_ANCHOR_JITTER + expansion * 8;
+            // INCREASED EXPANSION: Multiply by 16 instead of 8 so it rapidly hunts
+            // outwards to escape massive, irregular chunk territories.
+            int expansion = attempt / 4;
+            int jitterRadius = GROUP_ANCHOR_JITTER + expansion * 16;
 
             int offsetX = random.nextInt(jitterRadius * 2 + 1) - jitterRadius;
             int offsetZ = random.nextInt(jitterRadius * 2 + 1) - jitterRadius;
 
             BlockPos candidate = idealAnchor.offset(offsetX, 0, offsetZ);
             BlockPos surfaceCandidate = getSurfacePos(level, candidate);
+
+            // NEW: Reject if it's bad terrain OR if it's inside the dynamic chunk territory
+            if (!isValidTerrain(level, surfaceCandidate) || !isOutsideBaseTerritory(level, surfaceCandidate)) {
+                continue;
+            }
 
             if (!isAnchorFarEnoughFromReservedAnchors(
                     surfaceCandidate,
@@ -539,6 +546,11 @@ public class SourceGroupPlacement {
             BlockPos candidate,
             List<BlockPos> reservedSourcePositions
     ) {
+        // NEW: Reject invalid terrain and dynamic territory chunks before checking spacing
+        if (!isValidTerrain(level, candidate) || !isOutsideBaseTerritory(level, candidate)) {
+            return false;
+        }
+
         for (BlockPos reservedSourcePosition : reservedSourcePositions) {
             if (horizontalDistanceSqr(candidate, reservedSourcePosition)
                     < SOURCE_MINIMUM_SPACING * SOURCE_MINIMUM_SPACING) {
@@ -772,6 +784,34 @@ public class SourceGroupPlacement {
             int divisor
     ) {
         return (value + divisor - 1) / divisor;
+    }
+
+    private static boolean isValidTerrain(ServerLevel level, BlockPos pos) {
+        BlockPos floorPos = pos.below();
+        net.minecraft.world.level.block.state.BlockState floorState = level.getBlockState(floorPos);
+
+        return floorState.isSolidRender(level, floorPos)
+                && floorState.getFluidState().isEmpty()
+                && !floorState.is(net.minecraft.tags.BlockTags.LEAVES)
+                && !floorState.is(net.minecraft.tags.BlockTags.LOGS);
+    }
+
+    private static boolean isOutsideBaseTerritory(ServerLevel level, BlockPos pos) {
+        org.ratden.skavenblight.network.WarpFluxGridManager gridManager =
+                org.ratden.skavenblight.network.WarpFluxGridManager.get(level);
+
+        if (gridManager == null) return true;
+
+        net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(pos);
+
+        // Loop through all active bases to ensure we don't spawn inside ANY of them
+        for (org.ratden.skavenblight.network.WarpFluxNetwork network : gridManager.getAllNetworks()) {
+            if (network.getTerritoryChunks().contains(chunkPos)) {
+                return false; // Rejected: This chunk is claimed by a base!
+            }
+        }
+
+        return true;
     }
 
     private SourceGroupPlacement() {

@@ -50,7 +50,7 @@ public class CreateTunnelSource {
     }
 
     private static void prepareTunnelArea(ServerLevel level, BlockPos sourcePos) {
-        for (int x = -2; x <= 2; x++) {
+        /*for (int x = -2; x <= 2; x++) {
             for (int z = -2; z <= 2; z++) {
 
                 BlockPos floorPos = sourcePos.offset(x, -1, z);
@@ -71,7 +71,7 @@ public class CreateTunnelSource {
                     );
                 }
             }
-        }
+        }*/
     }
 
     private CreateTunnelSource() {
