@@ -14,65 +14,107 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public record SyncFlowFieldDebugPayload(Set<ChunkPos> territoryChunks, Map<BlockPos, SiegeNode> flowFieldMap) implements CustomPacketPayload {
+public class SyncFlowFieldDebugPayload implements CustomPacketPayload {
 
-    // 1. Declare the Payload Type
-    public static final CustomPacketPayload.Type<SyncFlowFieldDebugPayload> TYPE =
-            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("skavenblight", "sync_flow_field_debug"));
+    public static final Type<SyncFlowFieldDebugPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath("skavenblight", "sync_flow_field_debug"));
 
-    // 2. Declare the CODEC
-    public static final StreamCodec<FriendlyByteBuf, SyncFlowFieldDebugPayload> CODEC =
-            StreamCodec.ofMember(SyncFlowFieldDebugPayload::write, SyncFlowFieldDebugPayload::new);
+    public static final StreamCodec<FriendlyByteBuf, SyncFlowFieldDebugPayload> CODEC = CustomPacketPayload.codec(
+            SyncFlowFieldDebugPayload::write,
+            SyncFlowFieldDebugPayload::new
+    );
 
-    public SyncFlowFieldDebugPayload(FriendlyByteBuf buffer) {
-        this(readChunks(buffer), readMap(buffer));
+    private final Set<ChunkPos> territoryChunks;
+    private final Map<BlockPos, SiegeNode> flowFieldNodes;
+    private final Set<ChunkPos> mappedChunks;
+    private final int currentMode;
+
+    public SyncFlowFieldDebugPayload(Set<ChunkPos> territoryChunks, Map<BlockPos, SiegeNode> flowFieldNodes, Set<ChunkPos> mappedChunks, int currentMode) {
+        this.territoryChunks = territoryChunks;
+        this.flowFieldNodes = flowFieldNodes;
+        this.mappedChunks = mappedChunks;
+        this.currentMode = currentMode;
     }
 
-    public void write(FriendlyByteBuf buffer) {
-        buffer.writeInt(this.territoryChunks.size());
-        for (ChunkPos chunkPos : this.territoryChunks) {
-            buffer.writeLong(chunkPos.toLong());
+    public SyncFlowFieldDebugPayload(FriendlyByteBuf buf) {
+        // 1. Read and initialize territoryChunks
+        int territorySize = buf.readInt();
+        this.territoryChunks = new HashSet<>();
+        for (int i = 0; i < territorySize; i++) {
+            this.territoryChunks.add(buf.readChunkPos());
         }
 
-        buffer.writeInt(this.flowFieldMap.size());
-        for (Map.Entry<BlockPos, SiegeNode> entry : this.flowFieldMap.entrySet()) {
-            buffer.writeBlockPos(entry.getKey());
-            buffer.writeBlockPos(entry.getValue().pos());
-            buffer.writeEnum(entry.getValue().action());
+        // 2. Read and initialize flowFieldNodes
+        int nodeSize = buf.readInt();
+        this.flowFieldNodes = new HashMap<>();
+        for (int i = 0; i < nodeSize; i++) {
+            BlockPos pos = buf.readBlockPos();
+            BlockPos targetPos = buf.readBlockPos();
+            SiegeNode.SiegeAction action = buf.readEnum(SiegeNode.SiegeAction.class);
+            this.flowFieldNodes.put(pos, new SiegeNode(targetPos, action));
         }
+
+        // 3. Read and initialize mappedChunks
+        int mappedSize = buf.readInt();
+        this.mappedChunks = new HashSet<>();
+        for (int i = 0; i < mappedSize; i++) {
+            this.mappedChunks.add(buf.readChunkPos());
+        }
+
+        // 4. Read and initialize currentMode
+        this.currentMode = buf.readInt();
     }
 
-    private static Set<ChunkPos> readChunks(FriendlyByteBuf buffer) {
-        int size = buffer.readInt();
-        Set<ChunkPos> chunks = new HashSet<>();
-        for (int i = 0; i < size; i++) {
-            chunks.add(new ChunkPos(buffer.readLong()));
+    public void write(FriendlyByteBuf buf) {
+        buf.writeInt(this.territoryChunks.size());
+        for (ChunkPos pos : this.territoryChunks) {
+            buf.writeChunkPos(pos);
         }
-        return chunks;
-    }
 
-    private static Map<BlockPos, SiegeNode> readMap(FriendlyByteBuf buffer) {
-        int size = buffer.readInt();
-        Map<BlockPos, SiegeNode> map = new HashMap<>();
-        for (int i = 0; i < size; i++) {
-            BlockPos currentPos = buffer.readBlockPos();
-            BlockPos targetPos = buffer.readBlockPos();
-            SiegeNode.SiegeAction action = buffer.readEnum(SiegeNode.SiegeAction.class);
-
-            map.put(currentPos, new SiegeNode(targetPos, action));
+        buf.writeInt(this.flowFieldNodes.size());
+        for (Map.Entry<BlockPos, SiegeNode> entry : this.flowFieldNodes.entrySet()) {
+            buf.writeBlockPos(entry.getKey());
+            buf.writeBlockPos(entry.getValue().pos());
+            buf.writeEnum(entry.getValue().action());
         }
-        return map;
+
+        buf.writeInt(this.mappedChunks.size());
+        for (ChunkPos pos : this.mappedChunks) {
+            buf.writeChunkPos(pos);
+        }
+
+        buf.writeInt(this.currentMode);
     }
 
     @Override
-    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+    public Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
 
-    // 3. THIS is where the handle method lives!
+    // --- FIX: The handler method sits INSIDE the payload class ---
     public void handle(IPayloadContext context) {
         context.enqueueWork(() -> {
-            org.ratden.skavenblight.client.ClientDebugData.update(this.territoryChunks, this.flowFieldMap);
+            org.ratden.skavenblight.client.ClientDebugData.update(
+                    this.territoryChunks,
+                    this.flowFieldNodes,
+                    this.mappedChunks,
+                    this.currentMode
+            );
         });
+    }
+
+    public Set<ChunkPos> territoryChunks() {
+        return territoryChunks;
+    }
+
+    public Map<BlockPos, SiegeNode> flowFieldNodes() {
+        return flowFieldNodes;
+    }
+
+    public Set<ChunkPos> mappedChunks() {
+        return mappedChunks;
+    }
+
+    public int currentMode() {
+        return currentMode;
     }
 }

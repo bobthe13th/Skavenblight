@@ -61,7 +61,7 @@ public class ActiveIncursionManager {
 
     public static boolean hasActivePattern(ScenarioPattern pattern) {
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getPattern() == pattern) {
+            if (incursion.getDefinition().pattern() == pattern) {
                 return true;
             }
         }
@@ -71,7 +71,7 @@ public class ActiveIncursionManager {
 
     public static boolean hasActiveGoal(ScenarioGoal goal) {
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getGoal() == goal) {
+            if (incursion.getDefinition().goal() == goal) {
                 return true;
             }
         }
@@ -81,7 +81,7 @@ public class ActiveIncursionManager {
 
     public static boolean hasActiveOverlapType(OverlapType overlapType) {
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getOverlapType() == overlapType) {
+            if (incursion.getDefinition().overlapType() == overlapType) {
                 return true;
             }
         }
@@ -91,7 +91,7 @@ public class ActiveIncursionManager {
 
     public static boolean hasActivePressureProfile(PressureProfile pressureProfile) {
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getPressureProfile() == pressureProfile) {
+            if (incursion.getDefinition().pressureProfile() == pressureProfile) {
                 return true;
             }
         }
@@ -103,7 +103,7 @@ public class ActiveIncursionManager {
         int count = 0;
 
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getOverlapType() == overlapType) {
+            if (incursion.getDefinition().overlapType() == overlapType) {
                 count++;
             }
         }
@@ -115,7 +115,7 @@ public class ActiveIncursionManager {
         int count = 0;
 
         for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
-            if (incursion.getDefinition().getPressureProfile() == pressureProfile) {
+            if (incursion.getDefinition().pressureProfile() == pressureProfile) {
                 count++;
             }
         }

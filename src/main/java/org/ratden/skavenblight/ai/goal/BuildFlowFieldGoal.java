@@ -31,21 +31,26 @@ public class BuildFlowFieldGoal extends Goal {
 
     public void setFlowField(StandardFlowField flowField) {
         this.flowField = flowField;
+        if (this.flowField != null) {
+            System.out.println("[BuildFlowFieldGoal] Assigned FlowField Hash to Mob " + this.mob.getUUID() + ": " + System.identityHashCode(this.flowField));
+        }
     }
 
-    // --- NEW: Peek Ahead Helper Method ---
+    // Helper method to check for ALL valid building actions
+    private boolean isBuildAction(SiegeNode.SiegeAction action) {
+        return action == SiegeNode.SiegeAction.BUILD_STAIR ||
+                action == SiegeNode.SiegeAction.BUILD_BRIDGE ||
+                action == SiegeNode.SiegeAction.BUILD_PILLAR ||
+                action == SiegeNode.SiegeAction.BUILD_LANDING;
+    }
+
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
 
-        if (node == null) {
-            node = this.flowField.getDynamicWildernessNode(serverLevel, currentPos);
-        }
-
-        // Overcome vanilla boundary limits by adopting the next block's build action early
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
-            if (nextNode != null && (nextNode.action() == SiegeNode.SiegeAction.BUILD_STAIR || nextNode.action() == SiegeNode.SiegeAction.BUILD_BRIDGE)) {
+            if (nextNode != null && isBuildAction(nextNode.action())) {
                 if (currentPos.closerThan(nextNode.pos(), 2.5D)) {
                     return nextNode;
                 }
@@ -65,7 +70,8 @@ public class BuildFlowFieldGoal extends Goal {
 
         if (node == null) return false;
 
-        if (node.action() == SiegeNode.SiegeAction.BUILD_BRIDGE || node.action() == SiegeNode.SiegeAction.BUILD_STAIR) {
+        // Using the helper method to allow Pillars and Landings to trigger the goal
+        if (isBuildAction(node.action())) {
             BlockPos targetPlacePos = node.pos();
             return this.mob.level().getBlockState(targetPlacePos).canBeReplaced() && currentPos.closerThan(targetPlacePos, 2.5D);
         }
@@ -102,6 +108,7 @@ public class BuildFlowFieldGoal extends Goal {
             this.blockToPlace = Blocks.COBBLESTONE_STAIRS.defaultBlockState()
                     .setValue(StairBlock.FACING, moveDir);
         } else {
+            // Pillars, Bridges, and Landings will correctly fall through to Cobblestone
             this.blockToPlace = Blocks.COBBLESTONE.defaultBlockState();
         }
     }
@@ -125,8 +132,8 @@ public class BuildFlowFieldGoal extends Goal {
                 this.mob.level().setBlockAndUpdate(this.placePos, this.blockToPlace);
                 this.nextAllowedBuildTime = this.mob.level().getGameTime() + 10;
 
-                // --- NEW: Trigger instant Flow Field map refresh! ---
                 this.flowField.forceRecalculation();
+                System.out.println("[BuildFlowFieldGoal] Triggered Recalculation! Mob's FlowField Hash: " + System.identityHashCode(this.flowField));
             }
         }
     }

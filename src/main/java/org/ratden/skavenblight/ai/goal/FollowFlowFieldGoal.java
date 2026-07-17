@@ -33,15 +33,9 @@ public class FollowFlowFieldGoal extends Goal {
     public boolean canUse() {
         if (this.flowField == null || this.mob.getTarget() != null) return false;
 
-        BlockPos pos = this.mob.blockPosition();
-        SiegeNode node = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), pos);
-
-        // --- CHANGED: Off-path fallback ---
-        if (node == null && this.mob.level() instanceof ServerLevel serverLevel) {
-            node = this.flowField.getDynamicWildernessNode(serverLevel, pos);
-        }
-
-        return node != null && node.action() == SiegeNode.SiegeAction.WALK;
+        // --- CHANGED: Always return true if we have a flow field.
+        // We will decide whether to use Flow Field or Vanilla pathing in the tick() method.
+        return true;
     }
 
     @Override
@@ -87,11 +81,8 @@ public class FollowFlowFieldGoal extends Goal {
             BlockPos currentPos = this.mob.blockPosition();
             SiegeNode targetNode = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), currentPos);
 
-            // Dynamically retrieve node if in wilderness
-            if (targetNode == null && this.mob.level() instanceof ServerLevel serverLevel) {
-                targetNode = this.flowField.getDynamicWildernessNode(serverLevel, currentPos);
-            }
-
+            // --- CHANGED: Vanilla Pathfinding Fallback ---
+            // If there is no SiegeNode, we are in the wilderness. Hand over to vanilla AI.
             if (targetNode == null) {
                 this.mob.getNavigation().moveTo(
                         this.flowField.getTargetPos().getX() + 0.5D,
@@ -102,11 +93,13 @@ public class FollowFlowFieldGoal extends Goal {
                 return;
             }
 
+            // If we DO have a node, but it isn't WALK, stop moving so the Builder/Miner goals can take over.
             if (targetNode.action() != SiegeNode.SiegeAction.WALK) {
                 this.mob.getNavigation().stop();
                 return;
             }
 
+            // --- strict flow field execution below ---
             BlockPos nextInChain = targetNode.pos();
             int maxLookAhead = 3;
 

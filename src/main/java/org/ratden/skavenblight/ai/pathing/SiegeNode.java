@@ -5,9 +5,12 @@ import net.minecraft.core.BlockPos;
 public record SiegeNode(BlockPos pos, SiegeAction action) {
 
     public enum SiegeAction {
-        WALK,         // Path is clear. Use vanilla moveTo().
-        MINE,         // Obstacle detected. Break the block in the way.
-        BUILD_BRIDGE, // Horizontal gap detected. Place a Skaven Scaffold.
-        BUILD_STAIR   // Vertical gap detected. Place a Skaven Scaffold Stair.
+        WALK,
+        MINE,
+        BUILD_BRIDGE,
+        BUILD_STAIR,
+        BUILD_LANDING, // Forces a 3x3 staging area to break up long staircases
+        BUILD_PILLAR,  // Places a block directly beneath the rat to scale vertical shafts
+        LEAP           // Commands the rat to jump a 1-block gap
     }
 }

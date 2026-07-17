@@ -39,12 +39,12 @@ public class SpawnWolfCats {
                 continue;
             }
 
-            wolfCat.setScenarioId(leadershipContext.getScenarioId());
+            wolfCat.setScenarioId(leadershipContext.scenarioId());
             wolfCat.setSourceId(sourceId);
-            wolfCat.setVermintideId(leadershipContext.getVermintideId());
-            wolfCat.setFangId(leadershipContext.getFangId());
-            wolfCat.setClawId(leadershipContext.getClawId());
-            wolfCat.setPackId(leadershipContext.getPackId());
+            wolfCat.setVermintideId(leadershipContext.vermintideId());
+            wolfCat.setFangId(leadershipContext.fangId());
+            wolfCat.setClawId(leadershipContext.clawId());
+            wolfCat.setPackId(leadershipContext.packId());
 
             wolfCat.moveTo(
                     spawnPos.getX() + 0.5D,
@@ -92,36 +92,29 @@ public class SpawnWolfCats {
     }
 
     private static boolean isSafeSpawnPos(ServerLevel level, BlockPos pos) {
+        net.minecraft.world.level.block.state.BlockState floorState = level.getBlockState(pos.below());
+
+        boolean isSolid = floorState.isSolidRender(level, pos.below());
+        boolean isNotWater = floorState.getFluidState().isEmpty();
+        boolean isNotLeaves = !floorState.is(net.minecraft.tags.BlockTags.LEAVES); // Requires standard block tags
+        boolean isNotLog = !floorState.is(net.minecraft.tags.BlockTags.LOGS);
+
         return level.getBlockState(pos).isAir()
                 && level.getBlockState(pos.above()).isAir()
-                && level.getBlockState(pos.below()).isSolidRender(level, pos.below());
+                && isSolid
+                && isNotWater
+                && isNotLeaves
+                && isNotLog;
     }
 
     private static BlockPos createFallbackSpawnPos(ServerLevel level, BlockPos sourcePos) {
-        BlockPos fallbackPos = sourcePos.offset(1, 0, 0);
-
-        level.setBlock(
-                fallbackPos.below(),
-                Blocks.DIRT.defaultBlockState(),
-                3
-        );
-
-        level.setBlock(
-                fallbackPos,
-                Blocks.AIR.defaultBlockState(),
-                3
-        );
-
-        level.setBlock(
-                fallbackPos.above(),
-                Blocks.AIR.defaultBlockState(),
-                3
-        );
+        // We are no longer forcing Blocks.DIRT or hollowing out Blocks.AIR here!
+        // Instead, we should just look for the nearest valid surface height.
+        BlockPos fallbackPos = level.getHeightmapPos(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sourcePos.offset(1, 0, 0));
 
         if (isSafeSpawnPos(level, fallbackPos)) {
             return fallbackPos;
         }
-
         return null;
     }
 
