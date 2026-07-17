@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.action.source;
+package org.ratden.skavenblight.event.skavenIncursion.planning.source;
 
 public enum SourceSize {
     SMALL(5),

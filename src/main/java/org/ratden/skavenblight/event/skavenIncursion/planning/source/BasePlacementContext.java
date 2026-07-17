@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.action.source;
+package org.ratden.skavenblight.event.skavenIncursion.planning.source;
 
 import net.minecraft.core.BlockPos;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;

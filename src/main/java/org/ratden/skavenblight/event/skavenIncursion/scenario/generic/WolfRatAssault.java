@@ -9,7 +9,7 @@ import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWol
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SetSourceState;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SourcePlacement;
-import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
+import org.ratden.skavenblight.event.skavenIncursion.planning.budget.IncursionBudgetCosts;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.director.OverlapType;
 import org.ratden.skavenblight.event.skavenIncursion.director.PressureProfile;
@@ -130,7 +130,7 @@ public class WolfRatAssault implements SkavenScenario {
     public static int calculateWolfRatCount(ServerLevel level, IncursionTargetType targetType) {
         int threatBudget = calculateThreatBudget(level, targetType);
 
-        return Math.max(1, threatBudget / IncursionCosts.WOLF_RAT);
+        return Math.max(1, threatBudget / IncursionBudgetCosts.WOLF_RAT.threatCost());
     }
 
     public static int getComplexityBudgetMultiplier() {
@@ -157,7 +157,7 @@ public class WolfRatAssault implements SkavenScenario {
         return "Wolf Rat Assault"
                 + "\nTarget type: " + targetType
                 + "\nThreat budget: " + calculateThreatBudget(level, targetType)
-                + "\nWolf rat cost: " + IncursionCosts.WOLF_RAT
+                + "\nWolf rat cost: " + IncursionBudgetCosts.WOLF_RAT.threatCost()
                 + "\nWolf rats: " + calculateWolfRatCount(level, targetType)
                 + "\nComplexity budget: " + calculateComplexityBudget(level)
                 + "\nPoison attack chance: " + calculatePoisonAttackChancePercent(level) + "%"

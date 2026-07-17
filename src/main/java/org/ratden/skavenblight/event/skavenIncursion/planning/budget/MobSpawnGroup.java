@@ -1,7 +1,8 @@
-package org.ratden.skavenblight.event.skavenIncursion.action.source;
+package org.ratden.skavenblight.event.skavenIncursion.planning.budget;
 
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.MobModifier;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.MobOrder;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceSize;
 
 import java.util.ArrayList;
 import java.util.Collections;

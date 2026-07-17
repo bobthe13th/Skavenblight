@@ -25,8 +25,19 @@ public class WolfCat extends Cat implements IncursionOwnedMob {
     private UUID fangId;
     private UUID vermintideId;
 
+    /*
+     * Testing-only marker.
+     *
+     * This is deliberately specific to WolfCat rather than being added to
+     * IncursionOwnedMob, because the real Pack Leader system has not yet
+     * been designed.
+     */
+    private boolean testPackLeader;
+
     public WolfCat(EntityType<? extends Cat> type, Level level) {
         super(type, level);
+
+        this.testPackLeader = false;
     }
 
     public static AttributeSupplier.Builder createAttributes() {
@@ -34,7 +45,8 @@ public class WolfCat extends Cat implements IncursionOwnedMob {
                 .add(Attributes.MAX_HEALTH, 10.0D)
                 .add(Attributes.MOVEMENT_SPEED, 0.45D)
                 .add(Attributes.ATTACK_DAMAGE, 3.0D)
-                .add(Attributes.FOLLOW_RANGE, 40.0D);
+                .add(Attributes.FOLLOW_RANGE, 40.0D)
+                .add(Attributes.SCALE, 1.0D);
     }
 
     @Override
@@ -48,7 +60,22 @@ public class WolfCat extends Cat implements IncursionOwnedMob {
         this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
 
-        this.targetSelector.addGoal(1, new NearestAttackableTargetGoal<>(this, Player.class, true));
+        this.targetSelector.addGoal(
+                1,
+                new NearestAttackableTargetGoal<>(
+                        this,
+                        Player.class,
+                        true
+                )
+        );
+    }
+
+    public void setTestPackLeader(boolean testPackLeader) {
+        this.testPackLeader = testPackLeader;
+    }
+
+    public boolean isTestPackLeader() {
+        return testPackLeader;
     }
 
     @Override
@@ -138,6 +165,8 @@ public class WolfCat extends Cat implements IncursionOwnedMob {
         if (vermintideId != null) {
             tag.putUUID("vermintide_id", vermintideId);
         }
+
+        tag.putBoolean("test_pack_leader", testPackLeader);
     }
 
     @Override
@@ -167,5 +196,7 @@ public class WolfCat extends Cat implements IncursionOwnedMob {
         if (tag.hasUUID("vermintide_id")) {
             vermintideId = tag.getUUID("vermintide_id");
         }
+
+        testPackLeader = tag.getBoolean("test_pack_leader");
     }
 }
