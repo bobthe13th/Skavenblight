@@ -13,10 +13,12 @@ public class SourcePlacement {
             IncursionTargetType targetType
     ) {
         if (targetType == IncursionTargetType.NEXUS) {
-            return nearTarget(level, targetPos, 10, 18);
+            // Pushes the spawn to the edge of a typical 32-block base territory radius[cite: 50]
+            return nearTarget(level, targetPos, 32, 38);
         }
 
-        return nearTarget(level, targetPos, 8, 14);
+        // Expanded for players to keep it slightly out of immediate view[cite: 50]
+        return nearTarget(level, targetPos, 24, 32);
     }
 
     private static BlockPos nearTarget(
@@ -25,16 +27,16 @@ public class SourcePlacement {
             int minDistance,
             int maxDistance
     ) {
-        int attempts = 20;
+        int attempts = 30; // Increased attempts to account for stricter surface rules
         int sourceClearanceRadius = 6;
 
         for (int i = 0; i < attempts; i++) {
             BlockPos candidatePos = randomRingPos(level, targetPos, minDistance, maxDistance);
 
+            // StartY is no longer needed since we use heightmaps[cite: 50]
             BlockPos surfacePos = findSurface(
                     level,
                     candidatePos.getX(),
-                    targetPos.getY(),
                     candidatePos.getZ()
             );
 
@@ -44,15 +46,14 @@ public class SourcePlacement {
             }
         }
 
-        for (int i = 0; i < attempts; i++) {
-            BlockPos forcedPos = randomRingPos(level, targetPos, minDistance, maxDistance);
-
-            if (!isTooCloseToExistingSource(level, forcedPos, sourceClearanceRadius)) {
-                return forcedPos;
-            }
-        }
-
-        return randomRingPos(level, targetPos, maxDistance + sourceClearanceRadius, maxDistance + sourceClearanceRadius + 8);
+        // Fallback: If we fail to find a perfect spot (e.g., base is completely surrounded by ocean),
+        // we still use the heightmap to ensure it stays on the surface instead of forcing a
+        // raw Y-coordinate that might be mid-air or underground[cite: 50].
+        BlockPos forcedPos = randomRingPos(level, targetPos, minDistance, maxDistance);
+        return level.getHeightmapPos(
+                net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                forcedPos
+        );
     }
 
     private static BlockPos randomRingPos(
@@ -73,20 +74,24 @@ public class SourcePlacement {
     private static BlockPos findSurface(
             ServerLevel level,
             int x,
-            int startY,
             int z
     ) {
-        int minY = Math.max(level.getMinBuildHeight(), startY - 16);
-        int maxY = Math.min(level.getMaxBuildHeight() - 1, startY + 16);
+        // Replaces the manual Y-level loop with native surface snapping, ignoring tree canopies[cite: 50].
+        BlockPos surfacePos = level.getHeightmapPos(
+                net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                new BlockPos(x, 0, z)
+        );
 
-        for (int y = maxY; y >= minY; y--) {
-            BlockPos groundPos = new BlockPos(x, y, z);
-            BlockPos placePos = groundPos.above();
+        BlockPos floorPos = surfacePos.below();
+        net.minecraft.world.level.block.state.BlockState floorState = level.getBlockState(floorPos);
 
-            if (level.getBlockState(groundPos).isSolidRender(level, groundPos)
-                    && level.getBlockState(placePos).isAir()) {
-                return placePos;
-            }
+        boolean isSolid = floorState.isSolidRender(level, floorPos);
+        boolean isNotWater = floorState.getFluidState().isEmpty();
+        boolean isNotLeaves = !floorState.is(net.minecraft.tags.BlockTags.LEAVES);
+        boolean isNotLog = !floorState.is(net.minecraft.tags.BlockTags.LOGS);
+
+        if (isSolid && isNotWater && isNotLeaves && isNotLog) {
+            return surfacePos;
         }
 
         return null;
