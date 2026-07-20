@@ -1,6 +1,5 @@
 package org.ratden.skavenblight.datagen;
 
-import com.google.common.eventbus.Subscribe;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.data.DataGenerator;
 import net.minecraft.data.PackOutput;

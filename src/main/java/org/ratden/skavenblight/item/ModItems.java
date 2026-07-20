@@ -11,6 +11,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
 import org.ratden.skavenblight.item.custom.RatJuiceItem;
+import org.ratden.skavenblight.item.custom.SkavenblightBookItem;
 
 
 import java.util.List;
@@ -53,6 +54,8 @@ public class ModItems {
                     new Item.Properties().durability(ArmorItem.Type.BOOTS.getDurability(19))));
     public static final DeferredItem<Item> DEBUG_FLOW_FIELD_READER = ITEMS.register("debug_flow_field_reader",
             () -> new DebugFlowFieldReaderItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<Item> SKAVENBLIGHT_BOOK = ITEMS.register("skavenblight_book",
+            () -> new SkavenblightBookItem(new Item.Properties().stacksTo(1)));
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

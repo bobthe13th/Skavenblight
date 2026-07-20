@@ -1,0 +1,7 @@
+{
+  "book": "skavenblight:nexus_research",
+  "id": "skavenblight:nexus",
+  "name": "category.skavenblight.nexus_research.nexus.name",
+  "icon": "skavenblight:active_warpstone_nexus",
+  "sort_number": 0
+}

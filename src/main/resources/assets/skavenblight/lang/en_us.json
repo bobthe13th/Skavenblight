@@ -43,5 +43,17 @@
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
 
-  "creativetab.skavenblight": "Skavenblight"
+  "creativetab.skavenblight": "Skavenblight",
+
+  "entry.skavenblight.nexus_research.welcome.name": "Welcome to Skavenblight",
+  "page.skavenblight.nexus_research.welcome.title": "The Nexus",
+  "page.skavenblight.nexus_research.welcome.text": "Welcome, yes-yes! Your journey into the depths of Skaven engineering and chaotic magic begins here...",
+
+  "entry.skavenblight.nexus_research.magic_wip.name": "Winds of Magic (WIP)",
+  "entry.skavenblight.nexus_research.skaven_wip.name": "Skaven Engineering (WIP)",
+  "entry.skavenblight.nexus_research.dwarven_wip.name": "Dwarven Archeology (WIP)",
+
+  "page.skavenblight.nexus_research.wip.title": "Work in Progress",
+  "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!"
+
 }
