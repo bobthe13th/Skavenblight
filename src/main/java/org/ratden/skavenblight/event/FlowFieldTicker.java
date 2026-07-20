@@ -15,20 +15,29 @@ public class FlowFieldTicker {
 
     @SubscribeEvent
     public static void onLevelTick(LevelTickEvent.Post event) {
-        // Ensure this only runs on the server side
         if (event.getLevel() instanceof ServerLevel serverLevel) {
-            WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
-            if (gridManager == null) return;
+            WarpFluxGridManager gridManager =
+                    WarpFluxGridManager.get(serverLevel);
 
-            // Iterate through active networks and tick their flow fields
-            for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+            if (gridManager == null) {
+                return;
+            }
+
+            for (WarpFluxNetwork network
+                    : gridManager.getAllNetworks()) {
                 for (BlockPos endpoint : network.getEndpoints()) {
-                    if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                        StandardFlowField sharedField = network.getSharedFlowField(endpoint);
-                        if (sharedField != null) {
-                            // This ensures the queue processes continuously in the background!
-                            sharedField.calculateMapIfNeeded(serverLevel);
-                        }
+                    if (!(serverLevel.getBlockEntity(endpoint)
+                            instanceof WarpstoneNexusEntity)) {
+                        continue;
+                    }
+
+                    StandardFlowField sharedField =
+                            network.getSharedFlowField(endpoint);
+
+                    if (sharedField != null) {
+                        sharedField.calculateMapIfNeeded(
+                                serverLevel
+                        );
                     }
                 }
             }

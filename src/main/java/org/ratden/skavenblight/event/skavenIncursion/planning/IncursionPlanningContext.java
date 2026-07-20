@@ -56,9 +56,7 @@ public record IncursionPlanningContext(
                 placementContext.getTargetType()
         )) {
             throw new IllegalArgumentException(
-                    "Scenario "
-                            + scenarioDefinition.getId()
-                            + " does not allow target type "
+                    "Selected Scenario does not allow target type "
                             + placementContext.getTargetType()
                             + "."
             );

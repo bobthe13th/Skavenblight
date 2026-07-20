@@ -225,6 +225,7 @@ public class DebugIncursionLoadTest {
                             placementPos,
                             mobsForThisSource,
                             leadershipContext,
+                            packGroup.getId(),
                             createdSourceId,
                             mobType
                     );
@@ -245,7 +246,7 @@ public class DebugIncursionLoadTest {
                             .append("\nSource ID: ")
                             .append(createdSourceId)
                             .append("\nPack ID: ")
-                            .append(formatUuid(leadershipContext.getPackId()))
+                            .append(formatUuid(packGroup.getId()))
                             .append("\nRequested ")
                             .append(mobType.displayName)
                             .append(": ")
@@ -269,7 +270,8 @@ public class DebugIncursionLoadTest {
 
             source.sendSuccess(
                     () -> {
-                        StringBuilder finalMessage = new StringBuilder(message);
+                        StringBuilder finalMessage =
+                                new StringBuilder(message);
 
                         finalMessage.append("\n\nCreated sources: ")
                                 .append(finalCreatedSources)
@@ -281,13 +283,17 @@ public class DebugIncursionLoadTest {
                                 .append(loadTestSize.mobCount);
 
                         if (mobType == LoadTestMobType.WOLF_CAT_TEST_PACK) {
-                            finalMessage.append("\nTest Pack Leaders applied: ")
+                            finalMessage.append(
+                                            "\nTest Pack Leaders applied: "
+                                    )
                                     .append(finalTestPackLeadersApplied)
                                     .append(" / ")
                                     .append(finalCreatedSources);
                         }
 
-                        return Component.literal(finalMessage.toString());
+                        return Component.literal(
+                                finalMessage.toString()
+                        );
                     },
                     false
             );
@@ -307,6 +313,7 @@ public class DebugIncursionLoadTest {
             BlockPos placementPos,
             int count,
             LeadershipContext leadershipContext,
+            UUID packId,
             UUID createdSourceId,
             LoadTestMobType mobType
     ) {
@@ -338,6 +345,7 @@ public class DebugIncursionLoadTest {
                     placementPos,
                     count,
                     leadershipContext,
+                    packId,
                     createdSourceId
             );
 
@@ -359,6 +367,7 @@ public class DebugIncursionLoadTest {
             BlockPos placementPos,
             int count,
             LeadershipContext leadershipContext,
+            UUID packId,
             UUID createdSourceId
     ) {
         List<WolfCat> spawnedWolfCats = SpawnWolfCats.execute(
@@ -372,8 +381,6 @@ public class DebugIncursionLoadTest {
         if (spawnedWolfCats.isEmpty()) {
             return new SpawnResult(0, 0);
         }
-
-        UUID packId = leadershipContext.getPackId();
 
         if (packId == null) {
             throw new IllegalStateException(
