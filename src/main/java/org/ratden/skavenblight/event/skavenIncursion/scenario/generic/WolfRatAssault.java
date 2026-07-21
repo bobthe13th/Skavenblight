@@ -17,6 +17,8 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.planning.composition.IncursionMobCatalogue;
+import org.ratden.skavenblight.event.skavenIncursion.planning.stratagem.StratagemCatalogue;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
@@ -24,27 +26,38 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class WolfRatAssault implements SkavenScenario {
-    public static final ScenarioDefinition DEFINITION = new ScenarioDefinition(
-            "wolf_rat_assault",
-            ScenarioPattern.ASSAULT,
-            ScenarioGoal.PRESSURE,
-            OverlapType.MAJOR,
-            PressureProfile.COMBAT,
-            EnumSet.of(
-                    IncursionTargetType.PLAYER,
-                    IncursionTargetType.NEXUS
-            ),
-            0,
-            -1,
-            100,
-            24000L,
-            true,
-            true,
-            false
-    );
+    public static final ScenarioDefinition DEFINITION =
+            new ScenarioDefinition(
+                    "wolf_rat_assault",
+                    ScenarioPattern.ASSAULT,
+                    ScenarioGoal.PRESSURE,
+                    OverlapType.MAJOR,
+                    PressureProfile.COMBAT,
+                    EnumSet.of(
+                            IncursionTargetType.PLAYER,
+                            IncursionTargetType.NEXUS
+                    ),
+                    List.of(
+                            new ScenarioDefinition.MobRosterEntry(
+                                    IncursionMobCatalogue.WOLF_RAT,
+                                    1.0D
+                            )
+                    ),
+                    List.of(
+                            StratagemCatalogue.STEADY_1
+                    ),
+                    0,
+                    -1,
+                    100,
+                    24000L,
+                    true,
+                    true,
+                    false
+            );
 
     private final UUID instanceId;
     private final LeadershipRegistry leadershipRegistry;

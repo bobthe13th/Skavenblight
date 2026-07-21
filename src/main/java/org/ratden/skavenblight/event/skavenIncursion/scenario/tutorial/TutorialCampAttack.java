@@ -16,32 +16,45 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.planning.composition.IncursionMobCatalogue;
+import org.ratden.skavenblight.event.skavenIncursion.planning.stratagem.StratagemCatalogue;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class TutorialCampAttack implements SkavenScenario {
-    public static final ScenarioDefinition DEFINITION = new ScenarioDefinition(
-            "tutorial_camp_attack",
-            ScenarioPattern.AMBUSH,
-            ScenarioGoal.PRESSURE,
-            OverlapType.MAJOR,
-            PressureProfile.COMBAT,
-            EnumSet.of(
-                    IncursionTargetType.PLAYER
-            ),
-            0,
-            -1,
-            0,
-            0L,
-            false,
-            true,
-            false
-    );
+    public static final ScenarioDefinition DEFINITION =
+            new ScenarioDefinition(
+                    "tutorial_camp_attack",
+                    ScenarioPattern.AMBUSH,
+                    ScenarioGoal.PRESSURE,
+                    OverlapType.MAJOR,
+                    PressureProfile.COMBAT,
+                    EnumSet.of(
+                            IncursionTargetType.PLAYER
+                    ),
+                    List.of(
+                            new ScenarioDefinition.MobRosterEntry(
+                                    IncursionMobCatalogue.WOLF_RAT,
+                                    1.0D
+                            )
+                    ),
+                    List.of(
+                            StratagemCatalogue.STEADY_1
+                    ),
+                    0,
+                    -1,
+                    0,
+                    0L,
+                    false,
+                    true,
+                    false
+            );
 
     private static final int WOLF_RAT_COUNT = 3;
 

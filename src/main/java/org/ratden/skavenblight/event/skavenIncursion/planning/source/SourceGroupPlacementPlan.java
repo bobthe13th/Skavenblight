@@ -1,6 +1,7 @@
 package org.ratden.skavenblight.event.skavenIncursion.planning.source;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.ratden.skavenblight.event.skavenIncursion.planning.composition.SourceGroupComposition;
 
 import java.util.ArrayList;
@@ -11,14 +12,16 @@ import java.util.UUID;
 /**
  * Physical placement result for one planned source group.
  *
- * This object binds one SourceGroupComposition to the physical sources that
- * will execute it.
+ * One physical source group may support compositions from several waves.
+ * The contained SourcePlacementPlans represent the persistent physical
+ * sources that execute those compositions.
  */
 public class SourceGroupPlacementPlan {
 
     private final UUID sourceGroupPlacementId;
     private final UUID frontId;
-    private final UUID sourceGroupCompositionId;
+
+    private final List<UUID> sourceGroupCompositionIds;
 
     private final SourceRole sourceRole;
     private final BlockPos anchorPos;
@@ -27,7 +30,7 @@ public class SourceGroupPlacementPlan {
 
     public SourceGroupPlacementPlan(
             UUID frontId,
-            SourceGroupComposition sourceGroupComposition,
+            SourceGroupComposition initialSourceGroupComposition,
             SourceRole sourceRole,
             BlockPos anchorPos
     ) {
@@ -37,9 +40,9 @@ public class SourceGroupPlacementPlan {
             );
         }
 
-        if (sourceGroupComposition == null) {
+        if (initialSourceGroupComposition == null) {
             throw new IllegalArgumentException(
-                    "Source-group composition cannot be null."
+                    "Initial source-group composition cannot be null."
             );
         }
 
@@ -57,11 +60,16 @@ public class SourceGroupPlacementPlan {
 
         this.sourceGroupPlacementId = UUID.randomUUID();
         this.frontId = frontId;
-        this.sourceGroupCompositionId =
-                sourceGroupComposition.getSourceGroupCompositionId();
+        this.sourceGroupCompositionIds = new ArrayList<>();
+
         this.sourceRole = sourceRole;
         this.anchorPos = anchorPos.immutable();
+
         this.sourcePlacementPlans = new ArrayList<>();
+
+        bindSourceGroupComposition(
+                initialSourceGroupComposition
+        );
     }
 
     public UUID getSourceGroupPlacementId() {
@@ -72,8 +80,56 @@ public class SourceGroupPlacementPlan {
         return frontId;
     }
 
-    public UUID getSourceGroupCompositionId() {
-        return sourceGroupCompositionId;
+    /**
+     * Binds another wave's group composition to this physical source group.
+     */
+    public void bindSourceGroupComposition(
+            SourceGroupComposition sourceGroupComposition
+    ) {
+        if (sourceGroupComposition == null) {
+            throw new IllegalArgumentException(
+                    "Source-group composition cannot be null."
+            );
+        }
+
+        UUID sourceGroupCompositionId =
+                sourceGroupComposition
+                        .getSourceGroupCompositionId();
+
+        if (sourceGroupCompositionIds.contains(
+                sourceGroupCompositionId
+        )) {
+            throw new IllegalArgumentException(
+                    "Source-group placement "
+                            + sourceGroupPlacementId
+                            + " is already bound to source-group composition "
+                            + sourceGroupCompositionId
+                            + "."
+            );
+        }
+
+        sourceGroupCompositionIds.add(
+                sourceGroupCompositionId
+        );
+    }
+
+    public List<UUID> getSourceGroupCompositionIds() {
+        return Collections.unmodifiableList(
+                sourceGroupCompositionIds
+        );
+    }
+
+    public boolean isBoundToSourceGroupComposition(
+            UUID sourceGroupCompositionId
+    ) {
+        return sourceGroupCompositionId != null
+                && sourceGroupCompositionIds.contains(
+                sourceGroupCompositionId
+        );
+    }
+
+    public int getBoundCompositionCount() {
+        return sourceGroupCompositionIds.size();
     }
 
     public SourceRole getSourceRole() {
@@ -106,11 +162,31 @@ public class SourceGroupPlacementPlan {
 
     public SourcePlacementPlan createSourcePlacementPlan(
             SourceGroupComposition.SourceComposition sourceComposition,
+            SourcePlacementProfile placementProfile,
+            Direction facing,
             BlockPos sourceAnchorPos
     ) {
         if (sourceComposition == null) {
             throw new IllegalArgumentException(
                     "Source composition cannot be null."
+            );
+        }
+
+        if (placementProfile == null) {
+            throw new IllegalArgumentException(
+                    "Source placement profile cannot be null."
+            );
+        }
+
+        if (facing == null) {
+            throw new IllegalArgumentException(
+                    "Source facing cannot be null."
+            );
+        }
+
+        if (sourceAnchorPos == null) {
+            throw new IllegalArgumentException(
+                    "Source anchor position cannot be null."
             );
         }
 
@@ -121,15 +197,20 @@ public class SourceGroupPlacementPlan {
                         sourceComposition.getRequiredSourceType(),
                         sourceComposition.getRequiredSourceSize(),
                         sourceComposition.getSourceRole(),
+                        placementProfile,
+                        facing,
                         sourceAnchorPos
                 );
 
         sourcePlacementPlans.add(sourcePlacementPlan);
+
         return sourcePlacementPlan;
     }
 
     public List<SourcePlacementPlan> getSourcePlacementPlans() {
-        return Collections.unmodifiableList(sourcePlacementPlans);
+        return Collections.unmodifiableList(
+                sourcePlacementPlans
+        );
     }
 
     public boolean isEmpty() {

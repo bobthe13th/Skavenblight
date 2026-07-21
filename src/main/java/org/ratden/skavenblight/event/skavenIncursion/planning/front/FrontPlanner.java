@@ -7,6 +7,8 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanningC
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanningResult;
 import org.ratden.skavenblight.event.skavenIncursion.planning.PlanningStepResult;
 import org.ratden.skavenblight.event.skavenIncursion.planning.stratagem.StratagemDefinition;
+import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.WarpFluxNetworkGeometry;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -197,24 +199,75 @@ public class FrontPlanner {
             FrontPlacementPattern placementPattern,
             RandomSource random
     ) {
-        List<Double> angles = placementPattern.isEvenlySpaced()
-                ? createEvenlySpacedAngles(placementPattern, random)
-                : createIrregularAngles(placementPattern, random);
+        List<Double> angles =
+                placementPattern.isEvenlySpaced()
+                        ? createEvenlySpacedAngles(
+                        placementPattern,
+                        random
+                )
+                        : createIrregularAngles(
+                        placementPattern,
+                        random
+                );
 
-        List<BlockPos> anchors = new ArrayList<>();
+        List<BlockPos> anchors =
+                new ArrayList<>();
+
+        /*
+         * A Nexus does not represent the edge of its base. For Nexus-targeted
+         * incursions, resolve the complete connected Warp Flux network and
+         * measure front distance from that irregular network shape.
+         *
+         * Player-targeted planning continues to use the older target-radius
+         * calculation because there is no Warp Flux network boundary.
+         */
+        WarpFluxNetworkGeometry networkGeometry =
+                context.targetType()
+                        == IncursionTargetType.NEXUS
+                        ? context.protectedNetworkGeometrySnapshot()
+                        : null;
 
         for (double angleDegrees : angles) {
-            int distance = chooseDistance(
-                    context.minimumFrontDistance(),
-                    context.maximumFrontDistance(),
-                    random
-            );
+            BlockPos anchor;
 
-            anchors.add(calculateAnchor(
-                    context.targetPos(),
-                    angleDegrees,
-                    distance
-            ));
+            if (networkGeometry != null) {
+                anchor =
+                        networkGeometry.findPositionInClearanceBand(
+                                angleDegrees,
+                                context
+                                        .frontDistanceProfile()
+                                        .getMinPreferredNetworkClearance(),
+                                context
+                                        .frontDistanceProfile()
+                                        .getMaxPreferredNetworkClearance(),
+                                random
+                        );
+
+                /*
+                 * Returning fewer anchors produces a structured
+                 * NO_VIABLE_FRONT_PATTERN failure in planFronts(). The
+                 * IncursionPlanner may then retry with new tactical angles.
+                 */
+                if (anchor == null) {
+                    return List.of();
+                }
+            } else {
+                int distance =
+                        chooseDistance(
+                                context.minimumFrontDistance(),
+                                context.maximumFrontDistance(),
+                                random
+                        );
+
+                anchor =
+                        calculateAnchor(
+                                context.targetPos(),
+                                angleDegrees,
+                                distance
+                        );
+            }
+
+            anchors.add(anchor);
         }
 
         return anchors;

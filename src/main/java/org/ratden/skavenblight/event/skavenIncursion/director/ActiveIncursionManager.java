@@ -4,6 +4,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.event.SourceDestroyedEvent;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,6 +16,40 @@ public class ActiveIncursionManager {
 
     public static void addIncursion(SkavenScenario incursion) {
         ACTIVE_INCURSIONS.add(incursion);
+    }
+
+    /**
+     * Routes a source-destruction event to its owning active Scenario.
+     *
+     * @return true when the owning Scenario instance was active and received
+     *         the event; false when no matching active Scenario was found
+     */
+    public static boolean reportSourceDestroyed(
+            SourceDestroyedEvent event
+    ) {
+        if (event == null) {
+            throw new IllegalArgumentException(
+                    "Source destruction event cannot be null."
+            );
+        }
+
+        for (SkavenScenario incursion : ACTIVE_INCURSIONS) {
+            if (!event
+                    .scenarioInstanceId()
+                    .equals(
+                            incursion.getInstanceId()
+                    )) {
+                continue;
+            }
+
+            incursion.onSourceDestroyed(
+                    event
+            );
+
+            return true;
+        }
+
+        return false;
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
