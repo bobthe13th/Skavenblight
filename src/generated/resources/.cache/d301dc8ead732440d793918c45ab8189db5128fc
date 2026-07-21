@@ -1,4 +1,4 @@
-// 1.21.1	2026-07-20T12:18:47.8198056	Item Models: skavenblight
+// 1.21.1	2026-07-21T14:15:21.8961203	Item Models: skavenblight
 5c7b0463f979ef8a02f547d8003c3090483a29d7 assets/skavenblight/models/item/debug_flow_field_reader.json
 9fc7648f094b88989eb3b53584e0d9f5d54c165a assets/skavenblight/models/item/fused_warpstone.json
 5c4f4862d947333fda99589b8df015581b7bd640 assets/skavenblight/models/item/piston_spike_trap.json
@@ -53,3 +53,4 @@ f1cb53db29cef01df49d0c4a08aaac2548b3c8a4 assets/skavenblight/models/item/warpsto
 3ecc00865f244373894110a821e0bed75f537fa9 assets/skavenblight/models/item/warpstone_leggings_quartz_trim.json
 4f43f36dfee2d8579d110c10bb2e6c9ee92aeb80 assets/skavenblight/models/item/warpstone_leggings_redstone_trim.json
 8eb58df1849811d1bbab29c913b977c7095940ed assets/skavenblight/models/item/warpstone_wall.json
+ba237319a2dfc5d5cf5151c14a8dfb09c394d43a assets/skavenblight/models/item/warp_lightning_coil.json

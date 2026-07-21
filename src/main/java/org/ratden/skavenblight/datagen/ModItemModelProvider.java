@@ -61,6 +61,7 @@ public class ModItemModelProvider extends ItemModelProvider {
         basicItem(ModBlocks.PISTON_SPIKE_TRAP.asItem());
         basicItem(ModItems.SKAVENBLIGHT_BOOK.get());
         basicItem(ModItems.DEBUG_FLOW_FIELD_READER.asItem());
+        basicItem(ModBlocks.WARP_LIGHTNING_COIL.asItem());
     }
 
 

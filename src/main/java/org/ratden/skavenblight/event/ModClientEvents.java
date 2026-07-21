@@ -20,8 +20,9 @@ public class ModClientEvents {
         // Your existing Rat Wolf
         event.registerEntityRenderer(ModEntities.RAT_WOLF.get(), RatWolfRenderer::new);
 
-        // Add the new Piston Spike Trap here!
         event.registerBlockEntityRenderer(ModBlockEntities.PISTON_SPIKE_TRAP.get(),
                 context -> new PistonSpikeTrapRenderer());
+        event.registerBlockEntityRenderer(org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_LIGHTNING_COIL_BE.get(),
+                org.ratden.skavenblight.block.entity.client.WarpLightningCoilRenderer::new);
     }
 }

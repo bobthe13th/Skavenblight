@@ -14,6 +14,7 @@ import org.ratden.skavenblight.Skavenblight;
 
 import org.ratden.skavenblight.block.custom.*;
 
+import org.ratden.skavenblight.block.custom.WarpLightningCoilDummyBlock;
 import org.ratden.skavenblight.item.ModItems;
 
 import java.util.function.Supplier;
@@ -122,6 +123,25 @@ public class ModBlocks {
                     .sound(SoundType.METAL)
                     .noOcclusion() // Highly recommended for GeckoLib animated blocks!
             ));
+
+    public static final DeferredBlock<Block> WARP_LIGHTNING_COIL = registerBlock("warp_lightning_coil",
+            () -> new WarpLightningCoilBlock(BlockBehaviour.Properties.of()
+                    .strength(3.5f)
+                    .requiresCorrectToolForDrops()
+                    .sound(SoundType.METAL)
+                    .noOcclusion() // Essential for GeckoLib models and custom VoxelShapes
+            ));
+
+    // The invisible dummy block that handles the upper hitboxes
+    public static final DeferredBlock<Block> WARP_LIGHTNING_COIL_DUMMY = registerBlock("warp_lightning_coil_dummy",
+            () -> new WarpLightningCoilDummyBlock(BlockBehaviour.Properties.of()
+                    .strength(3.5f) // Matches the base block so mining the top feels the same
+                    .sound(SoundType.METAL)
+                    .noOcclusion() // Essential for invisible blocks
+            ));
+
+
+
     // A specialized helper function just for your expandable storage block tiers
     private static <T extends Block> DeferredBlock<T> registerStorageBlock(String name, java.util.function.Supplier<T> block) {
         DeferredBlock<T> toReturn = BLOCKS.register(name, block);

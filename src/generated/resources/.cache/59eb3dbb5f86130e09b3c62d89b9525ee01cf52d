@@ -1,4 +1,4 @@
-// 1.21.1	2026-07-10T17:50:24.5258394	Loot Tables
+// 1.21.1	2026-07-21T13:56:15.0915718	Loot Tables
 251f40f1eb84465d761d334dfa086058514201b9 data/skavenblight/loot_table/blocks/active_warpstone_nexus.json
 89dd87f6fd684cfcac00fa6e18d5b6e86556badb data/skavenblight/loot_table/blocks/basic_warp_flux_storage.json
 3b89374e00e666d484e2679c4570a1d74f52c973 data/skavenblight/loot_table/blocks/block_of_warpstone.json
@@ -19,3 +19,5 @@ ddac729708233fd6907ea684ca1e791b10a719b7 data/skavenblight/loot_table/blocks/war
 73c9e6338bcadc2ebe5f6829939333eef6df08b0 data/skavenblight/loot_table/blocks/warpstone_wall.json
 61d9ce3f255e5b69a0d3047a53640bb73e414b06 data/skavenblight/loot_table/blocks/warp_flux_conduit.json
 9d29ef1031bc544a9aac926570e00378896d3dd9 data/skavenblight/loot_table/blocks/warp_flux_furnace.json
+08207ec6370a3513122bc65ba00b6a64cb49eb36 data/skavenblight/loot_table/blocks/warp_lightning_coil.json
+ebdc16427f7350cba19654ca53ab622e7191bdc3 data/skavenblight/loot_table/blocks/warp_lightning_coil_dummy.json

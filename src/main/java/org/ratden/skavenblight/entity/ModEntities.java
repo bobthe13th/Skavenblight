@@ -11,10 +11,15 @@ import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.entity.client.ClanratRenderer;
+import org.ratden.skavenblight.entity.client.WarpLightningBoltRenderer;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
+import org.ratden.skavenblight.entity.custom.WarpLightningBoltEntity;
 import org.ratden.skavenblight.entity.custom.wolfCat.WolfCat;
 import org.ratden.skavenblight.entity.custom.WolfRat;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.block.entity.ModBlockEntities;
+import org.ratden.skavenblight.block.entity.WarpLightningCoilBlockEntity;
+import net.minecraft.core.Direction;
 
 public class ModEntities {
 
@@ -43,6 +48,15 @@ public class ModEntities {
                             .build(Skavenblight.MODID + ":clanrat")
             );
 
+    public static final DeferredHolder<EntityType<?>, EntityType<WarpLightningBoltEntity>> WARP_LIGHTNING_BOLT =
+            ENTITY_TYPES.register("warp_lightning_bolt", () ->
+                    EntityType.Builder.<WarpLightningBoltEntity>of(WarpLightningBoltEntity::new, MobCategory.MISC)
+                            .sized(0.0F, 0.0F)
+                            .clientTrackingRange(16)
+                            .updateInterval(Integer.MAX_VALUE) // Doesn't need to sync movement
+                            .build(Skavenblight.MODID + ":warp_lightning_bolt")
+            );
+
     @EventBusSubscriber(modid = Skavenblight.MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientEntityEvent { // <-- ADDED 'static' HERE
         @SubscribeEvent
@@ -53,21 +67,8 @@ public class ModEntities {
             // Registers the RatWolf renderer so it isn't invisible either!
             event.registerEntityRenderer(ModEntities.RAT_WOLF.get(), org.ratden.skavenblight.entity.client.RatWolfRenderer::new);
             event.registerEntityRenderer(ModEntities.WOLF_CAT.get(), CatRenderer::new);
-        }
-    }
-    @net.neoforged.bus.api.SubscribeEvent
-    public static void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
-        event.registerBlockEntity(
-                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
-                org.ratden.skavenblight.block.entity.ModBlockEntities.WARP_FLUX_STORAGE.get(),
-                (be, side) -> be.getFluxStorage()
-        );
 
-        // Also register your Warpstone Nexus entity if you haven't yet!
-        event.registerBlockEntity(
-                org.ratden.skavenblight.capability.ModCapabilities.WARP_FLUX,
-                org.ratden.skavenblight.block.entity.ModBlockEntities.WARPSTONE_NEXUS.get(),
-                (be, side) -> be.getFluxStorage()
-        );
+            event.registerEntityRenderer(ModEntities.WARP_LIGHTNING_BOLT.get(), WarpLightningBoltRenderer::new);
+        }
     }
 }

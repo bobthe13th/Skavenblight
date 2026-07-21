@@ -48,11 +48,31 @@ public class Config {
     private static final ModConfigSpec.IntValue BUILDING_BASE_PENALTY = BUILDER.comment("Flat pathfinding cost added when a rat has to place a block to move forward.")
             .defineInRange("buildingBasePenalty", 150, 1, 1000);
     private static final ModConfigSpec.IntValue MAX_FLOW_FIELD_NODES = BUILDER.comment("Maximum total nodes a Flow Field is allowed to map, acting as a hard limit on pathfinding range.")
-            .defineInRange("maxFlowFieldNodes", 15000, 1000, 1000000);
+            .defineInRange("maxFlowFieldNodes", 25000, 1000, 1000000);
 
-    // NEW: The settle delay config
+    // The settle delay config
     private static final ModConfigSpec.IntValue MINIMUM_SETTLE_DELAY_MS = BUILDER.comment("The minimum time in milliseconds the flow field pathfinder will wait after a block change before recalculating.")
             .defineInRange("minimumSettleDelayMs", 1000, 0, 10000);
+
+    // --- Warp Lightning Coil Configs ---
+    private static final ModConfigSpec.IntValue WL_COIL_CAPACITY = BUILDER.comment("Max Warp Flux the coil can hold.")
+            .defineInRange("wlCoilCapacity", 5000, 0, Integer.MAX_VALUE);
+    private static final ModConfigSpec.IntValue WL_COIL_COST_PER_SHOT = BUILDER.comment("Flux cost per lightning arc triggered.")
+            .defineInRange("wlCoilCostPerShot", 100, 0, Integer.MAX_VALUE);
+    private static final ModConfigSpec.IntValue WL_COIL_COOLDOWN = BUILDER.comment("Number of ticks before firing again.")
+            .defineInRange("wlCoilCooldown", 500, 0, 1000000);
+    private static final ModConfigSpec.DoubleValue WL_COIL_RANGE = BUILDER.comment("Detection and max chain range in blocks.")
+            .defineInRange("wlCoilRange", 64.0, 1.0, 256.0);
+    private static final ModConfigSpec.DoubleValue WL_COIL_DAMAGE = BUILDER.comment("Damage dealt per lightning strike.")
+            .defineInRange("wlCoilDamage", 1.0, 0.0, 100.0);
+    private static final ModConfigSpec.IntValue WL_COIL_CHAIN_COUNT = BUILDER.comment("Maximum number of additional mobs the lightning can chain to.")
+            .defineInRange("wlCoilChainCount", 15, 0, 255);
+    private static final ModConfigSpec.IntValue WL_COIL_CHAIN_RANGE = BUILDER.comment("Maximum range of mobs the lightning can chain to.")
+            .defineInRange("wlCoilChainRange", 32, 0, 255);
+    private static final ModConfigSpec.IntValue WL_COIL_POISON_TICKS = BUILDER.comment("Duration of Poison effect in ticks (20 ticks = 1 second).")
+            .defineInRange("wlCoilPoisonTicks", 1, 0, 1200);
+    private static final ModConfigSpec.IntValue WL_COIL_SLOW_TICKS = BUILDER.comment("Duration of Slowness effect in ticks.")
+            .defineInRange("wlCoilSlowTicks", 1000, 0, 1200);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -82,6 +102,16 @@ public class Config {
     public static int maxFlowFieldNodes;
     public static int minimumSettleDelayMs;
 
+    // --- Warp Lightning Coil Public Variables ---
+    public static int wlCoilCapacity;
+    public static int wlCoilCostPerShot;
+    public static double wlCoilRange;
+    public static double wlCoilDamage;
+    public static int wlCoilChainCount;
+    public static double wlCoilChainRange;
+    public static int wlCoilPoisonTicks;
+    public static int wlCoilSlowTicks;
+
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
     }
@@ -109,6 +139,16 @@ public class Config {
         buildingBasePenalty = BUILDING_BASE_PENALTY.get();
         maxFlowFieldNodes = MAX_FLOW_FIELD_NODES.get();
         minimumSettleDelayMs = MINIMUM_SETTLE_DELAY_MS.get();
+
+        // Load Warp Lightning Coil Configs
+        wlCoilCapacity = WL_COIL_CAPACITY.get();
+        wlCoilCostPerShot = WL_COIL_COST_PER_SHOT.get();
+        wlCoilRange = WL_COIL_RANGE.get();
+        wlCoilChainRange = WL_COIL_CHAIN_RANGE.get();
+        wlCoilDamage = WL_COIL_DAMAGE.get();
+        wlCoilChainCount = WL_COIL_CHAIN_COUNT.get();
+        wlCoilPoisonTicks = WL_COIL_POISON_TICKS.get();
+        wlCoilSlowTicks = WL_COIL_SLOW_TICKS.get();
 
         // convert the list of strings into a set of items
         items = ITEM_STRINGS.get().stream().map(itemName -> BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemName))).collect(Collectors.toSet());

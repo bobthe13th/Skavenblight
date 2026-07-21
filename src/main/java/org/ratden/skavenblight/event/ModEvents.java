@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.event;
 
+import net.minecraft.core.Direction;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -32,16 +33,28 @@ public class ModEvents {
 
     @SubscribeEvent
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-        // Register Warp Flux for the Nexus
+        // 1. Warpstone Nexus
         event.registerBlockEntity(
                 ModCapabilities.WARP_FLUX,
                 ModBlockEntities.WARPSTONE_NEXUS.get(),
                 (blockEntity, side) -> blockEntity.getFluxStorage()
         );
 
-        // --- NEW: Register Capabilities for the Warp Flux Furnace ---
+        // 2. Warp Flux Storage Block
+        event.registerBlockEntity(
+                ModCapabilities.WARP_FLUX,
+                ModBlockEntities.WARP_FLUX_STORAGE.get(),
+                (be, side) -> be.getFluxStorage()
+        );
 
-        // 1. Expose Warp Flux so conduits can power it
+        // 3. Warp Lightning Coil (Allows connection from any side)
+        event.registerBlockEntity(
+                ModCapabilities.WARP_FLUX,
+                ModBlockEntities.WARP_LIGHTNING_COIL_BE.get(),
+                (be, side) -> be.getFluxStorage()
+        );
+
+        // 4. Warp Flux Furnace (Flux)
         event.registerBlockEntity(
                 ModCapabilities.WARP_FLUX,
                 ModBlockEntities.WARP_FLUX_FURNACE.get(),
@@ -53,13 +66,13 @@ public class ModEvents {
                 }
         );
 
-        // 2. Expose the Item Handler so hoppers/pipes can move items in and out
+        // 5. Warp Flux Furnace (Item Handler)
         event.registerBlockEntity(
                 Capabilities.ItemHandler.BLOCK,
                 ModBlockEntities.WARP_FLUX_FURNACE.get(),
                 (blockEntity, side) -> {
                     if (blockEntity instanceof WarpFluxFurnaceBlockEntity furnace) {
-                        return furnace.getItemHandler(side); // only output out of hopper
+                        return furnace.getItemHandler(side);
                     }
                     return null;
                 }

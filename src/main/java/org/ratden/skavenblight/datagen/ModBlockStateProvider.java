@@ -57,6 +57,14 @@ public class ModBlockStateProvider extends BlockStateProvider {
 
         makeConduit(ModBlocks.WARP_FLUX_CONDUIT, "warp_flux_conduit");
 
+        // 1. Generate an empty model for the base coil so Geckolib can draw over it
+        simpleBlock(ModBlocks.WARP_LIGHTNING_COIL.get(),
+                models().getBuilder(ModBlocks.WARP_LIGHTNING_COIL.getId().getPath()));
+
+        // 2. Generate an empty model for the dummy block (so the top parts are invisible)
+        simpleBlock(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get(),
+                models().getBuilder(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.getId().getPath()));
+
         //Basic warp flux storage datagen
         // 1. Tell datagen to grab the custom model you manually placed in the resources folder
         ModelFile basicWarpFluxStorageModel = models().getExistingFile(modLoc("block/basic_warp_flux_storage"));
