@@ -50,13 +50,23 @@ public class ModRecipeProvider extends RecipeProvider implements IConditionBuild
                 .save(recipeOutput);
 
         ShapedRecipeBuilder.shaped(RecipeCategory.REDSTONE, ModBlocks.PISTON_SPIKE_TRAP.get())
-                .pattern(" I ")
-                .pattern(" P ")
-                .pattern(" W ")
-                .define('I', Items.IRON_BARS) // The spikes
-                .define('P', Items.PISTON)    // The mechanical pushing
-                .define('W', ModItems.RAW_WARPSTONE) // The flux battery
+                .pattern("I")
+                .pattern("P")
+                .pattern("W")
+                .define('I', Items.IRON_BARS)
+                .define('P', Items.PISTON)
+                .define('W', ModItems.RAW_WARPSTONE)
                 .unlockedBy(getHasName(Items.PISTON), has(Items.PISTON))
+                .save(recipeOutput);
+
+        ShapedRecipeBuilder.shaped(RecipeCategory.MISC, ModBlocks.WARP_LIGHTNING_COIL.get())
+                .pattern("C")
+                .pattern("W")
+                .pattern("I")
+                .define('C', Items.COPPER_INGOT)
+                .define('W', ModBlocks.BLOCK_OF_WARPSTONE.get())
+                .define('I', Items.IRON_BLOCK)
+                .unlockedBy("has_warpstone_block", has(ModBlocks.BLOCK_OF_WARPSTONE.get()))
                 .save(recipeOutput);
 
         ShapelessRecipeBuilder.shapeless(RecipeCategory.MISC, ModItems.FUSED_WARPSTONE.get(),9)

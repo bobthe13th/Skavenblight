@@ -104,7 +104,7 @@ public class WarpLightningCoilBlockEntity extends BlockEntity implements GeoBloc
         for (LivingEntity victim : hitTargets) {
             victim.hurt(level.damageSources().magic(), (float) Config.wlCoilDamage);
             victim.addEffect(new MobEffectInstance(MobEffects.POISON, Config.wlCoilPoisonTicks, 1));
-            victim.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, Config.wlCoilSlowTicks, 5));
+            victim.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, Config.wlCoilSlowTicks, 2));
         }
 
         this.fluxStorage.extractFlux(Config.wlCoilCostPerShot, false);

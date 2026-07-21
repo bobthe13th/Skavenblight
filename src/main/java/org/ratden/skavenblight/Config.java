@@ -62,13 +62,13 @@ public class Config {
     private static final ModConfigSpec.IntValue WL_COIL_COOLDOWN = BUILDER.comment("Number of ticks before firing again.")
             .defineInRange("wlCoilCooldown", 500, 0, 1000000);
     private static final ModConfigSpec.DoubleValue WL_COIL_RANGE = BUILDER.comment("Detection and max chain range in blocks.")
-            .defineInRange("wlCoilRange", 64.0, 1.0, 256.0);
+            .defineInRange("wlCoilRange", 6.0, 1.0, 256.0);
     private static final ModConfigSpec.DoubleValue WL_COIL_DAMAGE = BUILDER.comment("Damage dealt per lightning strike.")
-            .defineInRange("wlCoilDamage", 1.0, 0.0, 100.0);
+            .defineInRange("wlCoilDamage", 6.0, 0.0, 100.0);
     private static final ModConfigSpec.IntValue WL_COIL_CHAIN_COUNT = BUILDER.comment("Maximum number of additional mobs the lightning can chain to.")
-            .defineInRange("wlCoilChainCount", 15, 0, 255);
+            .defineInRange("wlCoilChainCount", 13, 0, 255);
     private static final ModConfigSpec.IntValue WL_COIL_CHAIN_RANGE = BUILDER.comment("Maximum range of mobs the lightning can chain to.")
-            .defineInRange("wlCoilChainRange", 32, 0, 255);
+            .defineInRange("wlCoilChainRange", 13, 0, 255);
     private static final ModConfigSpec.IntValue WL_COIL_POISON_TICKS = BUILDER.comment("Duration of Poison effect in ticks (20 ticks = 1 second).")
             .defineInRange("wlCoilPoisonTicks", 1, 0, 1200);
     private static final ModConfigSpec.IntValue WL_COIL_SLOW_TICKS = BUILDER.comment("Duration of Slowness effect in ticks.")
