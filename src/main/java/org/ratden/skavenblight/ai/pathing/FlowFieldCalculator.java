@@ -5,12 +5,16 @@ import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.Config;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FlowFieldCalculator {
 
     private PriorityQueue<QueueNode> calcQueue;
     private final Map<BlockPos, Integer> nextCostMap = new HashMap<>();
     private final Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+    // Thread-safe map exposed to debug visualizers while calculations run off-thread
+    private final Map<BlockPos, SiegeNode> liveDebugMap = new ConcurrentHashMap<>();
 
     private final TerrainEvaluator terrainEvaluator;
     private final SiegeProjectManager projectManager;
@@ -20,26 +24,22 @@ public class FlowFieldCalculator {
         this.projectManager = manager;
     }
 
-    // =================================================================================
-    // PUBLIC API
-    // =================================================================================
-
     /**
-     * Executes the entire FlowField calculation.
-     * THIS MUST BE CALLED FROM A BACKGROUND THREAD.
+     * Returns an unmodifiable snapshot of the live calculation progress.
      */
+    public Map<BlockPos, SiegeNode> getLiveDebugMap() {
+        return Collections.unmodifiableMap(this.liveDebugMap);
+    }
+
     public void calculateFully(ServerLevel level, FlowFieldState state) {
         startCalculation(level, state);
         processCalculationQueue(level, state);
     }
 
-    // =================================================================================
-    // ALGORITHM CORE
-    // =================================================================================
-
     private void startCalculation(ServerLevel level, FlowFieldState state) {
         nextCostMap.clear();
         nextInstructionMap.clear();
+        liveDebugMap.clear();
 
         calcQueue = new PriorityQueue<>();
         BlockPos targetPos = state.getTargetPos();
@@ -52,13 +52,16 @@ public class FlowFieldCalculator {
     }
 
     private void processCalculationQueue(ServerLevel level, FlowFieldState state) {
-        BlockPos targetPos = state.getTargetPos();
-
-        // Loop runs continuously until the queue is empty or the max node limit is hit
         while (!calcQueue.isEmpty()) {
             if (nextCostMap.size() >= Config.maxFlowFieldNodes) {
                 calcQueue.clear();
                 break;
+            }
+
+            // Periodically publish calculation progress for live visual rendering
+            if (nextCostMap.size() % 50 == 0) {
+                this.liveDebugMap.clear();
+                this.liveDebugMap.putAll(nextInstructionMap);
             }
 
             QueueNode qNode = calcQueue.poll();
@@ -67,18 +70,24 @@ public class FlowFieldCalculator {
 
             if (currentCost > nextCostMap.getOrDefault(current, Integer.MAX_VALUE)) continue;
 
-            boolean hitObstacle = processOrthogonalNeighbors(level, current, currentCost, targetPos);
+            // FlowFieldState acts as the boundary enforcer
+            boolean hitObstacle = processOrthogonalNeighbors(level, current, currentCost, state);
 
-            if (hitObstacle && (terrainEvaluator.isWalkableTerrain(level, current) || current.equals(targetPos))) {
-                projectManager.evaluateMacroProjects(level, current, targetPos, currentCost, calcQueue, nextCostMap, nextInstructionMap);
+            // Identify if this node is a planned midair landing blueprint
+            SiegeNode currentInstruction = nextInstructionMap.get(current);
+            boolean isPlannedLanding = currentInstruction != null && currentInstruction.action() == SiegeNode.SiegeAction.BUILD_LANDING;
+
+            // Allow macro evaluation if the node is physically walkable, the target, OR a planned landing
+            if (hitObstacle && (terrainEvaluator.isWalkableTerrain(level, current) || current.equals(state.getTargetPos()) || isPlannedLanding)) {
+                projectManager.evaluateMacroProjects(level, current, state, currentCost, calcQueue, nextCostMap, nextInstructionMap);
             }
         }
 
         finalizeCalculation(state);
     }
 
-    private boolean processOrthogonalNeighbors(ServerLevel level, BlockPos current, int currentCost, BlockPos targetPos) {
-        List<TerrainEvaluator.EvaluatedStep> validSteps = terrainEvaluator.getValidOrthogonalSteps(level, current, projectManager.getLockedPositions(), targetPos);
+    private boolean processOrthogonalNeighbors(ServerLevel level, BlockPos current, int currentCost, FlowFieldState state) {
+        List<TerrainEvaluator.EvaluatedStep> validSteps = terrainEvaluator.getValidOrthogonalSteps(level, current, projectManager.getLockedPositions(), state);
 
         for (TerrainEvaluator.EvaluatedStep step : validSteps) {
             int totalCost = currentCost + step.cost();
@@ -90,11 +99,18 @@ public class FlowFieldCalculator {
             }
         }
 
-        return validSteps.size() < 8;
+        long walkableNeighbors = validSteps.stream()
+                .filter(s -> s.action() == SiegeNode.SiegeAction.WALK && s.pos().getY() == current.getY())
+                .count();
+
+        return walkableNeighbors < 4;
     }
 
     private void finalizeCalculation(FlowFieldState state) {
-        // Pass maps to State and Foreman
+        // Final sync to guarantee debug visualizer matches finalized map state
+        this.liveDebugMap.clear();
+        this.liveDebugMap.putAll(nextInstructionMap);
+
         state.updateInstructions(new HashMap<>(nextInstructionMap));
         projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());
     }

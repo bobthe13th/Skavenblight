@@ -7,6 +7,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -17,6 +18,8 @@ import net.minecraft.world.level.Level;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
+import org.ratden.skavenblight.debug.PathingDebugFileWriter;
+import org.ratden.skavenblight.debug.TopologyExporter;
 import org.ratden.skavenblight.debug.mode.server.DetailedServerMode;
 import org.ratden.skavenblight.debug.mode.server.IServerDebugMode;
 import org.ratden.skavenblight.debug.mode.server.MacroServerMode;
@@ -24,13 +27,14 @@ import org.ratden.skavenblight.debug.mode.server.WildernessServerMode;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.network.WarpFluxNetwork;
 import org.ratden.skavenblight.network.payload.SyncFlowFieldDebugPayload;
+import org.ratden.skavenblight.world.NexusTracker;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class DebugFlowFieldReaderItem extends Item {
 
-    // --- NEW: Expandable Mode Enum ---
+    // --- Expandable Mode Enum ---
     public enum DebugMode {
         DETAILED_NODES("Detailed Block Paths", new DetailedServerMode()),
         MACRO_NAVMESH("Macro NavMesh (Chunk Routing)", new MacroServerMode()),
@@ -53,12 +57,60 @@ public class DebugFlowFieldReaderItem extends Item {
         super(properties);
     }
 
-    // --- NEW: Right-Click to cycle modes ---
+    // --- Right-Click Logic (Normal = Cycle Mode, Shift = Export Topology) ---
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
 
-        if (!level.isClientSide()) {
+        if (!level.isClientSide() && player instanceof ServerPlayer serverPlayer) {
+            ServerLevel serverLevel = (ServerLevel) level;
+
+            // --- SHIFT + RIGHT CLICK: Export Topology ---
+            if (player.isSecondaryUseActive() || player.isShiftKeyDown()) {
+                BlockPos playerPos = serverPlayer.blockPosition();
+
+                // 1. Check if the world has a globally active Nexus
+                if (!NexusTracker.hasActiveNexus(serverLevel)) {
+                    serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! No active Nexus found in the world."));
+                    return InteractionResultHolder.fail(player.getItemInHand(hand));
+                }
+
+                // 2. Fetch the active Nexus position
+                BlockPos nexusPos = NexusTracker.getActiveNexusPos(serverLevel);
+
+                // 3. Retrieve the active Flow Field using Chunk lookup
+                WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
+                StandardFlowField activeField = null;
+                net.minecraft.world.level.ChunkPos nexusChunk = new net.minecraft.world.level.ChunkPos(nexusPos);
+
+                for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+                    if (network.getTerritoryChunks().contains(nexusChunk)) {
+                        activeField = network.getSharedFlowField(serverLevel, nexusPos);
+                        break;
+                    }
+                }
+
+                // 4. Export the data if the field exists and is populated
+                if (activeField != null && !activeField.getInstructionMap().isEmpty()) {
+                    String filePath = PathingDebugFileWriter.exportDeepDump(serverLevel, activeField, playerPos, 32, 10, 32);
+
+                    if (filePath != null) {
+                        serverPlayer.sendSystemMessage(Component.literal("§a[Skavenblight] §fDeep dump saved to: §e" + filePath));
+                    } else {
+                        serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed to write dump file. Check server console."));
+                    }
+                } else {
+                    if (activeField == null) {
+                        serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! Could not find a Network claiming the Nexus at " + nexusPos.toShortString()));
+                    } else {
+                        serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! Active Flow Field is currently empty (Still calculating?)."));
+                    }
+                }
+
+                return InteractionResultHolder.success(player.getItemInHand(hand));
+            }
+
+            // --- NORMAL RIGHT CLICK: Cycle Modes ---
             CustomData customData = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
             CompoundTag tag = customData.copyTag();
 
@@ -103,7 +155,6 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (activeNexus != null) {
-                            // THE FIX: Add serverLevel here
                             StandardFlowField sharedField = network.getSharedFlowField(serverLevel, activeNexus);
                             sharedField.calculateMapIfNeeded(serverLevel);
 

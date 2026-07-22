@@ -31,7 +31,6 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
 
     public BuildFlowFieldGoal(PathfinderMob mob) {
         this.mob = mob;
-        // Lock out movement and looking to ensure the Execution Lock takes full control
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
@@ -44,14 +43,15 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
         return action == SiegeNode.SiegeAction.BUILD_STAIR ||
                 action == SiegeNode.SiegeAction.BUILD_BRIDGE ||
                 action == SiegeNode.SiegeAction.BUILD_PILLAR ||
-                action == SiegeNode.SiegeAction.BUILD_LANDING;
+                action == SiegeNode.SiegeAction.BUILD_LANDING ||
+                action == SiegeNode.SiegeAction.BUILD_SPIRAL ||
+                action == SiegeNode.SiegeAction.BUILD_LADDER; // FIXED: Added BUILD_LADDER
     }
 
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
 
-        // 1. NUDGE RECOVERY: If pushed off the path, check adjacent blocks to recover the project
         if (node == null) {
             for (Direction dir : Direction.Plane.HORIZONTAL) {
                 node = this.flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
@@ -117,7 +117,6 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
     public void tick() {
         if (this.placePos != null && this.mob.level() instanceof ServerLevel serverLevel) {
 
-            // 2. KINEMATIC EXECUTION LOCK: Anchor the rat physically so swarm traffic doesn't shove it
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
 
             this.mob.getLookControl().setLookAt(
@@ -156,11 +155,9 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
 
                 this.nextAllowedBuildTime = this.mob.level().getGameTime() + 10;
 
-                // 3. SEQUENCE PERSISTENCE: Check if the *next* block is also a build action
                 SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, this.placePos);
                 boolean isEndOfMacroProject = (nextNode == null || !isBuildAction(nextNode.action()));
 
-                // ONLY wipe and recalculate the map if the entire bridge/staircase is finished
                 if (isEndOfMacroProject && this.recalculateCooldown == 0 && !this.flowField.isCalculating()) {
                     this.flowField.forceRecalculation();
                     this.recalculateCooldown = 100;

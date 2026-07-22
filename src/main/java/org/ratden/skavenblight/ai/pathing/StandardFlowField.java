@@ -120,6 +120,10 @@ public class StandardFlowField {
     }
 
     public void calculateMapIfNeeded(ServerLevel level) {
+        if (this.isCalculatingAsync.get()) {
+            return; // Calculation already in progress! Do not launch another.
+        }
+
         long currentTime = level.getGameTime();
         boolean terrainSettled = (System.currentTimeMillis() - this.lastBlockChangeTime) >= Config.minimumSettleDelayMs;
         boolean offCooldown = (currentTime - lastCalculationStart) >= 80;
@@ -127,22 +131,20 @@ public class StandardFlowField {
         boolean shouldStart = state.isEmpty() || (this.isDirty && terrainSettled && offCooldown);
 
         if (shouldStart && this.isCalculatingAsync.compareAndSet(false, true)) {
-
             this.lastCalculationStart = currentTime;
-            LOGGER.info("[Skavenblight] Async FlowField calculation STARTED! Target: {}", state.getTargetPos());
+            LOGGER.info("[Skavenblight] Async FlowField calculation STARTED for Target: {}", state.getTargetPos());
 
             CompletableFuture.runAsync(() -> {
                 try {
                     this.calculator.calculateFully(level, this.state);
                 } catch (Exception e) {
                     LOGGER.error("[Skavenblight] Async FlowField calculation crashed!", e);
+                } finally {
+                    this.isDirty = false;
+                    this.isCalculatingAsync.set(false); // ALWAYS release in a finally block!
                 }
             }, Util.backgroundExecutor()).thenAcceptAsync(v -> {
-
-                this.isDirty = false;
-                this.isCalculatingAsync.set(false);
                 LOGGER.info("[Skavenblight] Async FlowField calculation FINISHED! Total Nodes: {}", state.getInstructionMap().size());
-
             }, level.getServer());
         }
     }
@@ -165,6 +167,9 @@ public class StandardFlowField {
     // =================================================================================
     // GETTERS & HELPERS
     // =================================================================================
+    public Map<BlockPos, SiegeNode> getLiveDebugMap() {
+        return this.calculator.getLiveDebugMap();
+    }
 
     public Map<BlockPos, SiegeNode> getInstructionMap() { return state.getInstructionMap(); }
     public BlockPos getTargetPos() { return state.getTargetPos(); }
@@ -189,7 +194,11 @@ public class StandardFlowField {
         int dz = Integer.compare(heading.getZ(), ratPos.getZ());
 
         if (dx == 0 && dy == 0 && dz == 0) return new SiegeNode(ratPos, SiegeNode.SiegeAction.WALK);
-        return evaluator.determineMacroAction(level, ratPos.offset(dx, dy, dz), dy, dx, dz);
+
+        BlockPos stepPos = ratPos.offset(dx, dy, dz);
+        SiegeNode.SiegeAction action = evaluator.determineMacroAction(level, stepPos, dy, dx, dz, state.getTargetPos());
+
+        return new SiegeNode(stepPos, action);
     }
 
     private BlockPos getOffsetPostAction(SiegeNode node) {

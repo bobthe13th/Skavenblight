@@ -10,10 +10,16 @@ import java.util.Map;
 public class DetailedServerMode implements IServerDebugMode {
     @Override
     public void collectData(ServerLevel level, BlockPos playerPos, StandardFlowField sharedField, Map<BlockPos, SiegeNode> localNodes) {
-        for (BlockPos pos : sharedField.getInstructionMap().keySet()) {
-            if (pos.closerThan(playerPos, 16)) {
-                SiegeNode nextNode = sharedField.getNextSiegeNode(level, pos);
-                if (nextNode != null) localNodes.put(pos, nextNode);
+        Map<BlockPos, SiegeNode> activeMap = sharedField.getInstructionMap();
+
+        // If calculation is currently running, show the live progress map!
+        if (activeMap.isEmpty() && sharedField.isCalculating()) {
+            activeMap = sharedField.getLiveDebugMap();
+        }
+
+        for (Map.Entry<BlockPos, SiegeNode> entry : activeMap.entrySet()) {
+            if (entry.getKey().closerThan(playerPos, 24)) {
+                localNodes.put(entry.getKey(), entry.getValue());
             }
         }
     }

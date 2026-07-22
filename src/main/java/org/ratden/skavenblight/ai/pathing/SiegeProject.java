@@ -7,11 +7,13 @@ import java.util.Map;
 
 /**
  * A data class representing an active multi-block building or mining project.
+ * This project may bridge directly to the ground, or it may be a chained segment
+ * terminating in a mid-air BUILD_LANDING.
  */
 public class SiegeProject {
 
     private final Map<BlockPos, SiegeNode> instructions;
-    private final BlockPos entryPos; // The block where rats enter this project
+    private final BlockPos entryPos; // The block where rats enter this project (can be on ground or a mid-air landing)
     private final int expectedEntryCost; // The massive penalty cost assigned to this project
 
     public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost) {
@@ -25,9 +27,9 @@ public class SiegeProject {
     }
 
     public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
-        // 1. ENTRY POINT VALIDATION (The Fix)
-        // If the final Dijkstra map gave our entry point a cheaper cost than
-        // the project's massive penalty, a walkable highway exists! Kill the project.
+        // 1. ENTRY POINT VALIDATION
+        // If the final Dijkstra map gave our entry point (whether ground or chained landing)
+        // a cheaper cost than the project's massive penalty, a walkable highway exists! Kill the project.
         int finalCost = finalCostMap.getOrDefault(entryPos, Integer.MAX_VALUE);
         if (finalCost < expectedEntryCost) {
             return false;
@@ -49,4 +51,13 @@ public class SiegeProject {
         });
         return remaining;
     }
+
+    public BlockPos getEntryPos() {
+        return entryPos;
+    }
+
+    public int getExpectedEntryCost() {
+        return expectedEntryCost;
+    }
+
 }
