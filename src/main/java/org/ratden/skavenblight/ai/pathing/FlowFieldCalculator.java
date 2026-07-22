@@ -5,7 +5,6 @@ import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.Config;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class FlowFieldCalculator {
 
@@ -13,22 +12,24 @@ public class FlowFieldCalculator {
     private final Map<BlockPos, Integer> nextCostMap = new HashMap<>();
     private final Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
 
-    // Thread-safe map exposed to debug visualizers while calculations run off-thread
-    private final Map<BlockPos, SiegeNode> liveDebugMap = new ConcurrentHashMap<>();
+    // FIXED: Volatile immutable map reference for atomic, zero-flicker snapshot reads across threads
+    private volatile Map<BlockPos, SiegeNode> liveDebugMap = Collections.emptyMap();
 
     private final TerrainEvaluator terrainEvaluator;
     private final SiegeProjectManager projectManager;
+    private final CalculationThrottler throttler;
 
-    public FlowFieldCalculator(TerrainEvaluator evaluator, SiegeProjectManager manager) {
+    public FlowFieldCalculator(TerrainEvaluator evaluator, SiegeProjectManager manager, CalculationThrottler throttler) {
         this.terrainEvaluator = evaluator;
         this.projectManager = manager;
+        this.throttler = throttler;
     }
 
     /**
-     * Returns an unmodifiable snapshot of the live calculation progress.
+     * Returns an unmodifiable atomic snapshot of live calculation progress.
      */
     public Map<BlockPos, SiegeNode> getLiveDebugMap() {
-        return Collections.unmodifiableMap(this.liveDebugMap);
+        return this.liveDebugMap;
     }
 
     public void calculateFully(ServerLevel level, FlowFieldState state) {
@@ -39,7 +40,7 @@ public class FlowFieldCalculator {
     private void startCalculation(ServerLevel level, FlowFieldState state) {
         nextCostMap.clear();
         nextInstructionMap.clear();
-        liveDebugMap.clear();
+        liveDebugMap = Collections.emptyMap();
 
         calcQueue = new PriorityQueue<>();
         BlockPos targetPos = state.getTargetPos();
@@ -52,16 +53,18 @@ public class FlowFieldCalculator {
     }
 
     private void processCalculationQueue(ServerLevel level, FlowFieldState state) {
+        // FIXED: Dynamically throttle max allowed nodes per calculation using MSPT metric
+        int maxAllowedNodes = Math.min(Config.maxFlowFieldNodes, throttler.getNodesPerTick());
+
         while (!calcQueue.isEmpty()) {
-            if (nextCostMap.size() >= Config.maxFlowFieldNodes) {
+            if (nextCostMap.size() >= maxAllowedNodes) {
                 calcQueue.clear();
                 break;
             }
 
-            // Periodically publish calculation progress for live visual rendering
+            // FIXED: Atomically publish progress snapshot without clearing the active map
             if (nextCostMap.size() % 50 == 0) {
-                this.liveDebugMap.clear();
-                this.liveDebugMap.putAll(nextInstructionMap);
+                this.liveDebugMap = Map.copyOf(nextInstructionMap);
             }
 
             QueueNode qNode = calcQueue.poll();
@@ -70,14 +73,11 @@ public class FlowFieldCalculator {
 
             if (currentCost > nextCostMap.getOrDefault(current, Integer.MAX_VALUE)) continue;
 
-            // FlowFieldState acts as the boundary enforcer
             boolean hitObstacle = processOrthogonalNeighbors(level, current, currentCost, state);
 
-            // Identify if this node is a planned midair landing blueprint
             SiegeNode currentInstruction = nextInstructionMap.get(current);
             boolean isPlannedLanding = currentInstruction != null && currentInstruction.action() == SiegeNode.SiegeAction.BUILD_LANDING;
 
-            // Allow macro evaluation if the node is physically walkable, the target, OR a planned landing
             if (hitObstacle && (terrainEvaluator.isWalkableTerrain(level, current) || current.equals(state.getTargetPos()) || isPlannedLanding)) {
                 projectManager.evaluateMacroProjects(level, current, state, currentCost, calcQueue, nextCostMap, nextInstructionMap);
             }
@@ -107,9 +107,8 @@ public class FlowFieldCalculator {
     }
 
     private void finalizeCalculation(FlowFieldState state) {
-        // Final sync to guarantee debug visualizer matches finalized map state
-        this.liveDebugMap.clear();
-        this.liveDebugMap.putAll(nextInstructionMap);
+        // FIXED: Atomic snapshot update
+        this.liveDebugMap = Map.copyOf(nextInstructionMap);
 
         state.updateInstructions(new HashMap<>(nextInstructionMap));
         projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());

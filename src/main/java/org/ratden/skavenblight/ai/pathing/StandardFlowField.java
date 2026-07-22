@@ -19,6 +19,7 @@ public class StandardFlowField {
     // --- Subsystems ---
     private final FlowFieldState state;
     private final TerrainEvaluator evaluator;
+    private final CalculationThrottler throttler; // FIXED: Integrated throttler
     private final SiegeProjectManager projectManager;
     private final FlowFieldCalculator calculator;
 
@@ -35,25 +36,24 @@ public class StandardFlowField {
     public StandardFlowField(ServerLevel level, BlockPos targetPos, Set<ChunkPos> territoryChunks) {
         this.state = new FlowFieldState(targetPos, territoryChunks);
         this.evaluator = new TerrainEvaluator();
+        this.throttler = new CalculationThrottler(); // FIXED: Initialized throttler
         this.projectManager = new SiegeProjectManager(this.evaluator);
-        this.calculator = new FlowFieldCalculator(this.evaluator, this.projectManager);
+        this.calculator = new FlowFieldCalculator(this.evaluator, this.projectManager, this.throttler);
 
-        // Lock territory chunks in memory as soon as the Flow Field is initialized
         syncTerritoryChunkTickets(level, territoryChunks);
+    }
+
+    public CalculationThrottler getThrottler() {
+        return this.throttler;
     }
 
     // =================================================================================
     // CHUNK TICKET MANAGEMENT
     // =================================================================================
 
-    /**
-     * Forces territory chunks to stay loaded in the world, and releases any chunks
-     * no longer inside the active base bounds.
-     */
     public void syncTerritoryChunkTickets(ServerLevel level, Set<ChunkPos> newTerritory) {
         if (level == null) return;
 
-        // 1. Release chunks that are no longer part of the territory
         Iterator<ChunkPos> iterator = forcedChunks.iterator();
         while (iterator.hasNext()) {
             ChunkPos cp = iterator.next();
@@ -64,7 +64,6 @@ public class StandardFlowField {
             }
         }
 
-        // 2. Force load all new territory chunks
         if (newTerritory != null) {
             for (ChunkPos cp : newTerritory) {
                 if (forcedChunks.add(cp)) {
@@ -75,10 +74,6 @@ public class StandardFlowField {
         }
     }
 
-    /**
-     * CRITICAL: Must be called when the base, Nexus, or FlowField is removed/destroyed
-     * to prevent server memory leaks!
-     */
     public void cleanup(ServerLevel level) {
         if (level == null) return;
 
@@ -121,8 +116,11 @@ public class StandardFlowField {
 
     public void calculateMapIfNeeded(ServerLevel level) {
         if (this.isCalculatingAsync.get()) {
-            return; // Calculation already in progress! Do not launch another.
+            return;
         }
+
+        // FIXED: Keep server performance metrics fresh prior to pathing run
+        this.throttler.tick(level.getServer());
 
         long currentTime = level.getGameTime();
         boolean terrainSettled = (System.currentTimeMillis() - this.lastBlockChangeTime) >= Config.minimumSettleDelayMs;
@@ -141,7 +139,7 @@ public class StandardFlowField {
                     LOGGER.error("[Skavenblight] Async FlowField calculation crashed!", e);
                 } finally {
                     this.isDirty = false;
-                    this.isCalculatingAsync.set(false); // ALWAYS release in a finally block!
+                    this.isCalculatingAsync.set(false);
                 }
             }, Util.backgroundExecutor()).thenAcceptAsync(v -> {
                 LOGGER.info("[Skavenblight] Async FlowField calculation FINISHED! Total Nodes: {}", state.getInstructionMap().size());

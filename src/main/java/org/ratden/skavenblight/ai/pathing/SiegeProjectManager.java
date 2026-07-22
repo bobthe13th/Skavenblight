@@ -10,7 +10,6 @@ import java.util.*;
 
 public class SiegeProjectManager {
 
-    // --- Added Logger Field Declaration ---
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final int MAX_PROJECT_LENGTH = 32;
@@ -73,7 +72,6 @@ public class SiegeProjectManager {
                                       Map<BlockPos, Integer> nextCostMap,
                                       Map<BlockPos, SiegeNode> nextInstructionMap) {
 
-        // Self-Evaluation: Ensure anchor itself is valid
         if (!terrainEvaluator.isWalkableTerrain(level, anchorPos)) {
             SiegeNode.SiegeAction selfAction = terrainEvaluator.determineMacroAction(level, anchorPos, 0, 0, 0, state.getTargetPos());
             if (selfAction != SiegeNode.SiegeAction.WALK) {
@@ -81,19 +79,16 @@ public class SiegeProjectManager {
             }
         }
 
-        // 1. Evaluate vertical shafts & spiral columns around conduits
         for (int dy : new int[]{-1, 1}) {
             evaluateSingleLine(level, anchorPos, state, anchorCost, 0, dy, 0, calcQueue, nextCostMap, nextInstructionMap);
         }
 
-        // 2. Evaluate horizontal bridges (dy=0) and diagonal staircases (dy=-1, 1)
         for (int[] dir : CARDINAL_OFFSETS) {
             for (int dy : new int[]{-1, 0, 1}) {
                 evaluateSingleLine(level, anchorPos, state, anchorCost, dir[0], dy, dir[1], calcQueue, nextCostMap, nextInstructionMap);
             }
         }
 
-        // Record anchorPos ONLY AFTER evaluating all directional rays from it
         plannedProjects.add(anchorPos.immutable());
     }
 
@@ -117,7 +112,6 @@ public class SiegeProjectManager {
                 break;
             }
 
-            // Prevent project collisions while allowing tight zigzags/spirals
             if (isNearExistingProject(nextPos, anchorPos)) return;
 
             SiegeNode.SiegeAction action = terrainEvaluator.determineMacroAction(level, nextPos, dy, dx, dz, state.getTargetPos());
@@ -145,8 +139,10 @@ public class SiegeProjectManager {
 
             // 1. Natural Completion: Line reaches walkable ground
             if (terrainEvaluator.isWalkableTerrain(level, nextPos)) {
-                LOGGER.info("[Pathfinder] Successful Macro Line built from {} to {} (Length: {}, Action: {})",
+                // FIXED: Changed log level from INFO to DEBUG to prevent log flooding
+                LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Length: {}, Action: {})",
                         anchorPos.toShortString(), nextPos.toShortString(), i, action);
+
                 if (!projectInstructions.isEmpty()) {
                     candidateProjects.add(new SiegeProject(projectInstructions, nextPos, totalCost));
 
