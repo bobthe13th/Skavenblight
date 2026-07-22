@@ -8,16 +8,17 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
-import org.ratden.skavenblight.ai.goal.SmartBreachGoal;
-import org.ratden.skavenblight.ai.goal.BuildFlowFieldGoal;
-import org.ratden.skavenblight.ai.goal.WidenStairsGoal;
+import org.ratden.skavenblight.ai.goal.*;
+import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationController;
 import software.bernie.geckolib.animation.RawAnimation;
 import software.bernie.geckolib.util.GeckoLibUtil;
-import org.ratden.skavenblight.ai.goal.FollowFlowFieldGoal;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
@@ -74,13 +75,11 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 double closestDist = Double.MAX_VALUE;
 
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
-                    // If we spawned inside a territory, lock on immediately and break
                     if (network.getTerritoryChunks().contains(currentChunk)) {
                         closestNetwork = network;
                         break;
                     }
 
-                    // Otherwise, find the closest base by checking distance to its Nexus endpoints
                     for (BlockPos endpoint : network.getEndpoints()) {
                         double dist = this.blockPosition().distSqr(endpoint);
                         if (dist < closestDist) {
@@ -90,7 +89,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
                     }
                 }
 
-                // Assign the flow field from the network we selected
                 if (closestNetwork != null) {
                     BlockPos activeNexus = null;
 
@@ -113,14 +111,8 @@ public class ClanratEntity extends Monster implements GeoEntity {
     public void assignFlowField(StandardFlowField field) {
         this.currentFlowField = field;
         this.goalSelector.getAvailableGoals().forEach(wrappedGoal -> {
-            if (wrappedGoal.getGoal() instanceof FollowFlowFieldGoal flowGoal) {
-                flowGoal.setFlowField(field);
-            } else if (wrappedGoal.getGoal() instanceof SmartBreachGoal breachGoal) {
-                breachGoal.setFlowField(field);
-            } else if (wrappedGoal.getGoal() instanceof BuildFlowFieldGoal buildGoal) {
-                buildGoal.setFlowField(field);
-            } else if (wrappedGoal.getGoal() instanceof WidenStairsGoal widenGoal) {
-                widenGoal.setFlowField(field);
+            if (wrappedGoal.getGoal() instanceof SiegeGoal siegeGoal) {
+                siegeGoal.setFlowField(field);
             }
         });
     }

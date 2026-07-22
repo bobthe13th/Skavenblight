@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.ai.goal;
+package org.ratden.skavenblight.ai.goal.clanrat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -6,13 +6,14 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
+import org.ratden.skavenblight.ai.goal.SiegeGoal;
+import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 
 import java.util.EnumSet;
 
-public class SmartBreachGoal extends Goal {
+public class SmartBreachGoal extends Goal implements SiegeGoal {
     private final PathfinderMob mob;
     private StandardFlowField flowField;
 
@@ -27,10 +28,6 @@ public class SmartBreachGoal extends Goal {
 
     public void setFlowField(StandardFlowField flowField) {
         this.flowField = flowField;
-        // --- DIAGNOSTIC LOG ---
-        if (this.flowField != null) {
-            System.out.println("[SmartBreachGoal] Assigned FlowField Hash to Mob " + this.mob.getUUID() + ": " + System.identityHashCode(this.flowField));
-        }
     }
 
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
@@ -72,13 +69,8 @@ public class SmartBreachGoal extends Goal {
     @Override
     public void start() {
         this.miningTicks = 0;
-        BlockState state = this.mob.level().getBlockState(this.targetBlock);
-        float hardness = state.getDestroySpeed(this.mob.level(), this.targetBlock);
-
-        this.maxMiningTicks = (int) (hardness * 20);
-        if (this.maxMiningTicks <= 0) {
-            this.maxMiningTicks = 5;
-        }
+        // Delegate hardness math to the handler
+        this.maxMiningTicks = SiegeInteractionHandler.calculateMiningTicks((ServerLevel)this.mob.level(), this.targetBlock);
     }
 
     @Override
@@ -91,9 +83,7 @@ public class SmartBreachGoal extends Goal {
 
         this.miningTicks++;
 
-        if (this.miningTicks % 5 == 0) {
-            this.mob.swing(InteractionHand.MAIN_HAND);
-        }
+        if (this.miningTicks % 5 == 0) this.mob.swing(InteractionHand.MAIN_HAND);
         if (this.miningTicks % 10 == 0) {
             this.mob.level().levelEvent(2001, this.targetBlock, Block.getId(this.mob.level().getBlockState(this.targetBlock)));
         }
@@ -103,12 +93,11 @@ public class SmartBreachGoal extends Goal {
 
         if (this.miningTicks >= this.maxMiningTicks) {
             if (this.mob.level() instanceof ServerLevel serverLevel) {
-                serverLevel.destroyBlock(this.targetBlock, true, this.mob);
-                this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, -1);
+                // Delegate destruction to the handler
+                SiegeInteractionHandler.executeBreach(serverLevel, this.targetBlock, this.flowField);
 
+                this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, -1);
                 this.flowField.forceRecalculation();
-                // --- DIAGNOSTIC LOG ---
-                System.out.println("[SmartBreachGoal] Triggered Recalculation! Mob's FlowField Hash: " + System.identityHashCode(this.flowField));
             }
         }
     }

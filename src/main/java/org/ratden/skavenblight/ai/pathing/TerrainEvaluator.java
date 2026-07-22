@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.Config;
+import net.minecraft.core.Direction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -110,7 +111,15 @@ public class TerrainEvaluator {
         if (!support.blocksMotion() && !isWalkableScaffold(support)) {
             SiegeNode.SiegeAction action;
             if (dx == 0 && dz == 0 && dy > 0) {
-                action = SiegeNode.SiegeAction.BUILD_PILLAR;
+                // ADDED: Check if there is a wall adjacent to us to place a ladder on
+                boolean hasWall = false;
+                for (Direction dir : Direction.Plane.HORIZONTAL) {
+                    if (level.getBlockState(pos.relative(dir)).isSolidRender(level, pos.relative(dir))) {
+                        hasWall = true;
+                        break;
+                    }
+                }
+                action = hasWall ? SiegeNode.SiegeAction.BUILD_LADDER : SiegeNode.SiegeAction.BUILD_PILLAR;
             } else if (dy != 0) {
                 action = SiegeNode.SiegeAction.BUILD_STAIR;
             } else {
@@ -161,6 +170,7 @@ public class TerrainEvaluator {
     private boolean isWalkableScaffold(BlockState state) {
         return state.getBlock() instanceof net.minecraft.world.level.block.StairBlock ||
                 state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock ||
+                state.getBlock() instanceof net.minecraft.world.level.block.LadderBlock ||
                 state.is(Blocks.COBBLESTONE);
     }
 

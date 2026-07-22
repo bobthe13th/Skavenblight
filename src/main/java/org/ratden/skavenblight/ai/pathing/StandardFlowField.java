@@ -29,6 +29,7 @@ public class StandardFlowField {
     private boolean isDirty = true;
     private long lastCalculationStart = 0;
     private long lastBlockChangeTime = 0;
+    private final Set<BlockPos> ignoredSkavenEdits = new HashSet<>();
 
     public StandardFlowField(BlockPos targetPos, Set<ChunkPos> territoryChunks) {
         this.state = new FlowFieldState(targetPos, territoryChunks);
@@ -42,9 +43,21 @@ public class StandardFlowField {
     // PUBLIC API FOR AI GOALS & EVENTS
     // =================================================================================
 
+    public void ignoreNextBlockChangeAt(BlockPos pos) {
+        this.ignoredSkavenEdits.add(pos.immutable());
+    }
+
     public void onBlockChanged(BlockPos pos) {
-        // Only care about blocks inside our mapped territory[cite: 15, 20]
-        if (!state.isOutOfBounds(pos)) {
+        BlockPos immutablePos = pos.immutable();
+
+        // ADD THIS: Check if a Skaven just edited this block.
+        // If remove() returns true, it was on the list, so we abort!
+        if (this.ignoredSkavenEdits.remove(immutablePos)) {
+            return;
+        }
+
+        // Only care about blocks inside our mapped territory
+        if (!state.isOutOfBounds(immutablePos)) {
             this.isDirty = true;
             this.lastBlockChangeTime = System.currentTimeMillis();
         }

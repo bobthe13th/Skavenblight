@@ -27,7 +27,6 @@ public class SiegeBlockEventHandler {
         if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel serverLevel)) return;
 
         handleBlockChange(serverLevel, event.getPos());
-        System.out.println("[Skavenblight] Player placed block at: " + event.getPos());
     }
 
     /**

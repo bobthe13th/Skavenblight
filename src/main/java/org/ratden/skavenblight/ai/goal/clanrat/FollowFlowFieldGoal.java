@@ -1,16 +1,17 @@
-package org.ratden.skavenblight.ai.goal;
+package org.ratden.skavenblight.ai.goal.clanrat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
+import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 
 import java.util.EnumSet;
 
-public class FollowFlowFieldGoal extends Goal {
+public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
     private final PathfinderMob mob;
     private final double speedModifier;
     private StandardFlowField flowField;
