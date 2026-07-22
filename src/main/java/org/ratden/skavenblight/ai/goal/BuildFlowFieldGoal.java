@@ -23,6 +23,7 @@ public class BuildFlowFieldGoal extends Goal {
     private final int maxBuildTicks = 15;
     private BlockPos placePos;
     private BlockState blockToPlace;
+    private int recalculateCooldown = 0;
 
     public BuildFlowFieldGoal(PathfinderMob mob) {
         this.mob = mob;
@@ -128,12 +129,21 @@ public class BuildFlowFieldGoal extends Goal {
 
             this.buildTicks++;
 
+            // Process the cooldown
+            if (this.recalculateCooldown > 0) {
+                this.recalculateCooldown--;
+            }
+
             if (this.buildTicks >= this.maxBuildTicks) {
                 this.mob.level().setBlockAndUpdate(this.placePos, this.blockToPlace);
                 this.nextAllowedBuildTime = this.mob.level().getGameTime() + 10;
 
-                this.flowField.forceRecalculation();
-                System.out.println("[BuildFlowFieldGoal] Triggered Recalculation! Mob's FlowField Hash: " + System.identityHashCode(this.flowField));
+                // 1. Check cooldown and calculating state before requesting a new map
+                if (this.recalculateCooldown == 0 && !this.flowField.isCalculating()) {
+                    this.flowField.forceRecalculation();
+                    this.recalculateCooldown = 100; // 5-second cooldown at 20 TPS
+                    System.out.println("[BuildFlowFieldGoal] Triggered Recalculation! Mob's FlowField Hash: " + System.identityHashCode(this.flowField));
+                }
             }
         }
     }
