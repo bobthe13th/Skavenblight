@@ -255,9 +255,11 @@ public class WarpFluxNetwork {
      * Gets the shared flow field for a specific Nexus.
      * Everything (Rats, Debug Item, Incursions) should use this single instance.
      */
-    public StandardFlowField getSharedFlowField(BlockPos targetNexus) {
+    // === FIX: Added ServerLevel level to the method parameters ===
+    public StandardFlowField getSharedFlowField(ServerLevel level, BlockPos targetNexus) {
         return flowFields.computeIfAbsent(targetNexus, pos ->
-                new StandardFlowField(pos, this.getTerritoryChunks())
+                // === FIX: Passed level into the StandardFlowField constructor ===
+                new StandardFlowField(level, pos, this.getTerritoryChunks())
         );
     }
 

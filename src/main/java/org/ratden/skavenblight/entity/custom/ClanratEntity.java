@@ -100,7 +100,7 @@ public class ClanratEntity extends Monster implements GeoEntity {
                     }
 
                     if (activeNexus != null) {
-                        StandardFlowField sharedField = closestNetwork.getSharedFlowField(activeNexus);
+                        StandardFlowField sharedField = closestNetwork.getSharedFlowField(serverLevel, activeNexus);
                         this.assignFlowField(sharedField);
                     }
                 }

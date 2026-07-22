@@ -19,7 +19,7 @@ public class SiegeBlockEventHandler {
         if (event.getLevel().isClientSide() || !(event.getLevel() instanceof ServerLevel serverLevel)) return;
 
         handleBlockChange(serverLevel, event.getPos());
-        System.out.println("[Skavenblight] Player broke block at: " + event.getPos());
+        //System.out.println("[Skavenblight] Player broke block at: " + event.getPos());
     }
 
     @SubscribeEvent
@@ -40,9 +40,8 @@ public class SiegeBlockEventHandler {
         for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
             for (BlockPos endpoint : network.getEndpoints()) {
                 if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                    StandardFlowField sharedField = network.getSharedFlowField(endpoint);
+                    StandardFlowField sharedField = network.getSharedFlowField(serverLevel, endpoint);
                     if (sharedField != null) {
-                        // This sets 'isDirty = true' inside the FlowField if the block is within the siege territory
                         sharedField.onBlockChanged(pos);
                     }
                 }

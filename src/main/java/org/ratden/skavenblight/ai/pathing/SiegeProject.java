@@ -11,18 +11,31 @@ import java.util.Map;
 public class SiegeProject {
 
     private final Map<BlockPos, SiegeNode> instructions;
+    private final BlockPos entryPos; // The block where rats enter this project
+    private final int expectedEntryCost; // The massive penalty cost assigned to this project
 
-    public SiegeProject(Map<BlockPos, SiegeNode> instructions) {
+    public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost) {
         this.instructions = new HashMap<>(instructions);
+        this.entryPos = entryPos;
+        this.expectedEntryCost = expectedEntryCost;
     }
 
     public boolean isCompleted(ServerLevel level, TerrainEvaluator evaluator) {
         return instructions.values().stream().allMatch(node -> evaluator.isActionCompleted(level, node));
     }
 
-    public boolean survivedMapOverwrite(Map<BlockPos, SiegeNode> finalMap) {
+    public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
+        // 1. ENTRY POINT VALIDATION (The Fix)
+        // If the final Dijkstra map gave our entry point a cheaper cost than
+        // the project's massive penalty, a walkable highway exists! Kill the project.
+        int finalCost = finalCostMap.getOrDefault(entryPos, Integer.MAX_VALUE);
+        if (finalCost < expectedEntryCost) {
+            return false;
+        }
+
+        // 2. Fallback check for the project blocks themselves
         return instructions.entrySet().stream().allMatch(entry -> {
-            SiegeNode finalNode = finalMap.get(entry.getKey());
+            SiegeNode finalNode = finalInstructionMap.get(entry.getKey());
             return finalNode != null && finalNode.action() == entry.getValue().action();
         });
     }

@@ -47,7 +47,18 @@ public class TerrainEvaluator {
 
                 if (isOutOfBounds(level, neighbor, targetPos) || lockedPositions.contains(neighbor)) continue;
 
-                if (isWalkableTerrain(level, neighbor) && evaluateSimpleStep(level, neighbor, current, dy)) {
+                if (isWalkableTerrain(level, neighbor)) {
+
+                    // CORNER CLEARANCE CHECK: Prevent entities from trying to squeeze through solid diagonal walls
+                    if (offset[0] != 0 && offset[1] != 0) {
+                        BlockPos corner1 = current.offset(offset[0], dy, 0);
+                        BlockPos corner2 = current.offset(0, dy, offset[1]);
+
+                        if (level.getBlockState(corner1).blocksMotion() || level.getBlockState(corner2).blocksMotion()) {
+                            continue; // Skip this diagonal step, the gap is physically impassable
+                        }
+                    }
+
                     // Standard walkable step
                     int stepCost = (offset[0] != 0 && offset[1] != 0) ? DIAGONAL_COST : ORTHOGONAL_COST;
                     validSteps.add(new EvaluatedStep(neighbor, stepCost, SiegeNode.SiegeAction.WALK));
@@ -57,8 +68,13 @@ public class TerrainEvaluator {
                     BlockPos groundNode = findGroundBelow(level, neighbor, targetPos);
 
                     if (groundNode != null && !lockedPositions.contains(groundNode)) {
-                        // Flat drop cost to prevent the PriorityQueue from deferring ground evaluation
-                        int dropCost = ORTHOGONAL_COST + 50;
+
+                        // THE FIX: Calculate the actual drop distance
+                        int dropDistance = current.getY() - groundNode.getY();
+
+                        // Multiply the height of the necessary scaffolding by your Config penalty
+                        // If they have to build a 50-block pillar, they pay the penalty 50 times!
+                        int dropCost = ORTHOGONAL_COST + (dropDistance * Config.buildingBasePenalty * COST_MULTIPLIER);
 
                         // Since Dijkstra calculates backwards, assigning BUILD_STAIR here
                         // tells a rat on the ground that it must build up to reach the ledge.
@@ -73,19 +89,6 @@ public class TerrainEvaluator {
         return validSteps;
     }
 
-    private boolean evaluateSimpleStep(ServerLevel level, BlockPos from, BlockPos to, int dy) {
-        if (dy > 1) {
-            // Check headroom when stepping up multiple blocks
-            for (int y = to.getY() + 1; y <= from.getY() + 1; y++) {
-                if (level.getBlockState(new BlockPos(to.getX(), y, to.getZ())).blocksMotion()) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return isFitForWalking(level, from);
-    }
-
     // =================================================================================
     // MACRO PROJECT EVALUATION
     // =================================================================================
@@ -96,7 +99,7 @@ public class TerrainEvaluator {
         BlockState ceiling = level.getBlockState(pos.above(2));
         BlockState support = level.getBlockState(pos.below());
 
-        // 1. MINE Check: Prioritize breaking obstructions first[cite: 10]
+        // 1. MINE Check: Prioritize breaking obstructions first
         if (dy != 0 && ceiling.blocksMotion() && !isWalkableScaffold(ceiling)) {
             return new SiegeNode(pos.above(2), SiegeNode.SiegeAction.MINE);
         }
@@ -107,11 +110,11 @@ public class TerrainEvaluator {
             return new SiegeNode(pos, SiegeNode.SiegeAction.MINE);
         }
 
-        // 2. BUILD Check: Construct necessary scaffolding[cite: 10]
+        // 2. BUILD Check: Construct necessary scaffolding
         if (!support.blocksMotion() && !isWalkableScaffold(support)) {
             SiegeNode.SiegeAction action;
             if (dx == 0 && dz == 0 && dy > 0) {
-                // ADDED: Check if there is a wall adjacent to us to place a ladder on
+                // Check if there is a wall adjacent to us to place a ladder on
                 boolean hasWall = false;
                 for (Direction dir : Direction.Plane.HORIZONTAL) {
                     if (level.getBlockState(pos.relative(dir)).isSolidRender(level, pos.relative(dir))) {
@@ -180,9 +183,8 @@ public class TerrainEvaluator {
         // Prevent chunk-loading deadlocks
         if (!level.isLoaded(pos)) return true;
 
-        // Vertical Boundary Constraints relative to the Nexus target
-        if (pos.getY() > targetPos.getY() + 15) return true; // Don't build to space
-        if (pos.getY() < targetPos.getY() - 30) return true; // Don't map the deep underground
+        // Let's keep the sensible lower bound so they don't bother mapping deeply below the target
+        if (pos.getY() < targetPos.getY() - 30) return true;
 
         return false;
     }

@@ -44,7 +44,7 @@ public class Config {
     private static final ModConfigSpec.IntValue MINING_PENALTY_MULTIPLIER = BUILDER.comment("Multiplier for block hardness when calculating path cost. Higher values make rats prefer walking around walls.")
             .defineInRange("miningPenaltyMultiplier", 100, 1, 1000);
     private static final ModConfigSpec.IntValue MINING_BASE_PENALTY = BUILDER.comment("Flat cost added to breaking any block. Prevents rats from breaking weak blocks just to save 1 or 2 steps.")
-            .defineInRange("miningBasePenalty", 50, 0, 500);
+            .defineInRange("miningBasePenalty", 80, 0, 500);
     private static final ModConfigSpec.IntValue BUILDING_BASE_PENALTY = BUILDER.comment("Flat pathfinding cost added when a rat has to place a block to move forward.")
             .defineInRange("buildingBasePenalty", 150, 1, 1000);
     private static final ModConfigSpec.IntValue MAX_FLOW_FIELD_NODES = BUILDER.comment("Maximum total nodes a Flow Field is allowed to map, acting as a hard limit on pathfinding range.")

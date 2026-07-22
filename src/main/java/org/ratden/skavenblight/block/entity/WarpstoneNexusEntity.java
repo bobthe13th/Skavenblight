@@ -6,7 +6,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import org.ratden.skavenblight.Config; // Added this import!
+import org.ratden.skavenblight.Config;
+import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.capability.custom.WarpFluxStorage;
 
 public class WarpstoneNexusEntity extends BlockEntity {
@@ -14,6 +15,11 @@ public class WarpstoneNexusEntity extends BlockEntity {
     private int nexusTier;
     private int stability;
     private final WarpFluxStorage fluxStorage;
+
+    // =================================================================
+    // THE FIX: We actually have to declare the variable here!
+    // =================================================================
+    private StandardFlowField flowField;
 
     public WarpstoneNexusEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.WARPSTONE_NEXUS.get(), pos, blockState);
@@ -92,11 +98,10 @@ public class WarpstoneNexusEntity extends BlockEntity {
                 // Just generate the power and put it in your own storage!
                 // The network's tick() will automatically extract it and route it to the furnaces.
                 this.fluxStorage.receiveFlux(amountToPush, false);
-                    this.setChanged();
-                }
+                this.setChanged();
             }
         }
-
+    }
 
     // --- Save and Load Data ---
 
@@ -161,9 +166,22 @@ public class WarpstoneNexusEntity extends BlockEntity {
 
     // Standard Getters & Setters
     public int getNexusTier() { return nexusTier; }
+
     public int getStability() { return stability; }
+
     public void setStability(int stability) {
         this.stability = Math.max(0, stability);
         setChanged();
+    }
+
+    // =================================================================
+    // NEW METHODS: To interact with the newly declared FlowField
+    // =================================================================
+    public StandardFlowField getFlowField() {
+        return this.flowField;
+    }
+
+    public void setFlowField(StandardFlowField field) {
+        this.flowField = field;
     }
 }

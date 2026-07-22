@@ -1,11 +1,11 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.level.block.Block;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
@@ -16,27 +16,46 @@ import java.util.EnumSet;
 public class SmartBreachGoal extends Goal implements SiegeGoal {
     private final PathfinderMob mob;
     private StandardFlowField flowField;
+    private long nextAllowedBreachTime = 0;
 
-    private BlockPos targetBlock = null;
-    private int miningTicks = 0;
-    private int maxMiningTicks = 0;
+    private int mineTicks = 0;
+    private final int maxMineTicks = 20; // Tune this to adjust Skaven mining speed
+
+    private BlockPos targetPos;
+    private SiegeNode.SiegeAction targetAction;
 
     public SmartBreachGoal(PathfinderMob mob) {
         this.mob = mob;
+        // Lock out native movement/looking so the Kinematic Lock works cleanly
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
+    @Override
     public void setFlowField(StandardFlowField flowField) {
         this.flowField = flowField;
+    }
+
+    private boolean isBreachAction(SiegeNode.SiegeAction action) {
+        // Adjust this if your enum has distinct mining actions (e.g., TUNNEL, BREACH)
+        return action == SiegeNode.SiegeAction.MINE;
     }
 
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
 
+        // 1. NUDGE RECOVERY: Re-acquire the node if shoved horizontally by the swarm
+        if (node == null) {
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                node = this.flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
+                if (node != null) break;
+            }
+        }
+
+        // Look ahead to snap to the breach target if we are close enough
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
-            if (nextNode != null && nextNode.action() == SiegeNode.SiegeAction.MINE) {
+            if (nextNode != null && isBreachAction(nextNode.action())) {
                 if (currentPos.closerThan(nextNode.pos(), 2.5D)) {
                     return nextNode;
                 }
@@ -47,67 +66,71 @@ public class SmartBreachGoal extends Goal implements SiegeGoal {
 
     @Override
     public boolean canUse() {
-        if (this.flowField == null) return false;
-
-        BlockPos pos = this.mob.blockPosition();
-        SiegeNode node = getEffectiveNode(pos);
-
-        if (node != null && node.action() == SiegeNode.SiegeAction.MINE) {
-            this.targetBlock = node.pos();
-            return this.mob.level().getBlockState(this.targetBlock).blocksMotion();
+        if (this.flowField == null || this.mob.level().getGameTime() < this.nextAllowedBreachTime) {
+            return false;
         }
 
+        BlockPos currentPos = this.mob.blockPosition();
+        SiegeNode node = getEffectiveNode(currentPos);
+
+        if (node != null && isBreachAction(node.action())) {
+            // Ensure there is actually a block to mine
+            return !this.mob.level().getBlockState(node.pos()).isAir() && currentPos.closerThan(node.pos(), 2.5D);
+        }
         return false;
     }
 
     @Override
     public boolean canContinueToUse() {
-        if (this.targetBlock == null || this.flowField == null || !this.mob.isAlive()) return false;
-        return this.mob.level().getBlockState(this.targetBlock).blocksMotion();
+        // Stop if the block is already broken by another rat or time runs out
+        return this.mineTicks <= this.maxMineTicks && this.targetPos != null && !this.mob.level().getBlockState(this.targetPos).isAir();
     }
 
     @Override
     public void start() {
-        this.miningTicks = 0;
-        // Delegate hardness math to the handler
-        this.maxMiningTicks = SiegeInteractionHandler.calculateMiningTicks((ServerLevel)this.mob.level(), this.targetBlock);
+        this.mineTicks = 0;
+        BlockPos currentPos = this.mob.blockPosition();
+        SiegeNode node = getEffectiveNode(currentPos);
+
+        if (node == null) return;
+
+        this.targetPos = node.pos();
+        this.targetAction = node.action();
     }
 
     @Override
     public void tick() {
-        this.mob.getLookControl().setLookAt(
-                this.targetBlock.getX() + 0.5D,
-                this.targetBlock.getY() + 0.5D,
-                this.targetBlock.getZ() + 0.5D
-        );
+        if (this.targetPos != null && this.mob.level() instanceof ServerLevel serverLevel) {
 
-        this.miningTicks++;
+            // 2. KINEMATIC EXECUTION LOCK: Drop horizontal momentum to 0 to resist getting pushed mid-swing
+            this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
 
-        if (this.miningTicks % 5 == 0) this.mob.swing(InteractionHand.MAIN_HAND);
-        if (this.miningTicks % 10 == 0) {
-            this.mob.level().levelEvent(2001, this.targetBlock, Block.getId(this.mob.level().getBlockState(this.targetBlock)));
-        }
+            this.mob.getLookControl().setLookAt(
+                    this.targetPos.getX() + 0.5D,
+                    this.targetPos.getY() + 0.5D,
+                    this.targetPos.getZ() + 0.5D
+            );
 
-        int progress = (int) ((float) this.miningTicks / this.maxMiningTicks * 10.0F);
-        this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, progress);
+            if (this.mineTicks % 5 == 0) {
+                this.mob.swing(InteractionHand.MAIN_HAND);
+            }
 
-        if (this.miningTicks >= this.maxMiningTicks) {
-            if (this.mob.level() instanceof ServerLevel serverLevel) {
-                // Delegate destruction to the handler
-                SiegeInteractionHandler.executeBreach(serverLevel, this.targetBlock, this.flowField);
+            this.mineTicks++;
 
-                this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, -1);
-                this.flowField.forceRecalculation();
+            if (this.mineTicks >= this.maxMineTicks) {
+                // Break the block and drop items. You can hand this off to SiegeInteractionHandler if you have custom logic.
+                serverLevel.destroyBlock(this.targetPos, true, this.mob);
+
+                // Short cooldown so they immediately move on to the next flow field node
+                this.nextAllowedBreachTime = this.mob.level().getGameTime() + 5;
             }
         }
     }
 
     @Override
     public void stop() {
-        if (this.targetBlock != null) {
-            this.mob.level().destroyBlockProgress(this.mob.getId(), this.targetBlock, -1);
-        }
-        this.targetBlock = null;
-        this.miningTicks = 0;
+        this.targetPos = null;
+        this.targetAction = null;
+        this.mineTicks = 0;
     }
 }

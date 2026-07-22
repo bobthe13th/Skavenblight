@@ -21,9 +21,8 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
     private int buildTicks = 0;
     private final int maxBuildTicks = 15;
 
-    // Deadlock Prevention Mechanics
     private int stalledTicks = 0;
-    private final int maxStalledTicks = 60; // 3 seconds timeout
+    private final int maxStalledTicks = 60;
 
     private BlockPos placePos;
     private Direction moveDir;
@@ -32,6 +31,7 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
 
     public BuildFlowFieldGoal(PathfinderMob mob) {
         this.mob = mob;
+        // Lock out movement and looking to ensure the Execution Lock takes full control
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
@@ -50,6 +50,14 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
     private SiegeNode getEffectiveNode(BlockPos currentPos) {
         ServerLevel serverLevel = (ServerLevel) this.mob.level();
         SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
+
+        // 1. NUDGE RECOVERY: If pushed off the path, check adjacent blocks to recover the project
+        if (node == null) {
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                node = this.flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
+                if (node != null) break;
+            }
+        }
 
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
@@ -108,6 +116,10 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
     @Override
     public void tick() {
         if (this.placePos != null && this.mob.level() instanceof ServerLevel serverLevel) {
+
+            // 2. KINEMATIC EXECUTION LOCK: Anchor the rat physically so swarm traffic doesn't shove it
+            this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+
             this.mob.getLookControl().setLookAt(
                     this.placePos.getX() + 0.5D,
                     this.placePos.getY() + 0.5D,
@@ -121,29 +133,19 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
 
             if (this.buildTicks >= this.maxBuildTicks) {
 
-                // Deadlock check: Is the placement area obstructed by mobs?
                 if (!SiegeInteractionHandler.isSpaceClear(serverLevel, this.placePos)) {
                     this.stalledTicks++;
-
-                    // 1. Clear Space: Nudge obstructing entities out of the target block
                     SiegeInteractionHandler.pushOccupantsAway(serverLevel, this.placePos, this.mob);
 
-                    // 2. Timeout & Abandon: If blocked for over 3 seconds, give up
                     if (this.stalledTicks >= this.maxStalledTicks) {
-                        // Apply a 5-second penalty cooldown before this rat can attempt building again
                         this.nextAllowedBuildTime = this.mob.level().getGameTime() + 100;
-
-                        // Nullifying placePos immediately fails canContinueToUse(), invoking stop()
                         this.placePos = null;
                         return;
                     }
-
-                    // Stall build timer to stay in execution state while waiting/pushing
                     this.buildTicks = this.maxBuildTicks - 5;
                     return;
                 }
 
-                // Space is clear; construct block
                 SiegeInteractionHandler.constructSiegeBlock(
                         serverLevel,
                         this.placePos,
@@ -154,7 +156,12 @@ public class BuildFlowFieldGoal extends Goal implements SiegeGoal {
 
                 this.nextAllowedBuildTime = this.mob.level().getGameTime() + 10;
 
-                if (this.recalculateCooldown == 0 && !this.flowField.isCalculating()) {
+                // 3. SEQUENCE PERSISTENCE: Check if the *next* block is also a build action
+                SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, this.placePos);
+                boolean isEndOfMacroProject = (nextNode == null || !isBuildAction(nextNode.action()));
+
+                // ONLY wipe and recalculate the map if the entire bridge/staircase is finished
+                if (isEndOfMacroProject && this.recalculateCooldown == 0 && !this.flowField.isCalculating()) {
                     this.flowField.forceRecalculation();
                     this.recalculateCooldown = 100;
                 }

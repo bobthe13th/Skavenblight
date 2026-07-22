@@ -55,9 +55,10 @@ public class SiegeProjectManager {
         }
     }
 
-    public void finalizeCandidateProjects(Map<BlockPos, SiegeNode> finalInstructionMap) {
+    public void finalizeCandidateProjects(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
         for (SiegeProject project : candidateProjects) {
-            if (project.survivedMapOverwrite(finalInstructionMap)) {
+            // Pass the cost map so the project can validate its entry point
+            if (project.survivedMapOverwrite(finalCostMap, finalInstructionMap)) {
                 this.activeProjects.add(project);
             }
         }
@@ -139,7 +140,8 @@ public class SiegeProjectManager {
                 nextInstructionMap.putAll(tempInstructionMap);
 
                 if (!projectInstructions.isEmpty()) {
-                    candidateProjects.add(new SiegeProject(projectInstructions));
+                    // THE FIX: Pass the entry position (ratPos) and the total penalty cost!
+                    candidateProjects.add(new SiegeProject(projectInstructions, ratPos, totalCost));
                 }
 
                 calcQueue.add(new FlowFieldCalculator.QueueNode(ratPos, totalCost));

@@ -103,21 +103,20 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (activeNexus != null) {
-                            StandardFlowField sharedField = network.getSharedFlowField(activeNexus);
+                            // THE FIX: Add serverLevel here
+                            StandardFlowField sharedField = network.getSharedFlowField(serverLevel, activeNexus);
                             sharedField.calculateMapIfNeeded(serverLevel);
 
-                            // --- THE FIX: Initialize map and delegate data collection to the active Strategy ---
                             Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
                             currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, localNodes);
 
-                            // Send the updated payload mapping to the client
                             serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                     network.getTerritoryChunks(),
                                     localNodes,
                                     sharedField.getMappedChunks(),
                                     currentMode.ordinal()
                             ));
-                            return; // Exit early once the payload for the active network is sent
+                            return;
                         }
                     }
                 }

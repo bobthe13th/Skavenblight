@@ -6,10 +6,6 @@ import org.ratden.skavenblight.Config;
 
 import java.util.*;
 
-/**
- * The core Dijkstra time-sliced math engine.
- * Responsible for mapping distances and directions from the target outward.
- */
 public class FlowFieldCalculator {
 
     private PriorityQueue<QueueNode> calcQueue;
@@ -18,8 +14,6 @@ public class FlowFieldCalculator {
 
     private final TerrainEvaluator terrainEvaluator;
     private final SiegeProjectManager projectManager;
-
-    private boolean isCalculating = false;
 
     public FlowFieldCalculator(TerrainEvaluator evaluator, SiegeProjectManager manager) {
         this.terrainEvaluator = evaluator;
@@ -30,18 +24,13 @@ public class FlowFieldCalculator {
     // PUBLIC API
     // =================================================================================
 
-    public void calculateMapIfNeeded(ServerLevel level, FlowFieldState state, int nodesPerTick) {
-        if (!isCalculating) {
-            startCalculation(level, state);
-        }
-
-        if (isCalculating) {
-            processCalculationQueue(level, state, nodesPerTick);
-        }
-    }
-
-    public boolean isCalculating() {
-        return isCalculating;
+    /**
+     * Executes the entire FlowField calculation.
+     * THIS MUST BE CALLED FROM A BACKGROUND THREAD.
+     */
+    public void calculateFully(ServerLevel level, FlowFieldState state) {
+        startCalculation(level, state);
+        processCalculationQueue(level, state);
     }
 
     // =================================================================================
@@ -49,7 +38,6 @@ public class FlowFieldCalculator {
     // =================================================================================
 
     private void startCalculation(ServerLevel level, FlowFieldState state) {
-        isCalculating = true;
         nextCostMap.clear();
         nextInstructionMap.clear();
 
@@ -60,15 +48,14 @@ public class FlowFieldCalculator {
         nextCostMap.put(targetPos, 0);
         nextInstructionMap.put(targetPos, new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK));
 
-        // Delegate re-injecting active projects to the manager
         projectManager.injectActiveProjects(level, calcQueue, nextCostMap, nextInstructionMap);
     }
 
-    private void processCalculationQueue(ServerLevel level, FlowFieldState state, int nodesPerTick) {
-        int nodesProcessed = 0;
+    private void processCalculationQueue(ServerLevel level, FlowFieldState state) {
         BlockPos targetPos = state.getTargetPos();
 
-        while (!calcQueue.isEmpty() && nodesProcessed < nodesPerTick) {
+        // Loop runs continuously until the queue is empty or the max node limit is hit
+        while (!calcQueue.isEmpty()) {
             if (nextCostMap.size() >= Config.maxFlowFieldNodes) {
                 calcQueue.clear();
                 break;
@@ -77,28 +64,20 @@ public class FlowFieldCalculator {
             QueueNode qNode = calcQueue.poll();
             BlockPos current = qNode.pos();
             int currentCost = qNode.cost();
-            nodesProcessed++;
 
-            // Skip stale nodes in the priority queue
             if (currentCost > nextCostMap.getOrDefault(current, Integer.MAX_VALUE)) continue;
 
-            // Thread the targetPos into the orthogonal evaluation
-            processOrthogonalNeighbors(level, current, currentCost, targetPos);
+            boolean hitObstacle = processOrthogonalNeighbors(level, current, currentCost, targetPos);
 
-            // Ask the TerrainEvaluator if this block is a valid anchor for a macro project
-            if (terrainEvaluator.isWalkableTerrain(level, current) || current.equals(targetPos)) {
-                // Thread the targetPos into the project manager
+            if (hitObstacle && (terrainEvaluator.isWalkableTerrain(level, current) || current.equals(targetPos))) {
                 projectManager.evaluateMacroProjects(level, current, targetPos, currentCost, calcQueue, nextCostMap, nextInstructionMap);
             }
         }
 
-        if (calcQueue.isEmpty()) {
-            finalizeCalculation(state);
-        }
+        finalizeCalculation(state);
     }
 
-    private void processOrthogonalNeighbors(ServerLevel level, BlockPos current, int currentCost, BlockPos targetPos) {
-        // Delegate voxel evaluation completely to the TerrainEvaluator, now passing targetPos
+    private boolean processOrthogonalNeighbors(ServerLevel level, BlockPos current, int currentCost, BlockPos targetPos) {
         List<TerrainEvaluator.EvaluatedStep> validSteps = terrainEvaluator.getValidOrthogonalSteps(level, current, projectManager.getLockedPositions(), targetPos);
 
         for (TerrainEvaluator.EvaluatedStep step : validSteps) {
@@ -110,21 +89,15 @@ public class FlowFieldCalculator {
                 calcQueue.add(new QueueNode(step.pos(), totalCost));
             }
         }
+
+        return validSteps.size() < 8;
     }
 
     private void finalizeCalculation(FlowFieldState state) {
-        isCalculating = false;
-
-        // Hand the finished maps over to the state object
+        // Pass maps to State and Foreman
         state.updateInstructions(new HashMap<>(nextInstructionMap));
-
-        // Tell the manager to filter candidate projects against the new map
-        projectManager.finalizeCandidateProjects(state.getInstructionMap());
+        projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());
     }
-
-    // =================================================================================
-    // INNER DATA
-    // =================================================================================
 
     public record QueueNode(BlockPos pos, int cost) implements Comparable<QueueNode> {
         @Override
