@@ -2,7 +2,6 @@ package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.Config;
@@ -28,24 +27,24 @@ public class TerrainEvaluator {
     // ADJACENT MOVEMENT (DIJKSTRA)
     // =================================================================================
 
-    public List<EvaluatedStep> getValidOrthogonalSteps(ServerLevel level, BlockPos current, Set<BlockPos> lockedPositions, FlowFieldState state) {
+    public List<EvaluatedStep> getValidOrthogonalSteps(TerrainAccess terrain, BlockPos current, Set<BlockPos> lockedPositions, FlowFieldState state) {
         List<EvaluatedStep> validSteps = new ArrayList<>();
 
         for (int[] offset : HORIZONTAL_OFFSETS) {
             for (int dy = -1; dy <= 1; dy++) {
                 BlockPos neighbor = current.offset(offset[0], dy, offset[1]);
 
-                if (isOutOfBounds(level, neighbor, state) || lockedPositions.contains(neighbor)) continue;
+                if (isOutOfBounds(terrain, neighbor, state) || lockedPositions.contains(neighbor)) continue;
 
-                BlockState neighborState = level.getBlockState(neighbor);
+                BlockState neighborState = terrain.getBlockState(neighbor);
 
-                if (isWalkableTerrain(level, neighbor)) {
+                if (isWalkableTerrain(terrain, neighbor)) {
 
                     if (offset[0] != 0 && offset[1] != 0) {
                         BlockPos corner1 = current.offset(offset[0], dy, 0);
                         BlockPos corner2 = current.offset(0, dy, offset[1]);
 
-                        if (level.getBlockState(corner1).blocksMotion() || level.getBlockState(corner2).blocksMotion()) {
+                        if (terrain.getBlockState(corner1).blocksMotion() || terrain.getBlockState(corner2).blocksMotion()) {
                             continue;
                         }
                     }
@@ -55,7 +54,7 @@ public class TerrainEvaluator {
                 }
                 else if (neighborState.blocksMotion() && !isWalkableScaffold(neighborState)) {
                     SiegeNode tempMineNode = new SiegeNode(neighbor, SiegeNode.SiegeAction.MINE);
-                    int baseMineCost = calculateActionCost(level, tempMineNode);
+                    int baseMineCost = calculateActionCost(terrain, tempMineNode);
 
                     if (baseMineCost != Integer.MAX_VALUE) {
                         int stepCost = baseMineCost + ((offset[0] != 0 && offset[1] != 0) ? DIAGONAL_COST : ORTHOGONAL_COST);
@@ -64,7 +63,7 @@ public class TerrainEvaluator {
                 }
                 else if (dy == 0) {
                     if (!neighborState.blocksMotion()) {
-                        BlockPos groundNode = findGroundBelow(level, neighbor, state);
+                        BlockPos groundNode = findGroundBelow(terrain, neighbor, state);
 
                         if (groundNode != null && !lockedPositions.contains(groundNode)) {
 
@@ -87,11 +86,11 @@ public class TerrainEvaluator {
     // MACRO PROJECT EVALUATION
     // =================================================================================
 
-    public SiegeNode.SiegeAction determineMacroAction(ServerLevel level, BlockPos pos, int dy, int dx, int dz, BlockPos targetPos) {
-        BlockState foot = level.getBlockState(pos);
-        BlockState head = level.getBlockState(pos.above());
-        BlockState ceiling = level.getBlockState(pos.above(2));
-        BlockState support = level.getBlockState(pos.below());
+    public SiegeNode.SiegeAction determineMacroAction(TerrainAccess terrain, BlockPos pos, int dy, int dx, int dz, BlockPos targetPos) {
+        BlockState foot = terrain.getBlockState(pos);
+        BlockState head = terrain.getBlockState(pos.above());
+        BlockState ceiling = terrain.getBlockState(pos.above(2));
+        BlockState support = terrain.getBlockState(pos.below());
 
         if (dy != 0 && ceiling.blocksMotion() && !isWalkableScaffold(ceiling)) {
             return SiegeNode.SiegeAction.MINE;
@@ -109,7 +108,7 @@ public class TerrainEvaluator {
                 boolean hasWall = false;
                 for (Direction dir : Direction.Plane.HORIZONTAL) {
                     BlockPos adj = pos.relative(dir);
-                    if (level.getBlockState(adj).isSolidRender(level, adj)) {
+                    if (terrain.isSolidRender(adj)) {
                         hasWall = true;
                         break;
                     }
@@ -138,17 +137,17 @@ public class TerrainEvaluator {
     /**
      * Overload to support legacy/direct calls using a SiegeNode.
      */
-    public int calculateActionCost(ServerLevel level, SiegeNode node) {
+    public int calculateActionCost(TerrainAccess terrain, SiegeNode node) {
         if (node == null) return ORTHOGONAL_COST;
-        return calculateActionCostForAction(level, node.pos(), node.action());
+        return calculateActionCostForAction(terrain, node.pos(), node.action());
     }
 
     /**
      * Calculates building and mining penalties based on position and action type.
      */
-    public int calculateActionCostForAction(ServerLevel level, BlockPos pos, SiegeNode.SiegeAction action) {
+    public int calculateActionCostForAction(TerrainAccess terrain, BlockPos pos, SiegeNode.SiegeAction action) {
         if (action == SiegeNode.SiegeAction.MINE) {
-            float hardness = level.getBlockState(pos).getDestroySpeed(level, pos);
+            float hardness = terrain.getDestroySpeed(pos);
             if (hardness < 0) return Integer.MAX_VALUE;
             return (int)(hardness * Config.miningPenaltyMultiplier * COST_MULTIPLIER) + (Config.miningBasePenalty * COST_MULTIPLIER);
         } else if (action != SiegeNode.SiegeAction.WALK) {
@@ -157,8 +156,8 @@ public class TerrainEvaluator {
         return ORTHOGONAL_COST;
     }
 
-    public boolean isActionCompleted(ServerLevel level, SiegeNode node) {
-        BlockState state = level.getBlockState(node.pos());
+    public boolean isActionCompleted(TerrainAccess terrain, SiegeNode node) {
+        BlockState state = terrain.getBlockState(node.pos());
         return switch (node.action()) {
             case MINE -> !state.blocksMotion() || isWalkableScaffold(state);
             case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LANDING, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
@@ -170,21 +169,21 @@ public class TerrainEvaluator {
     // BLOCK STATE HELPERS
     // =================================================================================
 
-    public boolean isWalkableTerrain(ServerLevel level, BlockPos pos) {
-        BlockState foot = level.getBlockState(pos);
+    public boolean isWalkableTerrain(TerrainAccess terrain, BlockPos pos) {
+        BlockState foot = terrain.getBlockState(pos);
 
         boolean hasSupport = isWalkableScaffold(foot);
         if (!hasSupport) {
-            BlockState support = level.getBlockState(pos.below());
+            BlockState support = terrain.getBlockState(pos.below());
             hasSupport = support.blocksMotion() || isWalkableScaffold(support);
         }
 
-        return hasSupport && isFitForWalking(level, pos);
+        return hasSupport && isFitForWalking(terrain, pos);
     }
 
-    private boolean isFitForWalking(ServerLevel level, BlockPos pos) {
-        BlockState foot = level.getBlockState(pos);
-        BlockState head = level.getBlockState(pos.above());
+    private boolean isFitForWalking(TerrainAccess terrain, BlockPos pos) {
+        BlockState foot = terrain.getBlockState(pos);
+        BlockState head = terrain.getBlockState(pos.above());
         return (!foot.blocksMotion() || isWalkableScaffold(foot)) && (!head.blocksMotion() || isWalkableScaffold(head));
     }
 
@@ -195,23 +194,22 @@ public class TerrainEvaluator {
                 state.is(Blocks.COBBLESTONE);
     }
 
-    public boolean isOutOfBounds(ServerLevel level, BlockPos pos, FlowFieldState state) {
-        if (level == null || level.isOutsideBuildHeight(pos)) return true;
-        if (!level.isLoaded(pos)) return true;
+    public boolean isOutOfBounds(TerrainAccess terrain, BlockPos pos, FlowFieldState state) {
+        if (terrain == null || terrain.isOutsideBuildHeight(pos)) return true;
+        if (!terrain.isLoaded(pos)) return true;
 
-        // FIXED: Removed the hardcoded -30 Y restriction relative to target
         if (state.isOutOfBounds(pos)) return true;
 
         return false;
     }
 
-    private BlockPos findGroundBelow(ServerLevel level, BlockPos airPos, FlowFieldState state) {
+    private BlockPos findGroundBelow(TerrainAccess terrain, BlockPos airPos, FlowFieldState state) {
         // Limit direct drop searching to short 4-block drops
         for (int i = 1; i <= 4; i++) {
             BlockPos checkPos = airPos.below(i);
-            if (isOutOfBounds(level, checkPos, state)) return null;
-            if (isWalkableTerrain(level, checkPos)) return checkPos;
-            if (level.getBlockState(checkPos).blocksMotion()) return null;
+            if (isOutOfBounds(terrain, checkPos, state)) return null;
+            if (isWalkableTerrain(terrain, checkPos)) return checkPos;
+            if (terrain.getBlockState(checkPos).blocksMotion()) return null;
         }
         return null;
     }

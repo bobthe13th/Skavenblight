@@ -2,7 +2,6 @@ package org.ratden.skavenblight.ai.pathing;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.Config;
 import org.slf4j.Logger;
 
@@ -16,10 +15,37 @@ public class SiegeProjectManager {
     private static final int COST_MULTIPLIER = 10;
     private static final int[][] CARDINAL_OFFSETS = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
 
+    // Upper bound on activeProjects - without this, a project that never completes (e.g.
+    // because rats keep congregating and failing at its entry point) accumulates forever:
+    // every such project is re-injected and re-locks its positions on every single pass,
+    // permanently blocking alternate routes through them. Observed in practice: 803 active
+    // projects in one test. Evicting the oldest isn't a loss - evaluateMacroProjects
+    // rediscovers the same need on the very next pass if the obstacle it addressed still exists.
+    private static final int MAX_ACTIVE_PROJECTS = 200;
+
+    // Proximity threshold used by isNearExistingProject() (distSqr < 9, i.e. within ~3 blocks).
+    private static final int PROXIMITY_RADIUS_SQR = 9;
+    // Bucket size for the spatial index below - must exceed the proximity radius (3) so that
+    // any two points within it are guaranteed to fall in the same or an adjacent bucket.
+    private static final int BUCKET_SIZE = 4;
+
     private final List<SiegeProject> activeProjects = new ArrayList<>();
     private final List<SiegeProject> candidateProjects = new ArrayList<>();
-    private final Set<BlockPos> plannedProjects = new HashSet<>();
+    // Spatial index of every anchor evaluateMacroProjects() has fired on this calculation,
+    // bucketed so isNearExistingProject() doesn't have to linearly scan every anchor seen so
+    // far. That scan used to run once per (line, step) - up to 14 * 32 = 448 times per anchor -
+    // against a set that grows for the entire calculation, an O(n^2) blowup that dominated
+    // runtime on any territory large enough to trigger macro evaluation frequently (which is
+    // most of them, given how often hitObstacle fires - see FlowFieldCalculator).
+    private final Map<Long, List<BlockPos>> plannedProjectBuckets = new HashMap<>();
     private final Set<BlockPos> lockedPositions = new HashSet<>();
+
+    // Per-calculation perf counters, reset in injectActiveProjects() and read by debug
+    // tooling (PathingDebugFileWriter) - a calculation that's slow because macro evaluation
+    // is firing on nearly every node looks very different from one that's slow for some
+    // other reason, and there was previously no way to tell the two apart from outside.
+    private int macroEvaluationCount = 0;
+    private long lineStepsEvaluated = 0;
 
     private final TerrainEvaluator terrainEvaluator;
 
@@ -27,18 +53,20 @@ public class SiegeProjectManager {
         this.terrainEvaluator = terrainEvaluator;
     }
 
-    public void injectActiveProjects(ServerLevel level,
+    public void injectActiveProjects(TerrainAccess terrain,
                                      PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                      Map<BlockPos, Integer> nextCostMap,
                                      Map<BlockPos, SiegeNode> nextInstructionMap) {
-        plannedProjects.clear();
+        plannedProjectBuckets.clear();
         lockedPositions.clear();
         candidateProjects.clear();
+        macroEvaluationCount = 0;
+        lineStepsEvaluated = 0;
 
-        activeProjects.removeIf(project -> project.isCompleted(level, terrainEvaluator));
+        activeProjects.removeIf(project -> project.isCompleted(terrain, terrainEvaluator));
 
         for (SiegeProject project : activeProjects) {
-            for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(level, terrainEvaluator).entrySet()) {
+            for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(terrain, terrainEvaluator).entrySet()) {
                 BlockPos pos = entry.getKey();
                 lockedPositions.add(pos);
                 nextInstructionMap.put(pos, entry.getValue());
@@ -61,38 +89,51 @@ public class SiegeProjectManager {
             }
         }
         candidateProjects.clear();
+
+        // Evict oldest-first if we're over the cap - see MAX_ACTIVE_PROJECTS.
+        while (activeProjects.size() > MAX_ACTIVE_PROJECTS) {
+            activeProjects.remove(0);
+        }
     }
 
     public Set<BlockPos> getLockedPositions() {
         return Collections.unmodifiableSet(this.lockedPositions);
     }
 
-    public void evaluateMacroProjects(ServerLevel level, BlockPos anchorPos, FlowFieldState state, int anchorCost,
+    public int getActiveProjectCount() { return this.activeProjects.size(); }
+    public int getCandidateProjectCount() { return this.candidateProjects.size(); }
+    public int getMacroEvaluationCount() { return this.macroEvaluationCount; }
+    public long getLineStepsEvaluated() { return this.lineStepsEvaluated; }
+
+    public void evaluateMacroProjects(TerrainAccess terrain, BlockPos anchorPos, FlowFieldState state, int anchorCost,
                                       PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                       Map<BlockPos, Integer> nextCostMap,
                                       Map<BlockPos, SiegeNode> nextInstructionMap) {
 
-        if (!terrainEvaluator.isWalkableTerrain(level, anchorPos)) {
-            SiegeNode.SiegeAction selfAction = terrainEvaluator.determineMacroAction(level, anchorPos, 0, 0, 0, state.getTargetPos());
+        macroEvaluationCount++;
+
+        if (!terrainEvaluator.isWalkableTerrain(terrain, anchorPos)) {
+            SiegeNode.SiegeAction selfAction = terrainEvaluator.determineMacroAction(terrain, anchorPos, 0, 0, 0, state.getTargetPos());
             if (selfAction != SiegeNode.SiegeAction.WALK) {
                 nextInstructionMap.putIfAbsent(anchorPos, new SiegeNode(anchorPos, selfAction));
             }
         }
 
         for (int dy : new int[]{-1, 1}) {
-            evaluateSingleLine(level, anchorPos, state, anchorCost, 0, dy, 0, calcQueue, nextCostMap, nextInstructionMap);
+            evaluateSingleLine(terrain, anchorPos, state, anchorCost, 0, dy, 0, calcQueue, nextCostMap, nextInstructionMap);
         }
 
         for (int[] dir : CARDINAL_OFFSETS) {
             for (int dy : new int[]{-1, 0, 1}) {
-                evaluateSingleLine(level, anchorPos, state, anchorCost, dir[0], dy, dir[1], calcQueue, nextCostMap, nextInstructionMap);
+                evaluateSingleLine(terrain, anchorPos, state, anchorCost, dir[0], dy, dir[1], calcQueue, nextCostMap, nextInstructionMap);
             }
         }
 
-        plannedProjects.add(anchorPos.immutable());
+        BlockPos immutableAnchor = anchorPos.immutable();
+        plannedProjectBuckets.computeIfAbsent(bucketKeyFor(immutableAnchor), k -> new ArrayList<>()).add(immutableAnchor);
     }
 
-    private void evaluateSingleLine(ServerLevel level, BlockPos anchorPos, FlowFieldState state, int anchorCost,
+    private void evaluateSingleLine(TerrainAccess terrain, BlockPos anchorPos, FlowFieldState state, int anchorCost,
                                     int dx, int dy, int dz,
                                     PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                     Map<BlockPos, Integer> nextCostMap,
@@ -105,16 +146,17 @@ public class SiegeProjectManager {
         Map<BlockPos, SiegeNode> projectInstructions = new HashMap<>();
 
         for (int i = 1; i <= MAX_PROJECT_LENGTH; i++) {
+            lineStepsEvaluated++;
             BlockPos nextPos = currentTarget.offset(dx, dy, dz);
 
-            if (terrainEvaluator.isOutOfBounds(level, nextPos, state)) {
+            if (terrainEvaluator.isOutOfBounds(terrain, nextPos, state)) {
                 LOGGER.debug("[Pathfinder] Line aborted at {}: Out of bounds", nextPos.toShortString());
                 break;
             }
 
             if (isNearExistingProject(nextPos, anchorPos)) return;
 
-            SiegeNode.SiegeAction action = terrainEvaluator.determineMacroAction(level, nextPos, dy, dx, dz, state.getTargetPos());
+            SiegeNode.SiegeAction action = terrainEvaluator.determineMacroAction(terrain, nextPos, dy, dx, dz, state.getTargetPos());
             if (action == null) {
                 LOGGER.debug("[Pathfinder] Line aborted at {}: Invalid macro action", nextPos.toShortString());
                 return;
@@ -127,7 +169,7 @@ public class SiegeProjectManager {
                 mineProjectLength = 0;
             }
 
-            projectCost += terrainEvaluator.calculateActionCostForAction(level, nextPos, action);
+            projectCost += terrainEvaluator.calculateActionCostForAction(terrain, nextPos, action);
 
             int evaluatedProjectCost = (dy != 0) ? (int) ((projectCost * 2) * 0.75f) : (projectCost * 2);
             int totalCost = anchorCost + evaluatedProjectCost;
@@ -138,8 +180,7 @@ public class SiegeProjectManager {
             projectInstructions.put(nextPos, stepInstruction);
 
             // 1. Natural Completion: Line reaches walkable ground
-            if (terrainEvaluator.isWalkableTerrain(level, nextPos)) {
-                // FIXED: Changed log level from INFO to DEBUG to prevent log flooding
+            if (terrainEvaluator.isWalkableTerrain(terrain, nextPos)) {
                 LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Length: {}, Action: {})",
                         anchorPos.toShortString(), nextPos.toShortString(), i, action);
 
@@ -175,12 +216,32 @@ public class SiegeProjectManager {
     }
 
     private boolean isNearExistingProject(BlockPos pos, BlockPos currentAnchor) {
-        for (BlockPos existing : plannedProjects) {
-            if (existing.equals(currentAnchor)) continue;
-            if (existing.distSqr(pos) < 9) {
-                return true;
+        int bx = Math.floorDiv(pos.getX(), BUCKET_SIZE);
+        int by = Math.floorDiv(pos.getY(), BUCKET_SIZE);
+        int bz = Math.floorDiv(pos.getZ(), BUCKET_SIZE);
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    List<BlockPos> bucket = plannedProjectBuckets.get(BlockPos.asLong(bx + dx, by + dy, bz + dz));
+                    if (bucket == null) continue;
+
+                    for (BlockPos existing : bucket) {
+                        if (existing.equals(currentAnchor)) continue;
+                        if (existing.distSqr(pos) < PROXIMITY_RADIUS_SQR) {
+                            return true;
+                        }
+                    }
+                }
             }
         }
         return false;
+    }
+
+    private static long bucketKeyFor(BlockPos pos) {
+        return BlockPos.asLong(
+                Math.floorDiv(pos.getX(), BUCKET_SIZE),
+                Math.floorDiv(pos.getY(), BUCKET_SIZE),
+                Math.floorDiv(pos.getZ(), BUCKET_SIZE));
     }
 }

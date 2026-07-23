@@ -10,8 +10,11 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.*;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.SpiralSapperGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.WarpSapperGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
@@ -51,13 +54,23 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
-        this.goalSelector.addGoal(2, new SmartBreachGoal(this));
-        this.goalSelector.addGoal(3, new BuildFlowFieldGoal(this));
-        this.goalSelector.addGoal(4, new WidenStairsGoal(this));
-        this.goalSelector.addGoal(5, new FollowFlowFieldGoal(this, 1.2D));
-        this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 1.0D));
-        this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+        // WarpSapperGoal must outrank SmartBreachGoal: it only fires for blocks too hard to
+        // hand-mine in a reasonable time (see its canUse() threshold), and needs first refusal
+        // so those blocks get demolished with TNT instead of a rat standing there mining for
+        // a very long time.
+        this.goalSelector.addGoal(2, new WarpSapperGoal(this));
+        this.goalSelector.addGoal(3, new SmartBreachGoal(this));
+        // SpiralSapperGoal/DeployClimbableGoal own BUILD_SPIRAL/BUILD_LADDER respectively and
+        // must outrank BuildFlowFieldGoal, which only handles those actions as a generic
+        // fallback if the specialized goal's own canUse() declines.
+        this.goalSelector.addGoal(4, new SpiralSapperGoal(this));
+        this.goalSelector.addGoal(5, new DeployClimbableGoal(this));
+        this.goalSelector.addGoal(6, new BuildFlowFieldGoal(this));
+        this.goalSelector.addGoal(7, new WidenStairsGoal(this));
+        this.goalSelector.addGoal(8, new FollowFlowFieldGoal(this, 1.2D));
+        this.goalSelector.addGoal(10, new WaterAvoidingRandomStrollGoal(this, 1.0D));
+        this.goalSelector.addGoal(11, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(11, new RandomLookAroundGoal(this));
     }
 
     @Override
@@ -115,6 +128,33 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 siegeGoal.setFlowField(field);
             }
         });
+    }
+
+    /**
+     * Names of every currently-RUNNING goal on this rat (e.g. "BuildFlowFieldGoal"), or
+     * "<idle>" if none. Used by PathingDebugFileWriter to answer "why is this rat just
+     * standing there" - the field the goal system doesn't otherwise expose externally.
+     */
+    public String getActiveGoalNames() {
+        String names = this.goalSelector.getAvailableGoals().stream()
+                .filter(wrapped -> wrapped.isRunning())
+                .map(wrapped -> wrapped.getGoal().getClass().getSimpleName())
+                .reduce((a, b) -> a + "+" + b)
+                .orElse(null);
+        return names != null ? names : "<idle>";
+    }
+
+    /**
+     * Clanrats are never ambient/vanilla world-spawns - they only ever exist because the
+     * siege/incursion system (or a debug command) deliberately spawned them as the attacking
+     * force, and are already lifecycle-managed by that system's own manual cleanup commands
+     * (see DebugCleanupCommands). Without this override they fall through to vanilla
+     * Mob.checkDespawn(), which discards them once the player wanders far enough away -
+     * exactly the "the attacking force vanishes because the player walked off" bug reported.
+     */
+    @Override
+    public boolean removeWhenFarAway(double distanceToClosestPlayer) {
+        return false;
     }
 
     public static AttributeSupplier.Builder createAttributes() {

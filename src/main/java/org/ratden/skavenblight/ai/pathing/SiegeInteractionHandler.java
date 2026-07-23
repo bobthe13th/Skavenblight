@@ -96,9 +96,9 @@ public class SiegeInteractionHandler {
         level.levelEvent(2001, pos, Block.getId(stateToPlace));
     }
 
-    public static boolean isSpaceClear(ServerLevel level, BlockPos pos) {
+    public static boolean isSpaceClear(ServerLevel level, BlockPos pos, LivingEntity builder) {
         AABB box = new AABB(pos);
-        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box);
+        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box, entity -> entity != builder);
         return entities.isEmpty();
     }
 
@@ -110,14 +110,22 @@ public class SiegeInteractionHandler {
         for (LivingEntity entity : entities) {
             if (entity.equals(builder)) continue;
 
-            Vec3 pushDir = entity.position().subtract(center);
-            if (pushDir.lengthSqr() < 0.0001D) {
-                pushDir = new Vec3(0.2D, 0.2D, 0.2D);
-            } else {
-                pushDir = pushDir.normalize().scale(0.35D).add(0.0D, 0.15D, 0.0D);
-            }
+            Vec3 delta = entity.position().subtract(center);
+            double horizLenSqr = delta.x * delta.x + delta.z * delta.z;
+            Vec3 horizontal = horizLenSqr < 0.0001D
+                    ? new Vec3(0.2D, 0.0D, 0.2D)
+                    : new Vec3(delta.x, 0.0D, delta.z).normalize().scale(0.35D);
 
-            entity.setDeltaMovement(entity.getDeltaMovement().add(pushDir));
+            // A queued rat on a narrow bridge/staircase has nothing but open air to either
+            // side - pushing it "away from center" without checking for a floor is how a
+            // nudge turns into knocking it off the edge. Only apply the horizontal shove if
+            // it actually lands somewhere with ground; otherwise just hop it in place.
+            BlockPos landingPos = BlockPos.containing(entity.position().add(horizontal));
+            boolean hasFloor = level.getBlockState(landingPos.below()).blocksMotion();
+
+            Vec3 pushVec = hasFloor ? horizontal.add(0.0D, 0.15D, 0.0D) : new Vec3(0.0D, 0.2D, 0.0D);
+
+            entity.setDeltaMovement(entity.getDeltaMovement().add(pushVec));
             entity.hasImpulse = true;
         }
     }

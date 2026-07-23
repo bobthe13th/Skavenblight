@@ -90,8 +90,10 @@ public class DebugFlowFieldReaderItem extends Item {
                     }
                 }
 
-                // 4. Export the data if the field exists and is populated
-                if (activeField != null && !activeField.getInstructionMap().isEmpty()) {
+                // 4. Export the data - PathingDebugFileWriter handles empty/calculating/ready
+                // states itself (it renders the live in-progress map while a calculation is
+                // running), so the only real failure case here is not finding a network at all.
+                if (activeField != null) {
                     String filePath = PathingDebugFileWriter.exportDeepDump(serverLevel, activeField, playerPos, 32, 10, 32);
 
                     if (filePath != null) {
@@ -100,11 +102,7 @@ public class DebugFlowFieldReaderItem extends Item {
                         serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed to write dump file. Check server console."));
                     }
                 } else {
-                    if (activeField == null) {
-                        serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! Could not find a Network claiming the Nexus at " + nexusPos.toShortString()));
-                    } else {
-                        serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! Active Flow Field is currently empty (Still calculating?)."));
-                    }
+                    serverPlayer.sendSystemMessage(Component.literal("§c[Skavenblight] §fFailed! Could not find a Network claiming the Nexus at " + nexusPos.toShortString()));
                 }
 
                 return InteractionResultHolder.success(player.getItemInHand(hand));

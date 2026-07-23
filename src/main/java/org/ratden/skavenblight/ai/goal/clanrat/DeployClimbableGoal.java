@@ -3,9 +3,9 @@ package org.ratden.skavenblight.ai.goal.clanrat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.phys.Vec3;
@@ -48,19 +48,21 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     public boolean canUse() {
         if (this.flowField == null || !this.mob.isAlive()) return false;
 
+        // Owns BUILD_LADDER nodes specifically - TerrainEvaluator emits BUILD_LADDER for a
+        // vertical shaft that has a wall to hang the ladder on (see determineMacroAction).
+        // SpiralSapperGoal owns the sibling BUILD_SPIRAL case (no wall present); BuildFlowFieldGoal
+        // is the generic fallback for both if these specialized goals decline.
         if (this.mob.level() instanceof ServerLevel serverLevel) {
             BlockPos pos = this.mob.blockPosition();
             SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, pos);
 
-            // Assuming we add BUILD_LADDER to SiegeNode.SiegeAction
-            if (node != null && node.action() == SiegeNode.SiegeAction.BUILD_PILLAR) { // Proxy until BUILD_LADDER exists
+            if (node != null && node.action() == SiegeNode.SiegeAction.BUILD_LADDER) {
                 Direction lookDir = this.mob.getDirection();
                 BlockPos blockInFront = pos.relative(lookDir);
 
-                // If there is a solid wall in front of us, we want to climb it
                 if (serverLevel.getBlockState(blockInFront).isSolidRender(serverLevel, blockInFront)) {
                     this.targetWallPos = blockInFront;
-                    this.wallFacing = lookDir.getOpposite(); // Ladder attaches facing AWAY from the wall
+                    this.wallFacing = lookDir.getOpposite();
                     return true;
                 }
             }
@@ -77,11 +79,11 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     private void checkOverhang() {
         ServerLevel level = (ServerLevel) this.mob.level();
         BlockPos headPos = this.mob.blockPosition().above();
-        BlockPos overhangPos = headPos.above(); // 2 blocks above feet
+        BlockPos overhangPos = headPos.above();
 
         if (!level.getBlockState(overhangPos).canBeReplaced()) {
             this.state = ClimbState.MINING_OVERHANG;
-            this.maxActionTicks = SiegeInteractionHandler.calculateMiningTicks(level, overhangPos); //[cite: 27]
+            this.maxActionTicks = SiegeInteractionHandler.calculateMiningTicks(level, overhangPos);
         } else {
             this.state = ClimbState.PLACING_LADDER;
             this.maxActionTicks = 10;
@@ -92,7 +94,7 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     public void tick() {
         if (!(this.mob.level() instanceof ServerLevel serverLevel) || this.targetWallPos == null) return;
 
-        BlockPos placePos = this.targetWallPos.relative(this.wallFacing); // Air block in front of the wall
+        BlockPos placePos = this.targetWallPos.relative(this.wallFacing);
 
         this.mob.getLookControl().setLookAt(
                 placePos.getX() + 0.5D,
@@ -105,48 +107,42 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
         switch (this.state) {
             case MINING_OVERHANG -> {
                 BlockPos overhangPos = this.mob.blockPosition().above(2);
-                if (this.actionTicks % 5 == 0) this.mob.swing(InteractionHand.MAIN_HAND);
+                boolean complete = SiegeActionAnimator.tickMiningAnimation(serverLevel, this.mob, overhangPos, this.actionTicks, this.maxActionTicks);
 
-                int progress = (int) ((float) this.actionTicks / this.maxActionTicks * 10.0F);
-                serverLevel.destroyBlockProgress(this.mob.getId(), overhangPos, progress);
+                if (complete) {
+                    SiegeInteractionHandler.executeBreach(serverLevel, overhangPos, this.flowField);
+                    SiegeActionAnimator.clearMiningAnimation(serverLevel, this.mob, overhangPos);
 
-                if (this.actionTicks >= this.maxActionTicks) {
-                    SiegeInteractionHandler.executeBreach(serverLevel, overhangPos, this.flowField); //[cite: 27]
-                    serverLevel.destroyBlockProgress(this.mob.getId(), overhangPos, -1);
-
-                    // Re-evaluate to see if we can place the ladder now
                     this.actionTicks = 0;
                     this.state = ClimbState.PLACING_LADDER;
                     this.maxActionTicks = 10;
                 }
             }
             case PLACING_LADDER -> {
-                if (this.actionTicks % 5 == 0) this.mob.swing(InteractionHand.MAIN_HAND);
+                SiegeActionAnimator.swingPeriodically(this.mob, this.actionTicks);
 
                 if (this.actionTicks >= this.maxActionTicks) {
-                    if (SiegeInteractionHandler.isSpaceClear(serverLevel, placePos)) { //[cite: 27]
+                    if (SiegeInteractionHandler.isSpaceClear(serverLevel, placePos, this.mob)) {
                         serverLevel.setBlockAndUpdate(placePos, Blocks.LADDER.defaultBlockState()
                                 .setValue(LadderBlock.FACING, this.wallFacing));
-                        serverLevel.levelEvent(2001, placePos, net.minecraft.world.level.block.Block.getId(Blocks.LADDER.defaultBlockState()));
+                        serverLevel.levelEvent(2001, placePos, Block.getId(Blocks.LADDER.defaultBlockState()));
 
-                        // Check if we need to dismount into a hole at this Y-level
                         BlockPos targetTunnel = placePos.above().relative(this.wallFacing.getOpposite());
                         if (serverLevel.getBlockState(targetTunnel).canBeReplaced()) {
                             this.state = ClimbState.DISMOUNTING;
                             this.actionTicks = 0;
                         } else {
-                            this.state = ClimbState.SEARCHING; // Move up and repeat
+                            this.state = ClimbState.SEARCHING;
                         }
                     } else {
-                        SiegeInteractionHandler.pushOccupantsAway(serverLevel, placePos, this.mob); //[cite: 27]
+                        SiegeInteractionHandler.pushOccupantsAway(serverLevel, placePos, this.mob);
                         this.actionTicks = Math.max(0, this.maxActionTicks - 5);
                     }
                 }
             }
             case DISMOUNTING -> {
-                // The Ledge Grab: Apply physical impulse to throw the rat into the tunnel
                 Vec3 forward = Vec3.atLowerCornerOf(this.wallFacing.getOpposite().getNormal());
-                Vec3 impulse = forward.scale(0.4D).add(0.0D, 0.25D, 0.0D); // Forward and slightly up
+                Vec3 impulse = forward.scale(0.4D).add(0.0D, 0.25D, 0.0D);
 
                 this.mob.setDeltaMovement(this.mob.getDeltaMovement().add(impulse));
                 this.mob.hasImpulse = true;
@@ -165,7 +161,7 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     @Override
     public void stop() {
         if (this.state == ClimbState.MINING_OVERHANG) {
-            this.mob.level().destroyBlockProgress(this.mob.getId(), this.mob.blockPosition().above(2), -1);
+            SiegeActionAnimator.clearMiningAnimation(this.mob.level(), this.mob, this.mob.blockPosition().above(2));
         }
         this.targetWallPos = null;
         this.state = ClimbState.SEARCHING;

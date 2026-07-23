@@ -1,7 +1,6 @@
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -22,8 +21,8 @@ public class SiegeProject {
         this.expectedEntryCost = expectedEntryCost;
     }
 
-    public boolean isCompleted(ServerLevel level, TerrainEvaluator evaluator) {
-        return instructions.values().stream().allMatch(node -> evaluator.isActionCompleted(level, node));
+    public boolean isCompleted(TerrainAccess terrain, TerrainEvaluator evaluator) {
+        return instructions.values().stream().allMatch(node -> evaluator.isActionCompleted(terrain, node));
     }
 
     public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
@@ -42,10 +41,10 @@ public class SiegeProject {
         });
     }
 
-    public Map<BlockPos, SiegeNode> getRemainingInstructions(ServerLevel level, TerrainEvaluator evaluator) {
+    public Map<BlockPos, SiegeNode> getRemainingInstructions(TerrainAccess terrain, TerrainEvaluator evaluator) {
         Map<BlockPos, SiegeNode> remaining = new HashMap<>();
         instructions.forEach((pos, node) -> {
-            if (!evaluator.isActionCompleted(level, node)) {
+            if (!evaluator.isActionCompleted(terrain, node)) {
                 remaining.put(pos, node);
             }
         });
