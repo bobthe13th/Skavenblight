@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -10,6 +11,7 @@ import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 import java.util.Optional;
@@ -28,6 +30,8 @@ import java.util.function.Predicate;
  * built on this base - see SiegeActionAnimator for the smaller bit of code they share instead.
  */
 public abstract class AbstractSiegeConstructionGoal extends Goal implements SiegeGoal {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     protected final PathfinderMob mob;
     protected StandardFlowField flowField;
@@ -110,10 +114,25 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
 
         if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
-            if (nextNode != null && lookAheadMatch.test(nextNode.action()) && currentPos.closerThan(nextNode.pos(), 2.5D)) {
+            if (nextNode != null && lookAheadMatch.test(nextNode.action())
+                    && !nextNode.pos().equals(currentPos)
+                    && currentPos.closerThan(nextNode.pos(), 2.5D)) {
                 return Optional.of(nextNode);
             }
         }
+
+        // A construction target that IS the mob's own current position can never be executed
+        // safely - a mob can't place a block into the exact space its body occupies without
+        // stepping aside first, which nothing here does. Defense in depth: the one known
+        // source of this (SiegeProjectManager's old self-referential anchor instruction) has
+        // been removed, but this guard means any future/unknown source degrades to
+        // "no instruction" (safe - the mob just waits) instead of silently entombing it.
+        // Confirmed via SiegeActivityLog in testing: exact mob-pos == target-pos matches on
+        // BUILD_STAIR executions.
+        if (node != null && node.action() != SiegeNode.SiegeAction.WALK && node.pos().equals(currentPos)) {
+            return Optional.empty();
+        }
+
         return Optional.ofNullable(node);
     }
 
@@ -153,7 +172,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.targetPos = target.pos();
         this.targetAction = target.action();
         this.facing = target.facing() != null ? target.facing() : this.mob.getDirection();
-        this.flowField.tryClaimTarget(this.targetPos);
+        this.flowField.tryClaimTarget(this.targetPos, this.mob);
     }
 
     @Override
@@ -179,6 +198,12 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
             this.stalledTicks++;
 
             if (getMaxStalledTicks() > 0 && this.stalledTicks >= getMaxStalledTicks()) {
+                // Logged so a recurring give-up at the same spot (a permanently occupied
+                // chokepoint, not just one unlucky tick) is visible in the log across a
+                // session rather than only inferable from a dump's momentary snapshot.
+                LOGGER.info("[Skavenblight] {} giving up on {} at {} after {} stalled ticks - space never cleared",
+                        this.getClass().getSimpleName(), this.targetAction, this.targetPos.toShortString(), this.stalledTicks);
+
                 this.nextAllowedActionTime = this.mob.level().getGameTime() + getGiveUpCooldownTicks();
                 // Release here, not just in stop() - this nulls targetPos directly, so by the
                 // time stop() naturally runs (canContinueToUse() sees targetPos == null on the

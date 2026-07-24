@@ -41,4 +41,17 @@ public final class SiegeActionAnimator {
     public static void clearMiningAnimation(Level level, PathfinderMob mob, BlockPos target) {
         level.destroyBlockProgress(mob.getId(), target, -1);
     }
+
+    /**
+     * True once a stalled-tick counter has crossed its give-up threshold. Mirrors
+     * AbstractSiegeConstructionGoal's stalledTicks/getMaxStalledTicks pattern for the three
+     * multi-state goals that aren't built on that base class (SpiralSapperGoal, WarpSapperGoal,
+     * DeployClimbableGoal) - without this, a "space never clears" or "can't reach the target"
+     * retry branch has no way to ever stop retrying, which is exactly the "no timeout or
+     * attempt to get unstuck" gap observed in testing (mobs going catatonic at the first
+     * obstacle instead of giving up and picking a new target).
+     */
+    public static boolean stalledPastLimit(int stalledTicks, int maxStalledTicks) {
+        return maxStalledTicks > 0 && stalledTicks >= maxStalledTicks;
+    }
 }

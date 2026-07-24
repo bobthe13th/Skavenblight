@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.Config;
 import org.slf4j.Logger;
@@ -64,7 +65,16 @@ public class StandardFlowField {
     // Without this, every mob near a bottleneck independently computes the same "next"
     // instruction and all converge on the identical target block simultaneously - multiple
     // mobs dog-piling one spot instead of spreading across the available frontier work.
-    private final Set<BlockPos> claimedTargets = new HashSet<>();
+    //
+    // Keyed to the claiming mob (not a bare position set) so a claim can self-heal when its
+    // owner dies or is discarded. AbstractSiegeConstructionGoal only releases a claim from its
+    // own stop()/give-up path, which never runs for a mob that's removed out from under its
+    // goal (death, /kill, DebugCleanupCommands' mob.discard(), fall damage, etc. all skip the
+    // GoalSelector's normal stop() call entirely) - a bare Set<BlockPos> would leak that
+    // position as permanently unclaimable for the rest of this flow field's lifetime. Checking
+    // the owner's isAlive() on every lookup instead of hooking every removal path individually
+    // handles all of them uniformly.
+    private final Map<BlockPos, Mob> claimedTargets = new HashMap<>();
 
     public StandardFlowField(ServerLevel level, BlockPos targetPos, Set<ChunkPos> territoryChunks) {
         this.state = new FlowFieldState(targetPos, territoryChunks);
@@ -139,8 +149,31 @@ public class StandardFlowField {
         }
     }
 
+    // Minimum real time between force-triggered recalculations. calculateMapIfNeeded's own
+    // settle-delay/cooldown gates don't help here: resetting lastCalculationStart to 0 below
+    // exists specifically so a deliberate "please recalculate soon" request can bypass those
+    // gates for a prompt one-off recalc - but every siege-construction goal calls this after
+    // finishing a build action, and there can be dozens active simultaneously across a large
+    // siege (BuildFlowFieldGoal self-throttles per-mob before calling this; SpiralSapperGoal
+    // and WarpSapperGoal do not). Without a shared throttle, many different mobs finishing
+    // builds within the same few ticks each independently force a brand-new full recalculation,
+    // discarding whatever the in-flight or just-finished pass computed. Reported in testing:
+    // siege plans "rapidly shift while the mobs are trying to build them, causing them to get
+    // stuck" - a mob's target superseded by a fresh plan before it even finishes approaching it.
+    private static final long MIN_FORCE_RECALC_INTERVAL_MS = 2000;
+    private long lastForceRecalculationMs = 0;
+
     public void forceRecalculation() {
         this.isDirty = true;
+
+        long now = System.currentTimeMillis();
+        if (now - this.lastForceRecalculationMs < MIN_FORCE_RECALC_INTERVAL_MS) {
+            // Still marked dirty above, so the next pass still happens once the normal
+            // settle-delay/cooldown gates allow it - this only refuses the "bypass those gates
+            // and go immediately" part of a request that arrived too soon after the last one.
+            return;
+        }
+        this.lastForceRecalculationMs = now;
         this.lastCalculationStart = 0;
     }
 
@@ -194,9 +227,29 @@ public class StandardFlowField {
                     this.isCalculatingAsync.set(false);
                 }
             }, Util.backgroundExecutor()).thenAcceptAsync(v -> {
-                LOGGER.info("[Skavenblight] Async FlowField calculation FINISHED! Total Nodes: {}", state.getInstructionMap().size());
+                Map<BlockPos, SiegeNode> finalMap = state.getInstructionMap();
+                LOGGER.info("[Skavenblight] Async FlowField calculation FINISHED! Total Nodes: {} | Dijkstra budget used: {}/{} ({}) | Actions: {}",
+                        finalMap.size(), this.calculator.getLastPassNodeCount(), this.throttler.getNodesPerTick(),
+                        this.calculator.isLastPassBudgetExhausted() ? "EXHAUSTED - queue cut off early" : "queue drained naturally",
+                        summarizeActions(finalMap));
             }, level.getServer());
         }
+    }
+
+    /**
+     * Cheap one-time histogram of the final instruction map's action types, logged alongside
+     * every completed pass so WALK-vs-BUILD/MINE trends are visible across a whole session in
+     * the persistent server log. Previously this was only visible via a manually-triggered
+     * debug dump at one instant, which meant no history of how a session's plan evolved (e.g.
+     * whether the hitObstacle sunburst got better or worse pass over pass) unless someone
+     * happened to grab a dump at exactly the right moments.
+     */
+    private static String summarizeActions(Map<BlockPos, SiegeNode> instructionMap) {
+        Map<SiegeNode.SiegeAction, Long> counts = new EnumMap<>(SiegeNode.SiegeAction.class);
+        for (SiegeNode node : instructionMap.values()) {
+            counts.merge(node.action(), 1L, Long::sum);
+        }
+        return counts.toString();
     }
 
     /** Must only be called from the main server thread. */
@@ -246,17 +299,36 @@ public class StandardFlowField {
                 new SiegeNode(getOffsetPostAction(node), SiegeNode.SiegeAction.WALK) : node;
     }
 
-    /** True and claims {@code pos} if it wasn't already claimed by another mob's construction goal. */
-    public boolean tryClaimTarget(BlockPos pos) {
-        return this.claimedTargets.add(pos.immutable());
+    /** True and claims {@code pos} if it wasn't already claimed by another live mob's construction goal. */
+    public boolean tryClaimTarget(BlockPos pos, Mob claimant) {
+        BlockPos key = pos.immutable();
+        Mob owner = this.claimedTargets.get(key);
+        if (owner != null && owner != claimant && owner.isAlive()) {
+            return false;
+        }
+        // Logged so the frequency of dead-owner reclaims is visible in the server log over a
+        // session - previously this recovery was silent, so there was no way to tell how often
+        // claims were actually being orphaned (e.g. by DebugCleanupCommands' mob.discard(),
+        // fall damage, combat) versus released normally. INFO rather than DEBUG so it actually
+        // lands in latest.log instead of being buried in debug.log's much higher-volume output
+        // (see SiegeProjectManager's "Line aborted" line - 98% of a whole session's debug.log
+        // in testing).
+        if (owner != null && owner != claimant) {
+            LOGGER.info("[Skavenblight] Reclaiming target {} for {} - previous owner {} is no longer alive",
+                    key.toShortString(), claimant.getClass().getSimpleName(), owner.getClass().getSimpleName());
+        }
+        this.claimedTargets.put(key, claimant);
+        return true;
     }
 
     public void releaseTarget(BlockPos pos) {
         if (pos != null) this.claimedTargets.remove(pos);
     }
 
+    /** False if unclaimed, or if the claiming mob is no longer alive (a dead/discarded owner can't hold a claim open). */
     public boolean isTargetClaimed(BlockPos pos) {
-        return this.claimedTargets.contains(pos);
+        Mob owner = this.claimedTargets.get(pos);
+        return owner != null && owner.isAlive();
     }
 
     public SiegeNode getDynamicWildernessNode(ServerLevel level, BlockPos ratPos) {
@@ -264,6 +336,19 @@ public class StandardFlowField {
 
         BlockPos headingTarget = determineWildernessHeading(ratPos);
         return calculateWildernessStep(level, ratPos, headingTarget);
+    }
+
+    /**
+     * The far-off point a wilderness rat should be walking toward (nearest mapped block, or
+     * the raw nexus if nothing is mapped yet) - as opposed to {@link #getDynamicWildernessNode}
+     * above, which collapses that same heading down to a single adjacent step for the debug
+     * visualizer's per-tile arrows. A real mob should hand this whole point to vanilla
+     * navigation and let it actually path there; feeding it one manually-computed step at a
+     * time gives vanilla nothing to route around obstacles with, so it stalls at the first one.
+     */
+    public BlockPos getWildernessHeadingTarget(BlockPos ratPos) {
+        if (state.isEmpty()) return state.getTargetPos();
+        return determineWildernessHeading(ratPos);
     }
 
     // =================================================================================
@@ -278,6 +363,7 @@ public class StandardFlowField {
     public Set<ChunkPos> getMappedChunks() { return state.getMappedChunks(); }
     public Set<ChunkPos> getForcedChunks() { return Collections.unmodifiableSet(this.forcedChunks); }
     public SiegeProjectManager getProjectManager() { return this.projectManager; }
+    public FlowFieldCalculator getCalculator() { return this.calculator; }
     public int getTerritoryChunkCount() { return state.getTerritoryChunks().size(); }
     public int getCapturedChunkCount() { return this.terrainSnapshot != null ? this.terrainSnapshot.getCapturedChunkCount() : 0; }
     /** Game-time tick the current (or most recent) calculation started at - see level.getGameTime(). */
@@ -292,6 +378,23 @@ public class StandardFlowField {
                 return blocks.stream().min(Comparator.comparingDouble(p -> p.distSqr(ratPos))).orElse(state.getTargetPos());
             }
         }
+
+        // A rat outside every mapped chunk previously fell straight through to the raw nexus
+        // target - identical to having no wilderness handling at all. Head for the nearest
+        // mapped chunk's nearest block instead, so it walks toward the edge of the known
+        // territory rather than beelining across whatever terrain (a pit, a cliff) made macro
+        // projects necessary in the first place.
+        ChunkPos nearestMappedChunk = state.getMappedChunks().stream()
+                .min(Comparator.comparingInt(cp -> cp.getChessboardDistance(ratChunk)))
+                .orElse(null);
+
+        if (nearestMappedChunk != null) {
+            List<BlockPos> blocks = state.getMappedBlocksInChunk(nearestMappedChunk);
+            if (!blocks.isEmpty()) {
+                return blocks.stream().min(Comparator.comparingDouble(p -> p.distSqr(ratPos))).orElse(state.getTargetPos());
+            }
+        }
+
         return state.getTargetPos();
     }
 

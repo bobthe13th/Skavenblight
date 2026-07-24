@@ -31,18 +31,32 @@ public class WarpLightningCoilDummyBlock extends Block {
         return RenderShape.INVISIBLE;
     }
 
-    // When the dummy is broken, find the base block and break it
+    // When either dummy segment is broken, find the base and the *other* dummy segment
+    // and clean up both directly. We can't rely on the base's own playerWillDestroy to
+    // cascade this for us: level.destroyBlock() never calls playerWillDestroy (that hook
+    // only fires for the block the player actually clicked), so if we only destroyed the
+    // base here, the remaining dummy segment would be orphaned.
     @Override
     public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
         if (!level.isClientSide()) {
-            // Check up to 2 blocks down for the base
-            for (int i = 1; i <= 2; i++) {
-                BlockPos lowerPos = pos.below(i);
-                BlockState lowerState = level.getBlockState(lowerPos);
-                if (lowerState.is(ModBlocks.WARP_LIGHTNING_COIL.get())) {
-                    level.destroyBlock(lowerPos, !player.isCreative());
-                    break;
-                }
+            BlockPos basePos = null;
+            BlockPos otherDummyPos = null;
+
+            if (level.getBlockState(pos.below(1)).is(ModBlocks.WARP_LIGHTNING_COIL.get())) {
+                // This is the middle segment: base is directly below, other dummy is above
+                basePos = pos.below(1);
+                otherDummyPos = pos.above(1);
+            } else if (level.getBlockState(pos.below(2)).is(ModBlocks.WARP_LIGHTNING_COIL.get())) {
+                // This is the top segment: base is two below, other dummy is directly below
+                basePos = pos.below(2);
+                otherDummyPos = pos.below(1);
+            }
+
+            if (otherDummyPos != null && level.getBlockState(otherDummyPos).is(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get())) {
+                level.destroyBlock(otherDummyPos, false); // false = don't drop items for dummy blocks
+            }
+            if (basePos != null && level.getBlockState(basePos).is(ModBlocks.WARP_LIGHTNING_COIL.get())) {
+                level.destroyBlock(basePos, !player.isCreative());
             }
         }
         return super.playerWillDestroy(level, pos, state, player);

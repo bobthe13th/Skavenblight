@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -8,15 +9,20 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LadderBlock;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.debug.SiegeActivityLog;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
 public class DeployClimbableGoal extends Goal implements SiegeGoal {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private final PathfinderMob mob;
     private StandardFlowField flowField;
 
@@ -26,6 +32,10 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
 
     private int actionTicks = 0;
     private int maxActionTicks = 0;
+    private int stalledTicks = 0;
+    private long nextAllowedStartTime = 0;
+    private static final int MAX_STALLED_TICKS = 60;
+    private static final long GIVE_UP_COOLDOWN_TICKS = 100;
 
     private enum ClimbState {
         SEARCHING,
@@ -47,6 +57,7 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     @Override
     public boolean canUse() {
         if (this.flowField == null || !this.mob.isAlive()) return false;
+        if (this.mob.level().getGameTime() < this.nextAllowedStartTime) return false;
 
         // Owns BUILD_LADDER nodes specifically - TerrainEvaluator emits BUILD_LADDER for a
         // vertical shaft that has a wall to hang the ladder on (see determineMacroAction).
@@ -57,13 +68,22 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
             SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, pos);
 
             if (node != null && node.action() == SiegeNode.SiegeAction.BUILD_LADDER) {
-                Direction lookDir = this.mob.getDirection();
-                BlockPos blockInFront = pos.relative(lookDir);
-
-                if (serverLevel.getBlockState(blockInFront).isSolidRender(serverLevel, blockInFront)) {
-                    this.targetWallPos = blockInFront;
-                    this.wallFacing = lookDir.getOpposite();
-                    return true;
+                // Match the planner's own hasWall scan (TerrainEvaluator#determineMacroAction) -
+                // all 4 horizontal directions, not just whichever way the mob happens to be
+                // facing on arrival. A mob approaches from wherever the flow field routed it,
+                // rarely the exact side the planner found a wall on; checking only
+                // mob.getDirection() made this goal decline far more often than the plan
+                // justified, silently pushing BUILD_LADDER nodes to BuildFlowFieldGoal's generic
+                // executor instead - which places a real ladder too, but skips this goal's
+                // overhang-clearing step.
+                for (Direction dir : Direction.Plane.HORIZONTAL) {
+                    BlockPos candidateWall = pos.relative(dir);
+                    if (serverLevel.getBlockState(candidateWall).isSolidRender(serverLevel, candidateWall)
+                            && !this.flowField.isTargetClaimed(candidateWall)) {
+                        this.targetWallPos = candidateWall;
+                        this.wallFacing = dir.getOpposite();
+                        return true;
+                    }
                 }
             }
         }
@@ -73,6 +93,8 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     @Override
     public void start() {
         this.actionTicks = 0;
+        this.stalledTicks = 0;
+        this.flowField.tryClaimTarget(this.targetWallPos, this.mob);
         checkOverhang();
     }
 
@@ -110,7 +132,7 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
                 boolean complete = SiegeActionAnimator.tickMiningAnimation(serverLevel, this.mob, overhangPos, this.actionTicks, this.maxActionTicks);
 
                 if (complete) {
-                    SiegeInteractionHandler.executeBreach(serverLevel, overhangPos, this.flowField);
+                    SiegeInteractionHandler.executeBreach(serverLevel, overhangPos, this.flowField, this.mob);
                     SiegeActionAnimator.clearMiningAnimation(serverLevel, this.mob, overhangPos);
 
                     this.actionTicks = 0;
@@ -123,9 +145,21 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
 
                 if (this.actionTicks >= this.maxActionTicks) {
                     if (SiegeInteractionHandler.isSpaceClear(serverLevel, placePos, this.mob)) {
+                        // Same self-entombment risk as SiegeInteractionHandler#constructSiegeBlock -
+                        // this placement bypasses that method entirely (a ladder goes on the wall
+                        // beside the mob, not underfoot, but placePos can still end up
+                        // overlapping the mob's own hitbox depending on approach angle).
+                        if (this.mob.getBoundingBox().intersects(new AABB(placePos))) {
+                            LOGGER.warn("[Skavenblight] {} ({}) placing ladder at {} while its own hitbox overlaps the target - " +
+                                            "risk of self-entombment. Mob pos: {}",
+                                    this.mob.getClass().getSimpleName(), this.mob.getUUID().toString().substring(0, 8),
+                                    placePos.toShortString(), this.mob.blockPosition().toShortString());
+                        }
+
                         serverLevel.setBlockAndUpdate(placePos, Blocks.LADDER.defaultBlockState()
                                 .setValue(LadderBlock.FACING, this.wallFacing));
                         serverLevel.levelEvent(2001, placePos, Block.getId(Blocks.LADDER.defaultBlockState()));
+                        SiegeActivityLog.record(serverLevel.getGameTime(), this.mob, placePos, SiegeNode.SiegeAction.BUILD_LADDER, "ladder placed");
 
                         BlockPos targetTunnel = placePos.above().relative(this.wallFacing.getOpposite());
                         if (serverLevel.getBlockState(targetTunnel).canBeReplaced()) {
@@ -134,8 +168,20 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
                         } else {
                             this.state = ClimbState.SEARCHING;
                         }
+                        this.stalledTicks = 0;
                     } else {
                         SiegeInteractionHandler.pushOccupantsAway(serverLevel, placePos, this.mob);
+                        this.stalledTicks++;
+
+                        if (SiegeActionAnimator.stalledPastLimit(this.stalledTicks, MAX_STALLED_TICKS)) {
+                            LOGGER.info("[Skavenblight] {} giving up placing ladder at {} after {} stalled ticks - space never cleared",
+                                    this.mob.getClass().getSimpleName(), placePos.toShortString(), this.stalledTicks);
+                            this.nextAllowedStartTime = serverLevel.getGameTime() + GIVE_UP_COOLDOWN_TICKS;
+                            this.flowField.releaseTarget(this.targetWallPos);
+                            this.targetWallPos = null;
+                            this.state = ClimbState.SEARCHING;
+                            return;
+                        }
                         this.actionTicks = Math.max(0, this.maxActionTicks - 5);
                     }
                 }
@@ -163,8 +209,12 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
         if (this.state == ClimbState.MINING_OVERHANG) {
             SiegeActionAnimator.clearMiningAnimation(this.mob.level(), this.mob, this.mob.blockPosition().above(2));
         }
+        if (this.targetWallPos != null) {
+            this.flowField.releaseTarget(this.targetWallPos);
+        }
         this.targetWallPos = null;
         this.state = ClimbState.SEARCHING;
         this.actionTicks = 0;
+        this.stalledTicks = 0;
     }
 }

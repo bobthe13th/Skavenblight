@@ -41,14 +41,22 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
             return Optional.empty();
         }
 
+        // Same-level (dy=0) only. This used to also check dy=1 (a neighbor one block above
+        // currentPos) but always targeted currentPos regardless of which dy matched - when
+        // the dy=1 case fired, the new stair landed one block too low relative to the
+        // neighbor it copied the facing from, breaking the parallel lane's continuity right
+        // where it was built. Confirmed via SiegeActivityLog in testing: "placed a stair
+        // block too high, blocking them from being able to continue building" traced to
+        // exactly this mismatch. currentPos.above() isn't a fix either - currentPos itself is
+        // confirmed air/replaceable above, so a stair placed one row up would have nothing
+        // solid beneath it. Only dy=0 is a position this method has already verified
+        // currentPos can correctly support (see the canBeReplaced/blocksMotion checks above).
         for (int[] offset : HORIZONTAL_OFFSETS) {
-            for (int dy = 0; dy <= 1; dy++) {
-                BlockPos checkPos = currentPos.offset(offset[0], dy, offset[1]);
-                BlockState adjacentState = this.mob.level().getBlockState(checkPos);
+            BlockPos checkPos = currentPos.offset(offset[0], 0, offset[1]);
+            BlockState adjacentState = this.mob.level().getBlockState(checkPos);
 
-                if (adjacentState.is(Blocks.COBBLESTONE_STAIRS)) {
-                    return Optional.of(new Target(currentPos, SiegeNode.SiegeAction.BUILD_STAIR, adjacentState.getValue(StairBlock.FACING)));
-                }
+            if (adjacentState.is(Blocks.COBBLESTONE_STAIRS)) {
+                return Optional.of(new Target(currentPos, SiegeNode.SiegeAction.BUILD_STAIR, adjacentState.getValue(StairBlock.FACING)));
             }
         }
 
@@ -62,12 +70,15 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
     protected long getPostActionCooldownTicks() { return 20; }
 
     @Override
+    protected int getMaxStalledTicks() { return 60; }
+
+    @Override
     protected boolean isTargetStillValid(ServerLevel level, BlockPos pos) {
         return level.getBlockState(pos).canBeReplaced();
     }
 
     @Override
     protected void execute(ServerLevel level, BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {
-        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField);
+        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField, this.mob);
     }
 }

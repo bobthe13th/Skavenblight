@@ -52,7 +52,18 @@ public class TerrainEvaluator {
                     int stepCost = (offset[0] != 0 && offset[1] != 0) ? DIAGONAL_COST : ORTHOGONAL_COST;
                     validSteps.add(new EvaluatedStep(neighbor, stepCost, SiegeNode.SiegeAction.WALK));
                 }
-                else if (neighborState.blocksMotion() && !isWalkableScaffold(neighborState)) {
+                // Only breach obstacles at the current level here. Full terrain columns mean
+                // almost every ordinary walkable tile has solid ground diagonally-below its
+                // neighbors - allowing dy != 0 here turned every such tile into up to 8
+                // "tunnel down into undisturbed dirt" MINE candidates, none of which ever lead
+                // anywhere useful. That flooded nextCostMap (the node-budget counter) with
+                // wasted entries near the start of the search, starving WALK propagation
+                // before it could reach the rest of the territory - see FlowFieldCalculator's
+                // MAX_CONSECUTIVE_MINE_DEPTH comment for the matching depth-side half of this
+                // problem. Deliberate vertical progress through solid material is already the
+                // capped, structured job of evaluateMacroProjects (via hitObstacle) - the core
+                // step doesn't need to also explore it ad hoc in every direction from every tile.
+                else if (dy == 0 && neighborState.blocksMotion() && !isWalkableScaffold(neighborState)) {
                     SiegeNode tempMineNode = new SiegeNode(neighbor, SiegeNode.SiegeAction.MINE);
                     int baseMineCost = calculateActionCost(terrain, tempMineNode);
 
@@ -157,10 +168,24 @@ public class TerrainEvaluator {
     }
 
     public boolean isActionCompleted(TerrainAccess terrain, SiegeNode node) {
+        // BUILD_LANDING is the odd one out: SiegeInteractionHandler#constructSiegeBlock
+        // deliberately leaves node.pos() itself (and the block above it) CLEAR - that's the
+        // standing space the landing exists to provide - and fills the floor one block below
+        // instead. Checking node.pos() the same way every other BUILD_* action is checked can
+        // therefore never see a completed landing as done (it's supposed to stay open), so it
+        // was never being marked complete - meaning a rat could never advance past a landing to
+        // whatever instruction comes after it, and any rat that re-queried it would redo the
+        // same construction again. Confirmed via SiegeActivityLog in testing: the same
+        // BUILD_LANDING executed twice in a row at the same position.
+        if (node.action() == SiegeNode.SiegeAction.BUILD_LANDING) {
+            BlockState floorState = terrain.getBlockState(node.pos().below());
+            return floorState.blocksMotion() || isWalkableScaffold(floorState);
+        }
+
         BlockState state = terrain.getBlockState(node.pos());
         return switch (node.action()) {
             case MINE -> !state.blocksMotion() || isWalkableScaffold(state);
-            case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LANDING, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
+            case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
             default -> false;
         };
     }
@@ -204,13 +229,19 @@ public class TerrainEvaluator {
     }
 
     private BlockPos findGroundBelow(TerrainAccess terrain, BlockPos airPos, FlowFieldState state) {
-        // Limit direct drop searching to short 4-block drops
-        for (int i = 1; i <= 4; i++) {
-            BlockPos checkPos = airPos.below(i);
-            if (isOutOfBounds(terrain, checkPos, state)) return null;
-            if (isWalkableTerrain(terrain, checkPos)) return checkPos;
-            if (terrain.getBlockState(checkPos).blocksMotion()) return null;
-        }
+        // Capped to exactly 1 block. The BUILD_PILLAR/BUILD_STAIR step built from this result
+        // encodes a single block placement (see getValidOrthogonalSteps) - a mob can place one
+        // block and hop onto it, not several stacked at once in one action. Scanning further
+        // down (this used to go up to 4) let that same single-placement step get selected for
+        // gaps of 2-4 blocks, producing an instruction that actually needs 2-4 sequential
+        // placements to be climbable; in practice a construction goal executes it once and
+        // leaves an unreachable block floating above the mob's head - observed in testing as a
+        // stair/pillar block placed several blocks up with no way to reach it. Genuine
+        // multi-level shafts are already handled correctly, one level per node, by
+        // evaluateMacroProjects's chained macro-project lines.
+        BlockPos checkPos = airPos.below();
+        if (isOutOfBounds(terrain, checkPos, state)) return null;
+        if (isWalkableTerrain(terrain, checkPos)) return checkPos;
         return null;
     }
 }

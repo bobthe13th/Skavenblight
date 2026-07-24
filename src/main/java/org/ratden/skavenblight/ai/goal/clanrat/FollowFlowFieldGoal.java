@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.PathfinderMob;
@@ -8,10 +9,13 @@ import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
 public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private final PathfinderMob mob;
     private final double speedModifier;
     private StandardFlowField flowField;
@@ -64,7 +68,18 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 double distanceMovedSqr = currentPosition.distanceToSqr(this.lastPosition);
                 if (distanceMovedSqr < 0.04) {
                     BlockPos escapePos = findEscapePos(this.mob.blockPosition());
+                    // Naturally rate-limited to at most once per ~70 ticks per mob (10-tick
+                    // poll + 60-tick escape-hatch cooldown below), so this won't spam even
+                    // under an 80-mob load test - INFO rather than DEBUG so it actually lands in
+                    // latest.log instead of being buried in debug.log's much higher-volume
+                    // output (see SiegeProjectManager's "Line aborted" line - 98% of a whole
+                    // session's debug.log in testing). Previously silent entirely - "rats seem
+                    // stuck" during testing had no log trail showing where or how often this
+                    // actually fires.
                     if (escapePos != null) {
+                        LOGGER.info("[Skavenblight] {} stuck at {} (hasn't moved in ~{} ticks) - escape-hatch heading to {}",
+                                this.mob.getClass().getSimpleName(), this.mob.blockPosition().toShortString(), this.pathingUpdateTimer, escapePos.toShortString());
+
                         this.mob.getNavigation().moveTo(
                                 escapePos.getX() + 0.5D,
                                 escapePos.getY(),
@@ -74,6 +89,9 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                         this.escapeHatchTicks = 60;
                         this.lastPosition = currentPosition;
                         return;
+                    } else {
+                        LOGGER.info("[Skavenblight] {} stuck at {} (hasn't moved in ~{} ticks) - no escape-hatch target found (no flow-field chain ahead)",
+                                this.mob.getClass().getSimpleName(), this.mob.blockPosition().toShortString(), this.pathingUpdateTimer);
                     }
                 }
             }
@@ -82,13 +100,24 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             BlockPos currentPos = this.mob.blockPosition();
             SiegeNode targetNode = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), currentPos);
 
-            // --- CHANGED: Vanilla Pathfinding Fallback ---
-            // If there is no SiegeNode, we are in the wilderness. Hand over to vanilla AI.
+            // --- Wilderness fallback ---
+            // No instruction at our feet. Rather than beeline straight at the raw nexus
+            // coordinate (which can be across the exact terrain - a pit, a cliff - that
+            // necessitated macro projects in the first place), head toward the nearest
+            // block the flow field HAS mapped, if any; only fall back to the raw nexus
+            // position when nothing is mapped at all.
+            //
+            // Hand vanilla navigation the actual far target, not a single manually-computed
+            // step toward it - moveTo-ing one adjacent block at a time (as getDynamicWildernessNode
+            // does for the debug visualizer's per-tile arrows) gives vanilla's pathfinder
+            // nothing to route around, so a rat stalls at the very first obstacle needing a
+            // multi-block detour instead of actually pathing in.
             if (targetNode == null) {
+                BlockPos heading = this.flowField.getWildernessHeadingTarget(currentPos);
                 this.mob.getNavigation().moveTo(
-                        this.flowField.getTargetPos().getX() + 0.5D,
-                        this.flowField.getTargetPos().getY(),
-                        this.flowField.getTargetPos().getZ() + 0.5D,
+                        heading.getX() + 0.5D,
+                        heading.getY(),
+                        heading.getZ() + 0.5D,
                         this.speedModifier
                 );
                 return;

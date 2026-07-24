@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -12,10 +13,13 @@ import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
 public class WarpSapperGoal extends Goal implements SiegeGoal {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private final PathfinderMob mob;
     private StandardFlowField flowField;
 
@@ -23,7 +27,15 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     private SapperState state = SapperState.SEARCHING;
 
     private int actionTicks = 0;
+    private long nextAllowedStartTime = 0;
     private static final int SAPPER_THRESHOLD_TICKS = 120;
+    // APPROACHING has no natural completion signal other than distance - unlike
+    // PLANTING_CHARGE/FLEEING, which are tick-count-bound, a mob that can never actually reach
+    // within 4 blocks of targetMinePos (blocked path, unreachable position) would otherwise
+    // call moveTo every tick forever. actionTicks is unused during APPROACHING today (reset to
+    // 0 on entry into PLANTING_CHARGE/FLEEING), so it doubles as this phase's stall counter.
+    private static final int MAX_APPROACH_TICKS = 200;
+    private static final long GIVE_UP_COOLDOWN_TICKS = 100;
 
     private enum SapperState {
         SEARCHING,
@@ -45,12 +57,14 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     @Override
     public boolean canUse() {
         if (this.flowField == null || !this.mob.isAlive()) return false;
+        if (this.mob.level().getGameTime() < this.nextAllowedStartTime) return false;
 
         if (this.mob.level() instanceof ServerLevel serverLevel) {
             BlockPos currentPos = this.mob.blockPosition();
             SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
 
-            if (node != null && node.action() == SiegeNode.SiegeAction.MINE) {
+            if (node != null && node.action() == SiegeNode.SiegeAction.MINE
+                    && !this.flowField.isTargetClaimed(node.pos())) {
                 int requiredTicks = SiegeInteractionHandler.calculateMiningTicks(serverLevel, node.pos());
 
                 if (requiredTicks > SAPPER_THRESHOLD_TICKS && requiredTicks < 10000) {
@@ -66,6 +80,7 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     public void start() {
         this.state = SapperState.APPROACHING;
         this.actionTicks = 0;
+        this.flowField.tryClaimTarget(this.targetMinePos, this.mob);
     }
 
     @Override
@@ -87,6 +102,16 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
                     this.state = SapperState.PLANTING_CHARGE;
                     this.actionTicks = 0;
                 } else {
+                    this.actionTicks++;
+                    if (this.actionTicks >= MAX_APPROACH_TICKS) {
+                        LOGGER.info("[Skavenblight] {} giving up approaching warp-charge target {} after {} ticks - never got within range",
+                                this.mob.getClass().getSimpleName(), this.targetMinePos.toShortString(), this.actionTicks);
+                        this.nextAllowedStartTime = this.mob.level().getGameTime() + GIVE_UP_COOLDOWN_TICKS;
+                        this.flowField.releaseTarget(this.targetMinePos);
+                        this.targetMinePos = null;
+                        this.state = SapperState.SEARCHING;
+                        return;
+                    }
                     this.mob.getNavigation().moveTo(this.targetMinePos.getX(), this.targetMinePos.getY(), this.targetMinePos.getZ(), 1.2D);
                 }
             }
@@ -136,6 +161,9 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
 
     @Override
     public void stop() {
+        if (this.targetMinePos != null) {
+            this.flowField.releaseTarget(this.targetMinePos);
+        }
         this.targetMinePos = null;
         this.state = SapperState.SEARCHING;
         this.actionTicks = 0;

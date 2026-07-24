@@ -38,6 +38,19 @@ public class FlowFieldCalculator {
     private final Map<BlockPos, Integer> mineChainDepth = new HashMap<>();
     private long lastLiveDebugPublishMs = 0;
 
+    // Diagnostics for the LAST completed pass, read by PathingDebugFileWriter/StandardFlowField's
+    // log line. nextCostMap.size() (not nextInstructionMap.size(), which is what "Total Nodes"
+    // in the finished-pass log/dump actually reports) is the value the budget cutoff at line
+    // ~96 checks - a single successful macro-project line only costs ONE nextCostMap entry (its
+    // endpoint) while writing up to MAX_PROJECT_LENGTH (32) entries into nextInstructionMap via
+    // putAll, so "Total Nodes" can look enormous (tens of thousands) while nextCostMap - the
+    // actual budget-gated counter real WALK propagation is competing against - is quietly maxed
+    // out. Without surfacing this separately there was no way to tell "budget genuinely
+    // exhausted by real competition for slots" apart from "queue drained naturally" from outside
+    // this class.
+    private int lastPassNodeCount = 0;
+    private boolean lastPassBudgetExhausted = false;
+
     // Volatile immutable map reference for atomic, zero-flicker snapshot reads across threads
     private volatile Map<BlockPos, SiegeNode> liveDebugMap = Collections.emptyMap();
 
@@ -90,9 +103,11 @@ public class FlowFieldCalculator {
     private void processCalculationQueue(TerrainAccess terrain, FlowFieldState state) {
         // Dynamically throttle max allowed nodes per calculation using MSPT metric
         int maxAllowedNodes = Math.min(Config.maxFlowFieldNodes, throttler.getNodesPerTick());
+        lastPassBudgetExhausted = false;
 
         while (!calcQueue.isEmpty()) {
             if (nextCostMap.size() >= maxAllowedNodes) {
+                lastPassBudgetExhausted = true;
                 calcQueue.clear();
                 break;
             }
@@ -144,9 +159,19 @@ public class FlowFieldCalculator {
             }
         }
 
-        long walkableNeighbors = validSteps.stream()
-                .filter(s -> s.action() == SiegeNode.SiegeAction.WALK && s.pos().getY() == current.getY())
-                .count();
+        // Was: only same-Y WALK steps counted. On any natural sloped/uneven terrain, a
+        // neighbor one block down or up is a perfectly ordinary, already-handled MINE or
+        // BUILD_PILLAR/BUILD_STAIR single step (see getValidOrthogonalSteps) - it never gets
+        // counted as WALK even though the core Dijkstra step has a cheap, correct way to take
+        // it right here, with no macro-project chain needed. That made hitObstacle fire on
+        // nearly every tile that wasn't a perfectly flat 4-way intersection (documented in
+        // CLAUDE.md as the known "sunburst" cause), not just genuine multi-block gaps/dead
+        // ends - confirmed in testing via 1948 macro-evaluation triggers and 486623 line-steps
+        // in a single pass, while WALK coverage stayed flat around 6600 nodes pass after pass.
+        // Counting any offered step (any action, any dy) reflects what actually needs a macro
+        // project: a direction getValidOrthogonalSteps found NOTHING for at all (a gap deeper
+        // than the single-block drop it already handles, or a solid wall in every dy).
+        long walkableNeighbors = validSteps.size();
 
         return walkableNeighbors < 4;
     }
@@ -155,9 +180,17 @@ public class FlowFieldCalculator {
         // Atomic snapshot update
         this.liveDebugMap = Map.copyOf(nextInstructionMap);
 
+        lastPassNodeCount = nextCostMap.size();
+
         state.updateInstructions(new HashMap<>(nextInstructionMap));
         projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());
     }
+
+    /** Size of nextCostMap at the end of the last pass - the real budget-gated counter, distinct from the published instruction map's size (see field doc above). */
+    public int getLastPassNodeCount() { return this.lastPassNodeCount; }
+
+    /** True if the last pass ended by hitting its node budget rather than draining the queue naturally. */
+    public boolean isLastPassBudgetExhausted() { return this.lastPassBudgetExhausted; }
 
     public record QueueNode(BlockPos pos, int cost) implements Comparable<QueueNode> {
         @Override

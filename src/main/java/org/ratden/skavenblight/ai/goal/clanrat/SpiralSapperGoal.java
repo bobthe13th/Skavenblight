@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.ai.goal.clanrat;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -10,10 +11,15 @@ import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.slf4j.Logger;
 
 import java.util.EnumSet;
 
 public class SpiralSapperGoal extends Goal implements SiegeGoal {
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private static final int MAX_STALLED_TICKS = 60;
+    private static final long GIVE_UP_COOLDOWN_TICKS = 100;
+
     private final PathfinderMob mob;
     private StandardFlowField flowField;
 
@@ -21,8 +27,15 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
     private SapperState state;
     private Direction currentFacing;
 
+    // The position claimed for the whole spiral-building attempt (the mob's own position when
+    // it started, matching what canUse() checked via isTargetClaimed) - distinct from
+    // currentTarget, which shifts across MINE_CEILING/MINE_LEDGE/BUILD_STAIR sub-steps.
+    private BlockPos claimedPos;
+
     private int actionTicks = 0;
     private int maxActionTicks = 0;
+    private int stalledTicks = 0;
+    private long nextAllowedStartTime = 0;
 
     private enum SapperState {
         MINE_CEILING,
@@ -44,6 +57,7 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
     @Override
     public boolean canUse() {
         if (this.flowField == null || !this.mob.isAlive()) return false;
+        if (this.mob.level().getGameTime() < this.nextAllowedStartTime) return false;
 
         BlockPos pos = this.mob.blockPosition();
 
@@ -55,7 +69,8 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
         // both if these specialized goals decline.
         if (this.mob.level() instanceof ServerLevel serverLevel) {
             SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, pos);
-            if (node != null && node.action() == SiegeNode.SiegeAction.BUILD_SPIRAL) {
+            if (node != null && node.action() == SiegeNode.SiegeAction.BUILD_SPIRAL
+                    && !this.flowField.isTargetClaimed(pos)) {
                 return this.mob.level().getBlockState(pos.above(2)).blocksMotion();
             }
         }
@@ -64,6 +79,9 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
 
     @Override
     public void start() {
+        this.stalledTicks = 0;
+        this.claimedPos = this.mob.blockPosition().immutable();
+        this.flowField.tryClaimTarget(this.claimedPos, this.mob);
         this.currentFacing = this.mob.getDirection();
         this.transitionTo(SapperState.MINE_CEILING);
     }
@@ -97,7 +115,7 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
         boolean complete = SiegeActionAnimator.tickMiningAnimation(level, this.mob, this.currentTarget, this.actionTicks, this.maxActionTicks);
 
         if (complete) {
-            SiegeInteractionHandler.executeBreach(level, this.currentTarget, this.flowField);
+            SiegeInteractionHandler.executeBreach(level, this.currentTarget, this.flowField, this.mob);
             SiegeActionAnimator.clearMiningAnimation(level, this.mob, this.currentTarget);
 
             if (this.state == SapperState.MINE_CEILING) {
@@ -118,12 +136,27 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
                         this.currentTarget,
                         this.currentFacing.getOpposite(),
                         SiegeNode.SiegeAction.BUILD_STAIR,
-                        this.flowField
+                        this.flowField,
+                        this.mob
                 );
                 this.flowField.forceRecalculation();
+                this.stalledTicks = 0;
                 this.transitionTo(SapperState.WAITING);
             } else {
                 SiegeInteractionHandler.pushOccupantsAway(level, this.currentTarget, this.mob);
+                this.stalledTicks++;
+
+                if (SiegeActionAnimator.stalledPastLimit(this.stalledTicks, MAX_STALLED_TICKS)) {
+                    LOGGER.info("[Skavenblight] {} giving up on spiral stair at {} after {} stalled ticks - space never cleared",
+                            this.mob.getClass().getSimpleName(), this.currentTarget.toShortString(), this.stalledTicks);
+                    this.nextAllowedStartTime = level.getGameTime() + GIVE_UP_COOLDOWN_TICKS;
+                    if (this.claimedPos != null) {
+                        this.flowField.releaseTarget(this.claimedPos);
+                        this.claimedPos = null;
+                    }
+                    this.transitionTo(SapperState.WAITING);
+                    return;
+                }
                 this.actionTicks = Math.max(0, this.maxActionTicks - 10);
             }
         }
@@ -164,8 +197,13 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
         if (this.currentTarget != null) {
             SiegeActionAnimator.clearMiningAnimation(this.mob.level(), this.mob, this.currentTarget);
         }
+        if (this.claimedPos != null) {
+            this.flowField.releaseTarget(this.claimedPos);
+            this.claimedPos = null;
+        }
         this.currentTarget = null;
         this.state = SapperState.WAITING;
         this.actionTicks = 0;
+        this.stalledTicks = 0;
     }
 }

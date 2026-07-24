@@ -62,6 +62,7 @@ public class PathingDebugFileWriter {
             writeHeader(writer, level, flowField, center, radiusX, heightY, radiusZ, calculating, renderMap);
             writeMetrics(writer, renderMap);
             writeNearbyMobs(writer, level, flowField, center, Math.max(radiusX, radiusZ), heightY);
+            writeRecentActivity(writer, center, Math.max(radiusX, radiusZ) * 2);
             writeGrid(writer, level, renderMap, center, radiusX, heightY, radiusZ);
 
             writer.write("\n================ END OF DIAGNOSTIC DUMP ================\n");
@@ -98,8 +99,16 @@ public class PathingDebugFileWriter {
         writer.write(String.format("Snapshot Coverage: %d / %d territory chunks captured\n",
                 flowField.getCapturedChunkCount(), flowField.getTerritoryChunkCount()));
         writer.write(String.format("Node Budget (throttled): %d nodes/pass\n", flowField.getThrottler().getNodesPerTick()));
-        writer.write(String.format("Siege Projects: %d active | %d candidate this pass\n",
-                pm.getActiveProjectCount(), pm.getCandidateProjectCount()));
+        // Distinct from "Total Nodes" above (the published instruction map's size) - this is
+        // nextCostMap's size, the counter the budget cutoff actually checks. A single successful
+        // macro-project line costs this counter only ONE slot (its endpoint) while writing up to
+        // 32 entries into the published instruction map, so "Total Nodes" can look enormous while
+        // this - the real competition WALK propagation is up against - is quietly maxed out.
+        writer.write(String.format("Dijkstra Budget Used: %d / %d nodes (%s)\n",
+                flowField.getCalculator().getLastPassNodeCount(), flowField.getThrottler().getNodesPerTick(),
+                flowField.getCalculator().isLastPassBudgetExhausted() ? "EXHAUSTED - queue cut off early" : "queue drained naturally"));
+        writer.write(String.format("Siege Projects: %d active | %d generated / %d survived this pass\n",
+                pm.getActiveProjectCount(), pm.getLastPassCandidatesGenerated(), pm.getLastPassCandidatesSurvived()));
         writer.write(String.format("Macro Evaluation: triggered %d times | %d total line-steps evaluated this pass\n",
                 pm.getMacroEvaluationCount(), pm.getLineStepsEvaluated()));
         writer.write("  (High macro-evaluation/line-step counts relative to node count is the signature of\n");
@@ -156,6 +165,17 @@ public class PathingDebugFileWriter {
             return;
         }
 
+        // Two entities occupying the same block is a jam, not a coincidence - vanilla movement
+        // doesn't prevent mobs stacking on a single-block-wide bottleneck (a staircase, a
+        // half-built bridge), and this was easy to miss by eye scanning a long mob list.
+        // Flagging it directly caught a real jam in testing (two clanrats on the same block,
+        // one running WidenStairsGoal and one BuildFlowFieldGoal, that would otherwise have
+        // required noticing the duplicate position manually.
+        Map<BlockPos, Integer> occupancy = new HashMap<>();
+        for (Mob mob : mobs) {
+            occupancy.merge(mob.blockPosition(), 1, Integer::sum);
+        }
+
         for (Mob mob : mobs) {
             BlockPos pos = mob.blockPosition();
             String goals = (mob instanceof ClanratEntity clanrat) ? clanrat.getActiveGoalNames() : "n/a";
@@ -163,8 +183,38 @@ public class PathingDebugFileWriter {
             SiegeNode next = flowField.getNextSiegeNode(level, pos);
             String nextDesc = next == null ? "no-instruction (wilderness)" : String.format("%s -> %s", next.action(), next.pos().toShortString());
 
-            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s\n",
-                    BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc));
+            String jamFlag = occupancy.getOrDefault(pos, 1) > 1 ? String.format(" [JAM: %d mobs on this block]", occupancy.get(pos)) : "";
+
+            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s\n",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc, jamFlag));
+        }
+        writer.write("\n");
+    }
+
+    /**
+     * Recent siege construction/mining activity near this dump's center, regardless of exactly
+     * when the dump was triggered - see SiegeActivityLog for why this exists (a dump is a
+     * single instant; several bugs found in testing had already finished happening by the time
+     * a dump was taken, leaving the grid/mob sections with no trace of what led there).
+     */
+    private static void writeRecentActivity(FileWriter writer, BlockPos center, int radius) throws IOException {
+        writer.write("--- RECENT SIEGE ACTIVITY (executed, not planned) ---\n");
+
+        List<SiegeActivityLog.Entry> nearby = SiegeActivityLog.recent(300).stream()
+                .filter(e -> e.targetPos().closerThan(center, radius))
+                .toList();
+
+        if (nearby.isEmpty()) {
+            writer.write("(no recorded activity within range - either nothing has been built/mined nearby yet,\n" +
+                    " or SiegeActivityLog's buffer has already rolled past it - see MAX_ENTRIES)\n\n");
+            return;
+        }
+
+        for (SiegeActivityLog.Entry entry : nearby) {
+            writer.write(String.format("  t=%-8d %-22s [%s] mob@%-16s -> %-12s at %-16s (%s)\n",
+                    entry.gameTime(), entry.mobType(), entry.mobId(),
+                    entry.mobPos() != null ? entry.mobPos().toShortString() : "?",
+                    entry.action(), entry.targetPos().toShortString(), entry.note()));
         }
         writer.write("\n");
     }

@@ -64,7 +64,7 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected void execute(ServerLevel level, BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {
-        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField);
+        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField, this.mob);
     }
 
     @Override

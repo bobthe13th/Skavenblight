@@ -46,6 +46,15 @@ public class SiegeProjectManager {
     // other reason, and there was previously no way to tell the two apart from outside.
     private int macroEvaluationCount = 0;
     private long lineStepsEvaluated = 0;
+    // getCandidateProjectCount() (candidateProjects.size()) is always 0 by the time anything
+    // outside this class can read it - finalizeCandidateProjects() unconditionally clears
+    // candidateProjects right after moving survivors into activeProjects, and that's the last
+    // thing that happens each pass. Confirmed in testing: every dump taken across an entire
+    // session read "0 candidate this pass" regardless of how many lines actually completed -
+    // a display artifact, not evidence evaluateSingleLine stopped producing candidates. These
+    // two counters capture the real per-pass numbers before the clear.
+    private int lastPassCandidatesGenerated = 0;
+    private int lastPassCandidatesSurvived = 0;
 
     private final TerrainEvaluator terrainEvaluator;
 
@@ -62,6 +71,8 @@ public class SiegeProjectManager {
         candidateProjects.clear();
         macroEvaluationCount = 0;
         lineStepsEvaluated = 0;
+        lastPassCandidatesGenerated = 0;
+        lastPassCandidatesSurvived = 0;
 
         activeProjects.removeIf(project -> project.isCompleted(terrain, terrainEvaluator));
 
@@ -86,6 +97,7 @@ public class SiegeProjectManager {
         for (SiegeProject project : candidateProjects) {
             if (project.survivedMapOverwrite(finalCostMap, finalInstructionMap)) {
                 this.activeProjects.add(project);
+                lastPassCandidatesSurvived++;
             }
         }
         candidateProjects.clear();
@@ -101,9 +113,12 @@ public class SiegeProjectManager {
     }
 
     public int getActiveProjectCount() { return this.activeProjects.size(); }
+    /** Always 0 once a pass has finished - see the field doc on lastPassCandidatesGenerated/Survived for the real per-pass numbers. */
     public int getCandidateProjectCount() { return this.candidateProjects.size(); }
     public int getMacroEvaluationCount() { return this.macroEvaluationCount; }
     public long getLineStepsEvaluated() { return this.lineStepsEvaluated; }
+    public int getLastPassCandidatesGenerated() { return this.lastPassCandidatesGenerated; }
+    public int getLastPassCandidatesSurvived() { return this.lastPassCandidatesSurvived; }
 
     public void evaluateMacroProjects(TerrainAccess terrain, BlockPos anchorPos, FlowFieldState state, int anchorCost,
                                       PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
@@ -112,12 +127,19 @@ public class SiegeProjectManager {
 
         macroEvaluationCount++;
 
-        if (!terrainEvaluator.isWalkableTerrain(terrain, anchorPos)) {
-            SiegeNode.SiegeAction selfAction = terrainEvaluator.determineMacroAction(terrain, anchorPos, 0, 0, 0, state.getTargetPos());
-            if (selfAction != SiegeNode.SiegeAction.WALK) {
-                nextInstructionMap.putIfAbsent(anchorPos, new SiegeNode(anchorPos, selfAction));
-            }
-        }
+        // Deliberately no "anchor itself needs fixing" special case here anymore. That used to
+        // putIfAbsent a SiegeNode(anchorPos, action) keyed at anchorPos itself - a literal
+        // self-loop instructing whoever is AT anchorPos to build/mine AT anchorPos. That's
+        // fundamentally unsafe to execute (a mob can't place a block into the exact space its
+        // own body occupies without stepping aside first, which nothing here did), and it's
+        // redundant: an anchor stops being walkable only when terrain changed after it was
+        // first queued (typically a SiegeProject's entry point getting physically broken - see
+        // injectActiveProjects), and the ordinary adjacent-neighbor repair path
+        // (getValidOrthogonalSteps' MINE/1-block-drop steps, or another nearby anchor's own
+        // fanned line landing on this same position) already discovers and repairs it safely
+        // from an adjacent tile, the same way any other obstruction gets fixed. Confirmed via
+        // SiegeActivityLog in testing: every "mob@X -> action at X" self-overlap traced back to
+        // this exact line.
 
         for (int dy : new int[]{-1, 1}) {
             evaluateSingleLine(terrain, anchorPos, state, anchorCost, 0, dy, 0, calcQueue, nextCostMap, nextInstructionMap);
@@ -150,7 +172,14 @@ public class SiegeProjectManager {
             BlockPos nextPos = currentTarget.offset(dx, dy, dz);
 
             if (terrainEvaluator.isOutOfBounds(terrain, nextPos, state)) {
-                LOGGER.debug("[Pathfinder] Line aborted at {}: Out of bounds", nextPos.toShortString());
+                // TRACE, not DEBUG: this fires on essentially every speculative line that
+                // reaches the territory edge, which is most of them given how often
+                // evaluateMacroProjects gets triggered (see hitObstacle). Measured in testing:
+                // 56,951 of 57,907 total lines (98.3%) in one session's debug.log were this
+                // exact message, drowning out everything else at DEBUG level (including
+                // FollowFlowFieldGoal's stuck-rat detection and StandardFlowField's claim-reclaim
+                // logging) in a single-purpose noise floor.
+                LOGGER.trace("[Pathfinder] Line aborted at {}: Out of bounds", nextPos.toShortString());
                 break;
             }
 
@@ -186,6 +215,7 @@ public class SiegeProjectManager {
 
                 if (!projectInstructions.isEmpty()) {
                     candidateProjects.add(new SiegeProject(projectInstructions, nextPos, totalCost));
+                    lastPassCandidatesGenerated++;
 
                     if (totalCost < nextCostMap.getOrDefault(nextPos, Integer.MAX_VALUE)) {
                         nextCostMap.put(nextPos, totalCost);
@@ -202,6 +232,7 @@ public class SiegeProjectManager {
                 projectInstructions.put(nextPos, landingNode);
 
                 candidateProjects.add(new SiegeProject(projectInstructions, nextPos, totalCost));
+                lastPassCandidatesGenerated++;
 
                 if (totalCost < nextCostMap.getOrDefault(nextPos, Integer.MAX_VALUE)) {
                     nextCostMap.put(nextPos, totalCost);
