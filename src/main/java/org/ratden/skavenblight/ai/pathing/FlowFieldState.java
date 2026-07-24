@@ -22,12 +22,18 @@ public class FlowFieldState {
 
     private final BlockPos targetPos;
     private final Set<ChunkPos> territoryChunks;
+    private final java.util.function.Predicate<BlockPos> cellFilter;
 
     private volatile Indexed indexed = Indexed.EMPTY;
 
     public FlowFieldState(BlockPos targetPos, Set<ChunkPos> territoryChunks) {
+        this(targetPos, territoryChunks, null);
+    }
+
+    public FlowFieldState(BlockPos targetPos, Set<ChunkPos> territoryChunks, java.util.function.Predicate<BlockPos> cellFilter) {
         this.targetPos = targetPos;
         this.territoryChunks = territoryChunks != null ? territoryChunks : Collections.emptySet();
+        this.cellFilter = cellFilter;
     }
 
     // =================================================================================
@@ -67,7 +73,8 @@ public class FlowFieldState {
 
     public boolean isOutOfBounds(BlockPos pos) {
         if (territoryChunks.isEmpty()) return false; // Global scope
-        return !territoryChunks.contains(new ChunkPos(pos));
+        if (!territoryChunks.contains(new ChunkPos(pos))) return true;
+        return cellFilter != null && !cellFilter.test(pos);
     }
 
     public boolean isChunkMapped(ChunkPos chunkPos) {
@@ -122,3 +129,5 @@ public class FlowFieldState {
         }
     }
 }
+
+
