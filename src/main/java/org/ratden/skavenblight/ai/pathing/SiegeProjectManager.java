@@ -2,7 +2,6 @@ package org.ratden.skavenblight.ai.pathing;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
-import org.ratden.skavenblight.Config;
 import org.slf4j.Logger;
 
 import java.util.*;
@@ -11,8 +10,6 @@ public class SiegeProjectManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    private static final int MAX_PROJECT_LENGTH = 32;
-    private static final int COST_MULTIPLIER = 10;
     private static final int[][] CARDINAL_OFFSETS = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
 
     // Upper bound on activeProjects - without this, a project that never completes (e.g.
@@ -57,9 +54,11 @@ public class SiegeProjectManager {
     private int lastPassCandidatesSurvived = 0;
 
     private final TerrainEvaluator terrainEvaluator;
+    private final SiegeLineTracer lineTracer;
 
     public SiegeProjectManager(TerrainEvaluator terrainEvaluator) {
         this.terrainEvaluator = terrainEvaluator;
+        this.lineTracer = new SiegeLineTracer(terrainEvaluator);
     }
 
     public void injectActiveProjects(TerrainAccess terrain,
@@ -161,89 +160,25 @@ public class SiegeProjectManager {
                                     Map<BlockPos, Integer> nextCostMap,
                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
 
-        int projectCost = Config.buildingBasePenalty * COST_MULTIPLIER;
-        int mineProjectLength = 0;
-        BlockPos currentTarget = anchorPos;
+        SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
+                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos));
 
-        Map<BlockPos, SiegeNode> projectInstructions = new HashMap<>();
+        if (!result.completed() || result.instructions().isEmpty()) return;
 
-        for (int i = 1; i <= MAX_PROJECT_LENGTH; i++) {
-            lineStepsEvaluated++;
-            BlockPos nextPos = currentTarget.offset(dx, dy, dz);
+        BlockPos endPos = result.endPos();
+        int totalCost = result.totalCost();
 
-            if (terrainEvaluator.isOutOfBounds(terrain, nextPos, state)) {
-                // TRACE, not DEBUG: this fires on essentially every speculative line that
-                // reaches the territory edge, which is most of them given how often
-                // evaluateMacroProjects gets triggered (see hitObstacle). Measured in testing:
-                // 56,951 of 57,907 total lines (98.3%) in one session's debug.log were this
-                // exact message, drowning out everything else at DEBUG level (including
-                // FollowFlowFieldGoal's stuck-rat detection and StandardFlowField's claim-reclaim
-                // logging) in a single-purpose noise floor.
-                LOGGER.trace("[Pathfinder] Line aborted at {}: Out of bounds", nextPos.toShortString());
-                break;
-            }
+        if (totalCost >= nextCostMap.getOrDefault(endPos, Integer.MAX_VALUE)) return;
 
-            if (isNearExistingProject(nextPos, anchorPos)) return;
+        LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Cost: {})",
+                anchorPos.toShortString(), endPos.toShortString(), totalCost);
 
-            SiegeNode.SiegeAction action = terrainEvaluator.determineMacroAction(terrain, nextPos, dy, dx, dz, state.getTargetPos());
-            if (action == null) {
-                LOGGER.debug("[Pathfinder] Line aborted at {}: Invalid macro action", nextPos.toShortString());
-                return;
-            }
+        candidateProjects.add(new SiegeProject(result.instructions(), endPos, totalCost));
+        lastPassCandidatesGenerated++;
 
-            if (action == SiegeNode.SiegeAction.MINE) {
-                mineProjectLength++;
-                if (mineProjectLength > 5) return;
-            } else {
-                mineProjectLength = 0;
-            }
-
-            projectCost += terrainEvaluator.calculateActionCostForAction(terrain, nextPos, action);
-
-            int evaluatedProjectCost = (dy != 0) ? (int) ((projectCost * 2) * 0.75f) : (projectCost * 2);
-            int totalCost = anchorCost + evaluatedProjectCost;
-
-            if (totalCost >= nextCostMap.getOrDefault(nextPos, Integer.MAX_VALUE)) return;
-
-            SiegeNode stepInstruction = new SiegeNode(currentTarget, action);
-            projectInstructions.put(nextPos, stepInstruction);
-
-            // 1. Natural Completion: Line reaches walkable ground
-            if (terrainEvaluator.isWalkableTerrain(terrain, nextPos)) {
-                LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Length: {}, Action: {})",
-                        anchorPos.toShortString(), nextPos.toShortString(), i, action);
-
-                if (!projectInstructions.isEmpty()) {
-                    candidateProjects.add(new SiegeProject(projectInstructions, nextPos, totalCost));
-                    lastPassCandidatesGenerated++;
-
-                    if (totalCost < nextCostMap.getOrDefault(nextPos, Integer.MAX_VALUE)) {
-                        nextCostMap.put(nextPos, totalCost);
-                        nextInstructionMap.putAll(projectInstructions);
-                        calcQueue.add(new FlowFieldCalculator.QueueNode(nextPos, totalCost));
-                    }
-                }
-                return;
-            }
-
-            // 2. Chained Completion: Max length reached in midair -> Deploy Landing Platform Node
-            if (i == MAX_PROJECT_LENGTH && !projectInstructions.isEmpty()) {
-                SiegeNode landingNode = new SiegeNode(currentTarget, SiegeNode.SiegeAction.BUILD_LANDING);
-                projectInstructions.put(nextPos, landingNode);
-
-                candidateProjects.add(new SiegeProject(projectInstructions, nextPos, totalCost));
-                lastPassCandidatesGenerated++;
-
-                if (totalCost < nextCostMap.getOrDefault(nextPos, Integer.MAX_VALUE)) {
-                    nextCostMap.put(nextPos, totalCost);
-                    nextInstructionMap.putAll(projectInstructions);
-                    calcQueue.add(new FlowFieldCalculator.QueueNode(nextPos, totalCost));
-                }
-                return;
-            }
-
-            currentTarget = nextPos;
-        }
+        nextCostMap.put(endPos, totalCost);
+        nextInstructionMap.putAll(result.instructions());
+        calcQueue.add(new FlowFieldCalculator.QueueNode(endPos, totalCost));
     }
 
     private boolean isNearExistingProject(BlockPos pos, BlockPos currentAnchor) {
