@@ -44,8 +44,13 @@ public final class RegionScanner {
         Set<BlockPos> visited = new HashSet<>();
         List<Region> regions = new ArrayList<>();
         int nextId = 0;
-        int scannedCells = 0;
+        // Mutable, shared across the whole scan() call (including every floodFill it drives) so
+        // the budget check inside floodFill's own loop sees the true running total, not just the
+        // count for the region currently being flooded.
+        int[] scannedCells = {0};
+        boolean[] budgetExhausted = {false};
 
+        outer:
         for (ChunkPos chunk : bounds) {
             if (!snapshot.hasColumn(chunk)) continue;
 
@@ -56,35 +61,53 @@ public final class RegionScanner {
 
                         if (visited.contains(seed) || !terrainEvaluator.isWalkableTerrain(snapshot, seed)) continue;
 
-                        if (scannedCells >= MAX_SCANNED_CELLS) {
-                            LOGGER.warn("[Skavenblight] RegionScanner hit MAX_SCANNED_CELLS ({}) - territory may be under-scanned this pass", MAX_SCANNED_CELLS);
-                            return regions;
+                        if (scannedCells[0] >= MAX_SCANNED_CELLS) {
+                            budgetExhausted[0] = true;
+                            break outer;
                         }
 
                         Region region = new Region(nextId++, minBuildHeight, height);
-                        scannedCells += floodFill(snapshot, boundsState, seed, visited, region);
+                        floodFill(snapshot, boundsState, seed, visited, region, scannedCells, budgetExhausted);
                         regions.add(region);
+
+                        // floodFill can itself exhaust the budget mid-flood (the common case for
+                        // one large connected region) - stop seeding any further regions the
+                        // moment that happens, same as the between-seeds check above.
+                        if (budgetExhausted[0]) {
+                            break outer;
+                        }
                     }
                 }
             }
         }
 
-        LOGGER.info("[Skavenblight] RegionScanner found {} regions ({} cells scanned)", regions.size(), scannedCells);
+        if (budgetExhausted[0]) {
+            LOGGER.warn("[Skavenblight] RegionScanner hit MAX_SCANNED_CELLS ({}) - territory may be under-scanned this pass", MAX_SCANNED_CELLS);
+        }
+
+        LOGGER.info("[Skavenblight] RegionScanner found {} regions ({} cells scanned)", regions.size(), scannedCells[0]);
         return regions;
     }
 
-    private int floodFill(TerrainSnapshot snapshot, FlowFieldState boundsState, BlockPos seed,
-                           Set<BlockPos> visited, Region region) {
+    private void floodFill(TerrainSnapshot snapshot, FlowFieldState boundsState, BlockPos seed,
+                            Set<BlockPos> visited, Region region, int[] scannedCells, boolean[] budgetExhausted) {
         Deque<BlockPos> queue = new ArrayDeque<>();
         queue.add(seed);
         visited.add(seed);
 
-        int cellsVisited = 0;
-
         while (!queue.isEmpty()) {
+            // Checked every iteration (not just between seeds in scan()) so a single large
+            // connected region - the common case, e.g. "a single unbroken room" - can't flood
+            // through an entire territory's full-build-height column in one uninterrupted pass
+            // before the cap is ever consulted again.
+            if (scannedCells[0] >= MAX_SCANNED_CELLS) {
+                budgetExhausted[0] = true;
+                return;
+            }
+
             BlockPos current = queue.poll();
             region.addCell(current);
-            cellsVisited++;
+            scannedCells[0]++;
 
             List<TerrainEvaluator.EvaluatedStep> steps =
                     terrainEvaluator.getValidOrthogonalSteps(snapshot, current, Collections.emptySet(), boundsState);
@@ -99,7 +122,5 @@ public final class RegionScanner {
                 }
             }
         }
-
-        return cellsVisited;
     }
 }
