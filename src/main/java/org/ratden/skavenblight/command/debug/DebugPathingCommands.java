@@ -71,6 +71,54 @@ public class DebugPathingCommands {
                                             + "\nMinimum Settle Delay: " + Config.minimumSettleDelayMs + "ms"
                             ), false);
                             return 1;
+                        }))
+
+                // Command: /skavendebug pathing regions
+                .then(Commands.literal("regions")
+                        .executes(context -> {
+                            var source = context.getSource();
+                            var level = source.getLevel();
+                            var pos = net.minecraft.core.BlockPos.containing(source.getPosition());
+
+                            org.ratden.skavenblight.network.WarpFluxGridManager gridManager =
+                                    org.ratden.skavenblight.network.WarpFluxGridManager.get(level);
+                            org.ratden.skavenblight.network.WarpFluxNetwork network = null;
+                            net.minecraft.world.level.ChunkPos currentChunk = new net.minecraft.world.level.ChunkPos(pos);
+
+                            for (org.ratden.skavenblight.network.WarpFluxNetwork candidate : gridManager.getAllNetworks()) {
+                                if (candidate.getTerritoryChunks().contains(currentChunk)) {
+                                    network = candidate;
+                                    break;
+                                }
+                            }
+
+                            if (network == null) {
+                                source.sendFailure(Component.literal("No network territory found at your position."));
+                                return 0;
+                            }
+
+                            org.ratden.skavenblight.ai.pathing.TerrainEvaluator evaluator = new org.ratden.skavenblight.ai.pathing.TerrainEvaluator();
+                            org.ratden.skavenblight.ai.pathing.TerrainSnapshot.RefreshResult result =
+                                    org.ratden.skavenblight.ai.pathing.TerrainSnapshot.refresh(
+                                            level, null, network.getTerritoryChunks(), new java.util.HashSet<>(network.getTerritoryChunks()),
+                                            level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE);
+
+                            org.ratden.skavenblight.ai.pathing.region.RegionScanner scanner =
+                                    new org.ratden.skavenblight.ai.pathing.region.RegionScanner(evaluator);
+                            java.util.List<org.ratden.skavenblight.ai.pathing.region.Region> regions =
+                                    scanner.scan(result.snapshot(), network.getTerritoryChunks(), pos, level.getMinBuildHeight(), level.getMaxBuildHeight());
+
+                            StringBuilder sb = new StringBuilder("Scanned ").append(regions.size()).append(" region(s):\n");
+                            for (org.ratden.skavenblight.ai.pathing.region.Region region : regions) {
+                                sb.append(String.format("  region %d: %d cells, %d boundary cells, bounds %s -> %s%n",
+                                        region.getId(), region.cellCount(), region.getBoundaryCells().size(),
+                                        region.getMin() != null ? region.getMin().toShortString() : "?",
+                                        region.getMax() != null ? region.getMax().toShortString() : "?"));
+                            }
+
+                            String finalOutput = sb.toString();
+                            source.sendSuccess(() -> Component.literal(finalOutput), false);
+                            return 1;
                         }));
     }
 }
