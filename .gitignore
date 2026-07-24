@@ -4,3 +4,4 @@
 /.gradle/
 /run/
 /src/generated/
+/.worktrees/
