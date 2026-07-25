@@ -92,7 +92,17 @@ public class DebugFlowFieldReaderItem extends Item {
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
                     if (network.getTerritoryChunks().contains(nexusChunk)) {
                         activeRegionMap = network.getRegionMap();
-                        activeField = activeRegionMap.getRegionFlowFieldFor(nexusPos);
+
+                        // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS
+                        // in ModBlocks), so it's never a member of any region and a direct
+                        // getRegionFlowFieldFor(nexusPos) lookup always misses - check its orthogonal
+                        // neighbors too, same fix as TerritoryRegionMap's own root-region resolution.
+                        for (BlockPos candidate : new BlockPos[]{
+                                nexusPos, nexusPos.above(), nexusPos.below(),
+                                nexusPos.north(), nexusPos.south(), nexusPos.east(), nexusPos.west()}) {
+                            activeField = activeRegionMap.getRegionFlowFieldFor(candidate);
+                            if (activeField != null) break;
+                        }
                         break;
                     }
                 }

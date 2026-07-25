@@ -162,7 +162,19 @@ public class TerritoryRegionMap {
         RegionIndex newIndex = new RegionIndex(regions);
         RegionGraph newGraph = RegionGraph.build(snapshot, newIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
 
-        Region rootRegion = newIndex.regionAt(nexusPos);
+        // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS in
+        // ModBlocks - plain full-collision blocks, no shape override), so RegionScanner never
+        // assigns nexusPos to any region: it only ever adds walkable cells. A direct
+        // newIndex.regionAt(nexusPos) lookup was therefore always null, which made rootRegion,
+        // and everything downstream of it (the whole route tree and every region's target),
+        // always null too - no region ever got a real FlowFieldState. Check the nexus's
+        // orthogonal neighbors as well, same as tick()'s dirty-marking already does for the
+        // identical "the block of interest itself isn't walkable" situation.
+        Region rootRegion = neighborsAndSelf(nexusPos).stream()
+                .map(newIndex::regionAt)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
         RegionRouteTree newRouteTree = rootRegion != null ? RegionRouteTree.compute(newGraph, rootRegion.getId()) : null;
 
         Map<Integer, FlowFieldState> newStates = new HashMap<>();
