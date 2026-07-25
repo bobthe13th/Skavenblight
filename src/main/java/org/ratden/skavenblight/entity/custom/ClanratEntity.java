@@ -122,7 +122,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
         if (region.getId() == this.currentRegionId) return; // still in the same region, no re-fetch needed
 
         RegionFlowField field = closestNetwork.getRegionMap().getRegionFlowFieldFor(this.blockPosition());
-        this.currentRegionId = region.getId();
+        if (field != null) {
+            this.currentRegionId = region.getId();
+        }
         this.assignFlowField(field);
     }
 
