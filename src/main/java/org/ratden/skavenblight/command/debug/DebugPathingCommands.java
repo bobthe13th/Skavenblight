@@ -148,6 +148,81 @@ public class DebugPathingCommands {
                             String finalOutput = sb.toString();
                             source.sendSuccess(() -> Component.literal(finalOutput), false);
                             return 1;
+                        }))
+
+                // Command: /skavendebug pathing regions_live
+                // Reports the LIVE TerritoryRegionMap for the network you're standing in - no
+                // fresh snapshot/scan/graph build of any kind. The sibling "regions" command
+                // always builds its own scan from scratch, so it looks healthy even when the
+                // runtime pipeline never initialized; this one is the only way to tell
+                // "the algorithm works" apart from "nothing ever called rebuild()".
+                .then(Commands.literal("regions_live")
+                        .executes(context -> {
+                            var source = context.getSource();
+                            var level = source.getLevel();
+                            var pos = net.minecraft.core.BlockPos.containing(source.getPosition());
+
+                            org.ratden.skavenblight.network.WarpFluxGridManager gridManager =
+                                    org.ratden.skavenblight.network.WarpFluxGridManager.get(level);
+                            org.ratden.skavenblight.network.WarpFluxNetwork network = null;
+                            net.minecraft.world.level.ChunkPos currentChunk = new net.minecraft.world.level.ChunkPos(pos);
+
+                            for (org.ratden.skavenblight.network.WarpFluxNetwork candidate : gridManager.getAllNetworks()) {
+                                if (candidate.getTerritoryChunks().contains(currentChunk)) {
+                                    network = candidate;
+                                    break;
+                                }
+                            }
+
+                            if (network == null) {
+                                source.sendFailure(Component.literal("No network territory found at your position."));
+                                return 0;
+                            }
+
+                            org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap regionMap = network.getRegionMap();
+                            org.ratden.skavenblight.ai.pathing.region.RegionIndex index = regionMap.getRegionIndex();
+                            org.ratden.skavenblight.ai.pathing.region.RegionGraph graph = regionMap.getRegionGraph();
+                            org.ratden.skavenblight.ai.pathing.region.RegionRouteTree routeTree = regionMap.getRouteTree();
+
+                            StringBuilder sb = new StringBuilder();
+                            sb.append(String.format("LIVE region map for network %s%n", network.getId()));
+                            sb.append(String.format("  territory chunks: %d | calculating: %s | rebuild generation: %d%n",
+                                    network.getTerritoryChunks().size(), regionMap.isCalculating(), regionMap.getGeneration()));
+                            sb.append(String.format("  regions: %d | connectors: %d | route tree: %s%n",
+                                    index.getRegions().size(),
+                                    graph != null ? graph.getAllConnectors().size() : 0,
+                                    routeTree != null ? ("rooted at region " + routeTree.getRootRegionId()) : "none"));
+
+                            if (index.getRegions().isEmpty()) {
+                                sb.append("  no regions scanned yet; the region map may not have initialized")
+                                        .append(regionMap.isCalculating() ? " (a rebuild IS currently running - re-run in a moment)" : "")
+                                        .append(".\n  Compare with /skavendebug pathing regions, which scans from scratch: if THAT finds regions and this doesn't, the runtime pipeline never rebuilt.\n");
+                            } else {
+                                for (org.ratden.skavenblight.ai.pathing.region.Region region : index.getRegions()) {
+                                    boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
+                                    sb.append(String.format("  region %d: %d cells, %d boundary cells, reachable=%s, hopCost=%s, bounds %s -> %s%n",
+                                            region.getId(), region.cellCount(), region.getBoundaryCells().size(), reachable,
+                                            reachable ? String.valueOf(routeTree.getHopCost(region.getId())) : "n/a",
+                                            region.getMin() != null ? region.getMin().toShortString() : "?",
+                                            region.getMax() != null ? region.getMax().toShortString() : "?"));
+                                }
+
+                                if (graph != null) {
+                                    for (org.ratden.skavenblight.ai.pathing.region.RegionConnector connector : graph.getAllConnectors()) {
+                                        sb.append(String.format("  connector: region %d <-> region %d, cost %d, entry %s -> %s%n",
+                                                connector.regionA(), connector.regionB(), connector.cost(),
+                                                connector.entryInA().toShortString(), connector.entryInB().toShortString()));
+                                    }
+                                }
+
+                                org.ratden.skavenblight.ai.pathing.region.Region here = index.regionAt(pos);
+                                sb.append(String.format("  your position is in: %s%n",
+                                        here != null ? ("region " + here.getId()) : "no region (wilderness/unmapped)"));
+                            }
+
+                            String finalOutput = sb.toString();
+                            source.sendSuccess(() -> Component.literal(finalOutput), false);
+                            return 1;
                         }));
     }
 }

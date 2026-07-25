@@ -104,17 +104,32 @@ public class PathingDebugFileWriter {
             writer.write(String.format("FlowField State: READY (last completed pass) | Total Nodes: %d\n", renderMap.size()));
         }
 
+        // These four all read TerritoryRegionMap's network-wide SiegeProjectManager /
+        // FlowFieldCalculator / TerrainSnapshot, which every region's pass shares. NOTE the scope
+        // change from the pre-region version of this file: the per-pass counters below describe
+        // the LAST region processed on this network, not this dump's region specifically (a full
+        // rebuild walks every region through the same two objects in sequence).
+        writer.write(String.format("Snapshot Coverage: %d / %d territory chunks captured\n",
+                regionMap.getCapturedChunkCount(), regionMap.getTerritoryChunkCount()));
         writer.write(String.format("Node Budget (throttled): %d nodes/pass\n", regionMap.getThrottler().getNodesPerTick()));
-        // Snapshot Coverage / Dijkstra Budget Used / Siege Projects / Macro Evaluation used to
-        // read StandardFlowField's own per-nexus SiegeProjectManager/FlowFieldCalculator/
-        // TerrainSnapshot capture-count directly. Those objects are now shared network-wide on
-        // TerritoryRegionMap (not per-region) and TerritoryRegionMap doesn't expose getters for
-        // them - only getThrottler() above survived the migration as a network-wide equivalent -
-        // so these per-pass perf counters are retired rather than guessed at.
-        writer.write("Snapshot Coverage: (per-nexus chunk-capture stats retired - see region graph dump below)\n");
-        writer.write("Dijkstra Budget Used: (per-nexus calculator diagnostics retired - see region graph dump below)\n");
-        writer.write("Siege Projects: (per-nexus project-manager stats retired - see region graph dump below)\n");
-        writer.write("Macro Evaluation: (per-nexus project-manager stats retired - see region graph dump below)\n\n");
+        // Distinct from "Total Nodes" above (the published instruction map's size) - this is
+        // nextCostMap's size, the counter the budget cutoff actually checks. A single successful
+        // macro-project line costs this counter only ONE slot (its endpoint) while writing up to
+        // 32 entries into the published instruction map, so "Total Nodes" can look enormous while
+        // this - the real competition WALK propagation is up against - is quietly maxed out.
+        writer.write(String.format("Dijkstra Budget Used: %d / %d nodes (%s)\n",
+                regionMap.getCalculator().getLastPassNodeCount(), regionMap.getThrottler().getNodesPerTick(),
+                regionMap.getCalculator().isLastPassBudgetExhausted() ? "EXHAUSTED - queue cut off early" : "queue drained naturally"));
+        writer.write(String.format("Siege Projects: %d active | %d generated / %d survived this pass\n",
+                regionMap.getProjectManager().getActiveProjectCount(),
+                regionMap.getProjectManager().getLastPassCandidatesGenerated(),
+                regionMap.getProjectManager().getLastPassCandidatesSurvived()));
+        writer.write(String.format("Macro Evaluation: triggered %d times | %d total line-steps evaluated this pass\n",
+                regionMap.getProjectManager().getMacroEvaluationCount(),
+                regionMap.getProjectManager().getLineStepsEvaluated()));
+        writer.write("  (High macro-evaluation/line-step counts relative to node count is the signature of\n");
+        writer.write("   the hitObstacle heuristic over-triggering - see FlowFieldCalculator - and is the\n");
+        writer.write("   single biggest lever on calculation cost if a pass is slow or looks hung.)\n\n");
     }
 
     /**
@@ -128,7 +143,11 @@ public class PathingDebugFileWriter {
         RegionGraph graph = regionMap.getRegionGraph();
         RegionRouteTree routeTree = regionMap.getRouteTree();
 
-        writer.write(String.format("Regions: %d | Connectors: %d\n", index.getRegions().size(), graph != null ? graph.getAllConnectors().size() : 0));
+        writer.write(String.format("Regions: %d | Connectors: %d | Rebuild generation: %d\n",
+                index.getRegions().size(), graph != null ? graph.getAllConnectors().size() : 0, regionMap.getGeneration()));
+        if (index.getRegions().isEmpty()) {
+            writer.write("  (no regions scanned yet - the region map never initialized, or its first rebuild is still running)\n");
+        }
 
         for (Region region : index.getRegions()) {
             boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
