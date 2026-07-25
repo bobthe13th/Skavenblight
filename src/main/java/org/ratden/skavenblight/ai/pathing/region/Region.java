@@ -46,6 +46,17 @@ public class Region {
     }
 
     public boolean contains(BlockPos pos) {
+        // Total function over any BlockPos, not just ones within this region's own world-height
+        // bounds - a caller (e.g. TerritoryRegionMap checking a changed block's orthogonal
+        // neighbors) can hand this a Y outside [minBuildHeight, minBuildHeight + height), such
+        // as one block below the world's minimum build height. cellIndex() has no bounds check
+        // of its own, so without this guard an out-of-range Y produces a negative or
+        // out-of-range index and BitSet.get() throws IndexOutOfBoundsException instead of just
+        // correctly answering "no, this position isn't part of this region."
+        int localY = pos.getY() - minBuildHeight;
+        if (localY < 0 || localY >= height) {
+            return false;
+        }
         BitSet bits = chunkCells.get(new ChunkPos(pos));
         return bits != null && bits.get(cellIndex(pos));
     }
