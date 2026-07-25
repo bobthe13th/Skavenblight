@@ -11,8 +11,12 @@ import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.SiegeProjectManager;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.Region;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionGraph;
+import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
+import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
+import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
 
 import java.io.File;
@@ -23,7 +27,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * Text dump of a StandardFlowField's state, written for an LLM reading the file afterward to
+ * Text dump of a RegionFlowField's state (plus its owning TerritoryRegionMap's region graph),
+ * written for an LLM reading the file afterward to
  * diagnose pathing/AI bugs - not for a human skimming it in-game. Every section is plain,
  * labeled key/value text rather than a purely visual layout, and it deliberately front-loads
  * the numbers most likely to explain "why is this broken" (calculation progress, perf
@@ -40,7 +45,8 @@ public class PathingDebugFileWriter {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
-    public static String exportDeepDump(ServerLevel level, StandardFlowField flowField, BlockPos center, int radiusX, int heightY, int radiusZ) {
+    public static String exportDeepDump(ServerLevel level, RegionFlowField flowField, TerritoryRegionMap regionMap,
+                                         BlockPos center, int radiusX, int heightY, int radiusZ) {
         File dumpDir = new File("skavenblight_dumps");
         if (!dumpDir.exists() && !dumpDir.mkdirs()) {
             System.err.println("[Skavenblight] Failed to create dump directory!");
@@ -59,7 +65,8 @@ public class PathingDebugFileWriter {
             // do; use the finalized one since that's what rats are actually reading.
             Map<BlockPos, SiegeNode> renderMap = calculating ? flowField.getLiveDebugMap() : flowField.getInstructionMap();
 
-            writeHeader(writer, level, flowField, center, radiusX, heightY, radiusZ, calculating, renderMap);
+            writeHeader(writer, flowField, regionMap, center, radiusX, heightY, radiusZ, calculating, renderMap);
+            writeRegionGraph(writer, regionMap);
             writeMetrics(writer, renderMap);
             writeNearbyMobs(writer, level, flowField, center, Math.max(radiusX, radiusZ), heightY);
             writeRecentActivity(writer, center, Math.max(radiusX, radiusZ) * 2);
@@ -75,45 +82,61 @@ public class PathingDebugFileWriter {
         }
     }
 
-    private static void writeHeader(FileWriter writer, ServerLevel level, StandardFlowField flowField, BlockPos center,
+    private static void writeHeader(FileWriter writer, RegionFlowField flowField, TerritoryRegionMap regionMap, BlockPos center,
                                      int radiusX, int heightY, int radiusZ, boolean calculating, Map<BlockPos, SiegeNode> renderMap) throws IOException {
         writer.write("====================================================\n");
         writer.write("         SKAVENBLIGHT DEEP DIAGNOSTIC DUMP          \n");
         writer.write("====================================================\n\n");
 
         writer.write(String.format("Timestamp    : %s\n", LocalDateTime.now()));
+        writer.write(String.format("Region Id    : %d\n", flowField.getRegionId()));
         writer.write(String.format("Target Pos   : %s\n", flowField.getTargetPos().toShortString()));
         writer.write(String.format("Center Pos   : %s\n", center.toShortString()));
         writer.write(String.format("Search Bounds: +/- %dx, %dy, %dz (Y: %d to %d)\n",
                 radiusX, heightY, radiusZ, center.getY() - heightY, center.getY() + heightY));
 
         if (calculating) {
-            long elapsedTicks = level.getGameTime() - flowField.getLastCalculationStartGameTime();
-            writer.write(String.format("FlowField State: CALCULATING (LIVE, in-progress snapshot) | Elapsed: %d ticks (%.1fs) | Nodes so far: %d\n",
-                    elapsedTicks, elapsedTicks / 20.0, renderMap.size()));
+            // No network-wide equivalent of getLastCalculationStartGameTime() is exposed by
+            // TerritoryRegionMap - it tracks a single lastCalculationStart privately and doesn't
+            // surface it - so elapsed-ticks-since-start is dropped rather than guessed at.
+            writer.write(String.format("FlowField State: CALCULATING (LIVE, in-progress snapshot) | Nodes so far: %d\n", renderMap.size()));
         } else {
             writer.write(String.format("FlowField State: READY (last completed pass) | Total Nodes: %d\n", renderMap.size()));
         }
 
-        SiegeProjectManager pm = flowField.getProjectManager();
-        writer.write(String.format("Snapshot Coverage: %d / %d territory chunks captured\n",
-                flowField.getCapturedChunkCount(), flowField.getTerritoryChunkCount()));
-        writer.write(String.format("Node Budget (throttled): %d nodes/pass\n", flowField.getThrottler().getNodesPerTick()));
-        // Distinct from "Total Nodes" above (the published instruction map's size) - this is
-        // nextCostMap's size, the counter the budget cutoff actually checks. A single successful
-        // macro-project line costs this counter only ONE slot (its endpoint) while writing up to
-        // 32 entries into the published instruction map, so "Total Nodes" can look enormous while
-        // this - the real competition WALK propagation is up against - is quietly maxed out.
-        writer.write(String.format("Dijkstra Budget Used: %d / %d nodes (%s)\n",
-                flowField.getCalculator().getLastPassNodeCount(), flowField.getThrottler().getNodesPerTick(),
-                flowField.getCalculator().isLastPassBudgetExhausted() ? "EXHAUSTED - queue cut off early" : "queue drained naturally"));
-        writer.write(String.format("Siege Projects: %d active | %d generated / %d survived this pass\n",
-                pm.getActiveProjectCount(), pm.getLastPassCandidatesGenerated(), pm.getLastPassCandidatesSurvived()));
-        writer.write(String.format("Macro Evaluation: triggered %d times | %d total line-steps evaluated this pass\n",
-                pm.getMacroEvaluationCount(), pm.getLineStepsEvaluated()));
-        writer.write("  (High macro-evaluation/line-step counts relative to node count is the signature of\n");
-        writer.write("   the hitObstacle heuristic over-triggering - see FlowFieldCalculator - and is the\n");
-        writer.write("   single biggest lever on calculation cost if a pass is slow or looks hung.)\n\n");
+        writer.write(String.format("Node Budget (throttled): %d nodes/pass\n", regionMap.getThrottler().getNodesPerTick()));
+        // Snapshot Coverage / Dijkstra Budget Used / Siege Projects / Macro Evaluation used to
+        // read StandardFlowField's own per-nexus SiegeProjectManager/FlowFieldCalculator/
+        // TerrainSnapshot capture-count directly. Those objects are now shared network-wide on
+        // TerritoryRegionMap (not per-region) and TerritoryRegionMap doesn't expose getters for
+        // them - only getThrottler() above survived the migration as a network-wide equivalent -
+        // so these per-pass perf counters are retired rather than guessed at.
+        writer.write("Snapshot Coverage: (per-nexus chunk-capture stats retired - see region graph dump below)\n");
+        writer.write("Dijkstra Budget Used: (per-nexus calculator diagnostics retired - see region graph dump below)\n");
+        writer.write("Siege Projects: (per-nexus project-manager stats retired - see region graph dump below)\n");
+        writer.write("Macro Evaluation: (per-nexus project-manager stats retired - see region graph dump below)\n\n");
+    }
+
+    /**
+     * Region graph + route tree snapshot - added when this file migrated off StandardFlowField's
+     * single-territory model, since region/connector/reachability info now lives on
+     * TerritoryRegionMap rather than on any individual RegionFlowField.
+     */
+    private static void writeRegionGraph(FileWriter writer, TerritoryRegionMap regionMap) throws IOException {
+        writer.write("--- REGION GRAPH ---\n");
+        RegionIndex index = regionMap.getRegionIndex();
+        RegionGraph graph = regionMap.getRegionGraph();
+        RegionRouteTree routeTree = regionMap.getRouteTree();
+
+        writer.write(String.format("Regions: %d | Connectors: %d\n", index.getRegions().size(), graph != null ? graph.getAllConnectors().size() : 0));
+
+        for (Region region : index.getRegions()) {
+            boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
+            writer.write(String.format("  region %d: %d cells, reachable=%s, hopCost=%s\n",
+                    region.getId(), region.cellCount(), reachable,
+                    reachable ? String.valueOf(routeTree.getHopCost(region.getId())) : "n/a"));
+        }
+        writer.write("\n");
     }
 
     private static void writeMetrics(FileWriter writer, Map<BlockPos, SiegeNode> renderMap) throws IOException {
@@ -154,7 +177,7 @@ public class PathingDebugFileWriter {
      * "<idle>" and a non-WALK next instruction is a rat whose construction goal declined to
      * claim a target it should have - previously invisible from outside the entity itself.
      */
-    private static void writeNearbyMobs(FileWriter writer, ServerLevel level, StandardFlowField flowField, BlockPos center, int radius, int heightY) throws IOException {
+    private static void writeNearbyMobs(FileWriter writer, ServerLevel level, RegionFlowField flowField, BlockPos center, int radius, int heightY) throws IOException {
         writer.write("--- NEARBY MOBS (goal state) ---\n");
 
         AABB box = new AABB(center).inflate(radius, heightY, radius);
@@ -211,10 +234,11 @@ public class PathingDebugFileWriter {
         }
 
         for (SiegeActivityLog.Entry entry : nearby) {
-            writer.write(String.format("  t=%-8d %-22s [%s] mob@%-16s -> %-12s at %-16s (%s)\n",
+            writer.write(String.format("  t=%-8d %-22s [%s] mob@%-16s -> %-12s at %-16s region=%-4s (%s)\n",
                     entry.gameTime(), entry.mobType(), entry.mobId(),
                     entry.mobPos() != null ? entry.mobPos().toShortString() : "?",
-                    entry.action(), entry.targetPos().toShortString(), entry.note()));
+                    entry.action(), entry.targetPos().toShortString(),
+                    entry.regionId() != null ? entry.regionId().toString() : "?", entry.note()));
         }
         writer.write("\n");
     }

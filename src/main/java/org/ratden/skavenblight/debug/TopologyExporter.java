@@ -4,13 +4,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 import java.util.Map;
 
 public class TopologyExporter {
 
-    public static String exportSlice(ServerLevel level, StandardFlowField flowField, BlockPos center, int radiusX, int heightY, int radiusZ) {
+    public static String exportSlice(ServerLevel level, RegionFlowField flowField, BlockPos center, int radiusX, int heightY, int radiusZ) {
         StringBuilder sb = new StringBuilder();
         sb.append("=== SKAVENBLIGHT TOPOLOGY EXPORT ===\n");
         sb.append(String.format("Center: %s | Bounds: +/- %dx, %dy, %dz\n", center.toShortString(), radiusX, heightY, radiusZ));

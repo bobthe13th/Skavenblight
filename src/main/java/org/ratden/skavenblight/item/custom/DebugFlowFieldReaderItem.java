@@ -14,10 +14,11 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
-import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
+import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.debug.PathingDebugFileWriter;
 import org.ratden.skavenblight.debug.TopologyExporter;
 import org.ratden.skavenblight.debug.mode.server.DetailedServerMode;
@@ -31,6 +32,8 @@ import org.ratden.skavenblight.world.NexusTracker;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 public class DebugFlowFieldReaderItem extends Item {
 
@@ -78,23 +81,27 @@ public class DebugFlowFieldReaderItem extends Item {
                 // 2. Fetch the active Nexus position
                 BlockPos nexusPos = NexusTracker.getActiveNexusPos(serverLevel);
 
-                // 3. Retrieve the active Flow Field using Chunk lookup
+                // 3. Retrieve the active Region Flow Field using Chunk lookup, then resolve it to
+                // the specific region containing the nexus via the network's TerritoryRegionMap
+                // (StandardFlowField's single-territory getSharedFlowField no longer exists).
                 WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
-                StandardFlowField activeField = null;
-                net.minecraft.world.level.ChunkPos nexusChunk = new net.minecraft.world.level.ChunkPos(nexusPos);
+                RegionFlowField activeField = null;
+                TerritoryRegionMap activeRegionMap = null;
+                ChunkPos nexusChunk = new ChunkPos(nexusPos);
 
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
                     if (network.getTerritoryChunks().contains(nexusChunk)) {
-                        activeField = network.getSharedFlowField(serverLevel, nexusPos);
+                        activeRegionMap = network.getRegionMap();
+                        activeField = activeRegionMap.getRegionFlowFieldFor(nexusPos);
                         break;
                     }
                 }
 
                 // 4. Export the data - PathingDebugFileWriter handles empty/calculating/ready
                 // states itself (it renders the live in-progress map while a calculation is
-                // running), so the only real failure case here is not finding a network at all.
+                // running), so the only real failure case here is not finding a network/region at all.
                 if (activeField != null) {
-                    String filePath = PathingDebugFileWriter.exportDeepDump(serverLevel, activeField, playerPos, 32, 10, 32);
+                    String filePath = PathingDebugFileWriter.exportDeepDump(serverLevel, activeField, activeRegionMap, playerPos, 32, 10, 32);
 
                     if (filePath != null) {
                         serverPlayer.sendSystemMessage(Component.literal("§a[Skavenblight] §fDeep dump saved to: §e" + filePath));
@@ -144,29 +151,49 @@ public class DebugFlowFieldReaderItem extends Item {
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
                     if (network.getTerritoryChunks().contains(serverPlayer.chunkPosition())) {
 
-                        BlockPos activeNexus = null;
-                        for (BlockPos endpoint : network.getEndpoints()) {
-                            if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                                activeNexus = endpoint;
-                                break;
-                            }
+                        // Position-based lookup against the player's current region - replaces
+                        // the old nexus-lookup + network-wide getSharedFlowField call, since
+                        // pathing is now region-scoped rather than one field per whole territory.
+                        TerritoryRegionMap regionMap = network.getRegionMap();
+                        RegionFlowField sharedField = regionMap.getRegionFlowFieldFor(playerPos);
+
+                        if (sharedField == null && currentMode == DebugMode.WILDERNESS_PATH) {
+                            // Wilderness mode's whole purpose is showing a heading FROM outside
+                            // every scanned region - getWildernessHeadingTarget delegates
+                            // network-wide via TerritoryRegionMap regardless of which region's
+                            // RegionFlowField instance issues the call (see RegionFlowField and
+                            // FollowFlowFieldGoal's identical use of this for wandering mobs), so
+                            // grab any available region's field as a proxy instead of skipping
+                            // visualization entirely for the one mode that needs this most.
+                            sharedField = regionMap.getRegionIndex().getRegions().stream()
+                                    .map(r -> regionMap.getRegionFlowFieldFor(r.getMin()))
+                                    .filter(Objects::nonNull)
+                                    .findFirst().orElse(null);
                         }
 
-                        if (activeNexus != null) {
-                            StandardFlowField sharedField = network.getSharedFlowField(serverLevel, activeNexus);
-                            sharedField.calculateMapIfNeeded(serverLevel);
-
-                            Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
-                            currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, localNodes);
-
-                            serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
-                                    network.getTerritoryChunks(),
-                                    localNodes,
-                                    sharedField.getMappedChunks(),
-                                    currentMode.ordinal()
-                            ));
+                        if (sharedField == null) {
+                            // Player standing outside every scanned region (or nothing built yet
+                            // for this network) - nothing to visualize here this tick.
                             return;
                         }
+
+                        Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+                        currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, regionMap, localNodes);
+
+                        RegionFlowField highlightField = sharedField;
+                        Set<ChunkPos> highlightedChunks = regionMap.getRegionIndex().getRegions().stream()
+                                .filter(r -> r.getId() == highlightField.getRegionId())
+                                .findFirst()
+                                .map(r -> r.getChunkCells().keySet())
+                                .orElse(Set.of());
+
+                        serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
+                                network.getTerritoryChunks(),
+                                localNodes,
+                                highlightedChunks,
+                                currentMode.ordinal()
+                        ));
+                        return;
                     }
                 }
             }

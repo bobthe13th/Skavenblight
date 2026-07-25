@@ -24,15 +24,20 @@ public final class SiegeActivityLog {
     }
 
     public static synchronized void record(long gameTime, LivingEntity actor, BlockPos targetPos,
-                                            SiegeNode.SiegeAction action, String note) {
+                                            SiegeNode.SiegeAction action, String note, Integer regionId) {
         String mobType = actor != null ? BuiltInRegistries.ENTITY_TYPE.getKey(actor.getType()).toString() : "?";
         String mobId = actor != null ? actor.getStringUUID() : "?";
         BlockPos mobPos = actor != null ? actor.blockPosition() : null;
 
-        ENTRIES.addLast(new Entry(gameTime, mobType, mobId, mobPos, targetPos, action, note));
+        ENTRIES.addLast(new Entry(gameTime, mobType, mobId, mobPos, targetPos, action, note, regionId));
         while (ENTRIES.size() > MAX_ENTRIES) {
             ENTRIES.removeFirst();
         }
+    }
+
+    /** Backward-compatible overload for call sites that don't (yet) have a region id handy. */
+    public static void record(long gameTime, LivingEntity actor, BlockPos targetPos, SiegeNode.SiegeAction action, String note) {
+        record(gameTime, actor, targetPos, action, note, null);
     }
 
     public static synchronized List<Entry> recent(int count) {
@@ -42,6 +47,6 @@ public final class SiegeActivityLog {
     }
 
     public record Entry(long gameTime, String mobType, String mobId, BlockPos mobPos, BlockPos targetPos,
-                         SiegeNode.SiegeAction action, String note) {
+                         SiegeNode.SiegeAction action, String note, Integer regionId) {
     }
 }
