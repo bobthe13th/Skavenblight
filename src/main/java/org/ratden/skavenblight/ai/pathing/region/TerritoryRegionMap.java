@@ -34,6 +34,24 @@ public class TerritoryRegionMap {
     private final Set<ChunkPos> dirtySnapshotChunks = new HashSet<>();
     private final Set<ChunkPos> forcedChunks = new HashSet<>();
 
+    // The network's REAL configured territory and nexus, as handed to the last rebuild(). Both
+    // are needed by tick()/recomputeDirtyRegions long after that call returned:
+    //  - territoryChunks: tick() used to derive its bounds from "chunks that currently contain at
+    //    least one region cell", which can only ever shrink - a territory chunk with no walkable
+    //    cells yet (or one that hasn't been scanned) was silently dropped from the snapshot
+    //    forever, and dirty chunks outside the derived set were never captured or cleared.
+    //  - nexusPos: the full-rebuild fallback used to re-root at a Region's bounding-box corner
+    //    (getMin()), which is not the nexus and usually isn't even inside the region.
+    private volatile Set<ChunkPos> territoryChunks = Set.of();
+    private volatile BlockPos nexusPos = null;
+
+    // Bumped on every completed full rebuild. Region ids are renumbered from 0 by RegionScanner
+    // on each scan (and seeded from an unordered chunk set), so "region 3" before a rebuild is
+    // not "region 3" after one. Anything caching a region id (see ClanratEntity) must pair it
+    // with this generation or it will happily keep a RegionFlowField wrapping an orphaned
+    // FlowFieldState that this map no longer recomputes.
+    private volatile long generation = 0;
+
     private volatile RegionIndex regionIndex = new RegionIndex(List.of());
     private volatile RegionGraph regionGraph = null;
     private volatile RegionRouteTree routeTree = null;
@@ -80,6 +98,20 @@ public class TerritoryRegionMap {
         forcedChunks.clear();
     }
 
+    /**
+     * Re-issues every chunk ticket this map believes it already holds. Needed when a DIFFERENT
+     * TerritoryRegionMap whose territory overlapped ours releases its own tickets (see
+     * WarpFluxGridManager's network merge): {@code level.setChunkForced} is one level-wide set,
+     * so the other map's release also drops a shared chunk we still depend on, while our own
+     * forcedChunks bookkeeping still lists it - which would make syncTerritoryChunkTickets skip
+     * re-forcing it.
+     */
+    public void reassertChunkTickets(ServerLevel level) {
+        for (ChunkPos cp : forcedChunks) {
+            level.setChunkForced(cp.x, cp.z, true);
+        }
+    }
+
     public void onBlockChanged(BlockPos pos) {
         pendingBlockChanges.add(pos.immutable());
     }
@@ -88,6 +120,10 @@ public class TerritoryRegionMap {
     public void rebuild(ServerLevel level, Set<ChunkPos> territoryChunks, BlockPos nexusPos) {
         if (isCalculatingAsync.get()) return;
         if (!isCalculatingAsync.compareAndSet(false, true)) return;
+
+        // Remembered for tick()/recomputeDirtyRegions - see the field docs.
+        this.territoryChunks = Set.copyOf(territoryChunks);
+        this.nexusPos = nexusPos.immutable();
 
         syncTerritoryChunkTickets(level, territoryChunks);
         dirtySnapshotChunks.addAll(territoryChunks);
@@ -125,13 +161,23 @@ public class TerritoryRegionMap {
 
         Map<Integer, FlowFieldState> newStates = new HashMap<>();
         for (Region region : regions) {
-            BlockPos target = region.getId() == (rootRegion != null ? rootRegion.getId() : -1)
-                    ? nexusPos
-                    : (newRouteTree != null && newRouteTree.getParentConnector(region.getId()) != null
-                            ? newRouteTree.getParentConnector(region.getId()).entryFor(region.getId())
-                            : null);
+            boolean isRoot = rootRegion != null && region.getId() == rootRegion.getId();
+            RegionConnector parentConnector = isRoot ? null
+                    : (newRouteTree != null ? newRouteTree.getParentConnector(region.getId()) : null);
+
+            BlockPos target = isRoot ? nexusPos
+                    : (parentConnector != null ? parentConnector.entryFor(region.getId()) : null);
 
             if (target == null) continue; // unreachable region - no local field until a connector exists
+
+            // Seed this region's chosen connector as the shared project manager's single active
+            // project, so injectActiveProjects feeds its not-yet-built instructions (the actual
+            // build/mine orders for the bridge/staircase/tunnel out of this region) into the pass
+            // below. Without this nothing ever tells a mob to construct a connector at all.
+            // Safe with one shared manager because regions are processed strictly sequentially
+            // here - setActiveConnectorProject clears and re-seeds immediately before the pass
+            // that consumes it, so no region can see another's project.
+            projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.project() : null);
 
             FlowFieldState state = new FlowFieldState(target, territoryChunks, region::contains);
             calculator.calculateFully(snapshot, state);
@@ -149,6 +195,11 @@ public class TerritoryRegionMap {
         this.routeTree = newRouteTree;
         this.regionStates = Map.copyOf(newStates);
         this.regionFlowFields = Map.copyOf(newFlowFields);
+        // Published last, alongside the new maps: every region id above is freshly renumbered, so
+        // anything caching one must be able to notice they all just changed meaning. Written only
+        // from the single-flight rebuild path (guarded by isCalculatingAsync), hence a plain
+        // volatile increment rather than an atomic.
+        this.generation++;
     }
 
     /**
@@ -169,13 +220,43 @@ public class TerritoryRegionMap {
         return isCalculatingAsync.get();
     }
 
+    /**
+     * Where a mob outside any mapped region (or inside an unreachable one) should head. Only
+     * ROUTE-REACHABLE regions are considered - heading toward a region the route tree can't reach
+     * from the nexus is no better than where the mob already is, and for a stranded mob it can be
+     * its own region. The heading itself is the nearest of that region's boundary cells: those are
+     * real walkable member cells at the region's edge, unlike getMin(), which is a bounding-box
+     * corner that's frequently inside solid rock and not even part of the region.
+     *
+     * <p>Never returns null once any region exists at all (FollowFlowFieldGoal/StrandedGoal rely
+     * on that): if nothing is reachable, it falls back to the old nearest-getMin() behavior.
+     */
     public BlockPos getWildernessHeadingTarget(BlockPos pos) {
         List<Region> regions = regionIndex.getRegions();
+        RegionRouteTree tree = this.routeTree;
+
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
+
+        if (tree != null) {
+            for (Region region : regions) {
+                if (!tree.isReachable(region.getId())) continue;
+                for (BlockPos boundaryCell : region.getBoundaryCells()) {
+                    double dist = boundaryCell.distSqr(pos);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = boundaryCell;
+                    }
+                }
+            }
+        }
+        if (best != null) return best;
+
+        // Nothing reachable (no route tree yet, or every region sealed off) - keep the contract
+        // and hand back the nearest region's bounding-box corner as a last resort.
         for (Region region : regions) {
             if (region.getMin() == null) continue;
-            BlockPos candidate = region.getMin(); // cheap stand-in for "somewhere in this region"
+            BlockPos candidate = region.getMin();
             double dist = candidate.distSqr(pos);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -189,6 +270,32 @@ public class TerritoryRegionMap {
         return regionIndex;
     }
 
+    /** Bumped on every completed full rebuild - see the {@code generation} field doc. */
+    public long getGeneration() {
+        return generation;
+    }
+
+    /** Network-wide siege project manager (shared by every region's calculation pass) - exposed for debug dumps. */
+    public SiegeProjectManager getProjectManager() {
+        return projectManager;
+    }
+
+    /** Network-wide flow-field calculator (shared by every region's calculation pass) - exposed for debug dumps. */
+    public FlowFieldCalculator getCalculator() {
+        return calculator;
+    }
+
+    /** Chunk columns actually captured by the current terrain snapshot, or 0 if none captured yet. */
+    public int getCapturedChunkCount() {
+        TerrainSnapshot snapshot = this.terrainSnapshot;
+        return snapshot != null ? snapshot.getCapturedChunkCount() : 0;
+    }
+
+    /** Size of the territory this map was last rebuilt against. */
+    public int getTerritoryChunkCount() {
+        return this.territoryChunks.size();
+    }
+
     public RegionRouteTree getRouteTree() {
         return routeTree;
     }
@@ -200,6 +307,10 @@ public class TerritoryRegionMap {
     private static final long RECALC_COOLDOWN_TICKS = 80;
 
     public void tick(ServerLevel level) {
+        // Feeds the throttler its MSPT sample. Without this its dynamic node budget never moves
+        // off its static maximum, so processCalculationQueue's Math.min(...) is a no-op.
+        this.throttler.tick(level.getServer());
+
         if (isCalculatingAsync.get()) return;
 
         BlockPos changed;
@@ -236,7 +347,10 @@ public class TerritoryRegionMap {
         Set<Integer> regionsToProcess = Set.copyOf(dirtyRegionIds);
         dirtyRegionIds.clear();
 
-        Set<ChunkPos> territoryChunks = terrainSnapshot != null ? Set.copyOf(getSnapshotChunks()) : Set.of();
+        // The network's REAL territory as of the last rebuild, not "chunks that happen to contain
+        // a region cell right now" - see the territoryChunks field doc for why the latter can only
+        // ever shrink and silently strands dirty chunks outside it.
+        Set<ChunkPos> territoryChunks = this.territoryChunks;
         TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(
                 level, terrainSnapshot, territoryChunks, dirtySnapshotChunks,
                 level.getMinBuildHeight(), level.getMaxBuildHeight(), 10);
@@ -258,14 +372,6 @@ public class TerritoryRegionMap {
 
     private static List<BlockPos> neighborsAndSelf(BlockPos pos) {
         return List.of(pos, pos.above(), pos.below(), pos.north(), pos.south(), pos.east(), pos.west());
-    }
-
-    private Set<ChunkPos> getSnapshotChunks() {
-        Set<ChunkPos> chunks = new HashSet<>();
-        for (Region region : regionIndex.getRegions()) {
-            chunks.addAll(region.getChunkCells().keySet());
-        }
-        return chunks;
     }
 
     private void recomputeDirtyRegions(Set<Integer> dirtyIds, Set<ChunkPos> territoryChunks) {
@@ -295,6 +401,11 @@ public class TerritoryRegionMap {
                 // Same single region, just recompute its local field against the current route tree.
                 FlowFieldState state = regionStates.get(regionId);
                 if (state != null) {
+                    // Re-seed this region's connector instructions for the pass (see the matching
+                    // call in rebuildRegionsAndGraph). Uses the CURRENT route tree - this is the
+                    // steady-state single-region path, not a full rebuild, so no new tree exists.
+                    RegionConnector parentConnector = routeTree != null ? routeTree.getParentConnector(regionId) : null;
+                    projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.project() : null);
                     calculator.calculateFully(snapshot, state);
                 }
                 continue;
@@ -305,9 +416,10 @@ public class TerritoryRegionMap {
             // RegionScanner's manual test notes) - falling back to a full rebuild here is simpler
             // and safer than hand-patching RegionGraph/RegionRouteTree, and still only runs when
             // topology actually changed, not on every terrain edit.
-            BlockPos rootTarget = regionIndex.getRegions().stream()
-                    .filter(r -> routeTree != null && r.getId() == routeTree.getRootRegionId())
-                    .findFirst().map(Region::getMin).orElse(oldRegion.getMin());
+            // Re-root at the REAL nexus position this map was built for, not at the root region's
+            // bounding-box corner (getMin()), which isn't the nexus and usually isn't even inside
+            // that region - re-rooting there produced a route tree/flow field aimed at solid rock.
+            BlockPos rootTarget = this.nexusPos != null ? this.nexusPos : oldRegion.getMin();
             rebuildRegionsAndGraph(territoryChunks, rootTarget);
             return;
         }

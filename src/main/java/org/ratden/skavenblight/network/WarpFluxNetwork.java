@@ -21,6 +21,11 @@ public class WarpFluxNetwork {
     private final Set<BlockPos> endpoints = new HashSet<>();
     private final Set<ChunkPos> territoryChunks = new HashSet<>();
 
+    // Gates the region-map bootstrap in tick() - see the comment there. 0 means "attempt on the
+    // very next tick", so a brand-new network still bootstraps immediately.
+    private static final long REGION_BOOTSTRAP_RETRY_TICKS = 100;
+    private long nextRegionBootstrapTick = 0;
+
     public WarpFluxNetwork() {
         this.networkId = UUID.randomUUID();
     }
@@ -71,6 +76,25 @@ public class WarpFluxNetwork {
         transferPower(generators, consumers, level);
         transferPower(batteries, consumers, level);
         transferPower(generators, batteries, level);
+
+        // Self-healing bootstrap: nothing else ever kicks off the very first region scan, so a
+        // freshly-created (or freshly-loaded) network would otherwise never produce a region
+        // graph at all, and no mob would ever get a flow field. The first tick where this network
+        // has both a nexus endpoint AND an empty region index triggers one full rebuild; once
+        // regions exist this check is a no-op forever, and steady-state terrain changes are
+        // handled by TerritoryRegionMap.tick's own dirty-region tracking.
+        // The retry interval matters only for the failure case: a rebuild that captured no chunk
+        // columns yet (common on the first ticks after a world load, since the region map's forced
+        // chunk tickets don't take effect instantly) finds 0 regions, which leaves this condition
+        // true. Without the interval that retries a full-territory TerrainSnapshot.refresh - a
+        // MAIN-THREAD call - on literally every tick until it succeeds.
+        if (!generators.isEmpty()
+                && this.regionMap.getRegionIndex().getRegions().isEmpty()
+                && !this.regionMap.isCalculating()
+                && level.getGameTime() >= this.nextRegionBootstrapTick) {
+            this.nextRegionBootstrapTick = level.getGameTime() + REGION_BOOTSTRAP_RETRY_TICKS;
+            this.regionMap.rebuild(level, this.territoryChunks, generators.get(0).pos());
+        }
 
         // This ticks the region map tied to this network.
         this.regionMap.tick(level);

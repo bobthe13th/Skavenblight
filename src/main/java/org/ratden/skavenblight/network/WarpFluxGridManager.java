@@ -87,6 +87,7 @@ public class WarpFluxGridManager extends SavedData {
         }
 
         WarpFluxNetwork targetNetwork;
+        boolean anyRegionMapCleaned = false;
 
         if (adjacentNetworks.isEmpty()) {
             // Case A: No nearby networks. Create a brand new one!
@@ -111,9 +112,20 @@ public class WarpFluxGridManager extends SavedData {
                     targetNetwork.addEndpoint(oldEndpointPos);
                 }
 
-                // Delete the old, absorbed network
+                // Delete the old, absorbed network. Release its region map's forced-chunk
+                // tickets first - nothing else ever calls TerritoryRegionMap.cleanup, so the
+                // tickets it took out would leak for the rest of the session.
+                networkToMerge.getRegionMap().cleanup(level);
                 networks.remove(networkToMerge.getId());
+                anyRegionMapCleaned = true;
             }
+        }
+
+        // setChunkForced is one level-wide set: if the absorbed network's territory overlapped the
+        // surviving one's, the cleanup above just dropped a ticket the survivor still believes it
+        // holds (so syncTerritoryChunkTickets would never re-issue it). Re-assert its own tickets.
+        if (anyRegionMapCleaned) {
+            targetNetwork.getRegionMap().reassertChunkTickets(level);
         }
 
         // Add the newly placed conduit and newly discovered endpoints to our chosen network
@@ -136,6 +148,12 @@ public class WarpFluxGridManager extends SavedData {
 
         WarpFluxNetwork oldNetwork = networks.remove(networkId);
         if (oldNetwork == null) return;
+
+        // This network is gone (its survivors get rebuilt into brand-new networks below, each with
+        // its own fresh region map) - hand its forced-chunk tickets back, or they leak for the rest
+        // of the session. Any chunk a rebuilt network still needs is re-forced by that network's
+        // own first region-map rebuild.
+        oldNetwork.getRegionMap().cleanup(level);
 
         // 1. Unmap all remaining conduits that were part of this old network
         for (BlockPos cPos : oldNetwork.getConduits()) {
