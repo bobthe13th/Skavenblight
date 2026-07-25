@@ -61,6 +61,21 @@ public class SiegeProjectManager {
         this.lineTracer = new SiegeLineTracer(terrainEvaluator);
     }
 
+    /**
+     * Registers a region's chosen parent connector as a persistent active project, so
+     * injectActiveProjects seeds its remaining (not-yet-built) instructions into every
+     * subsequent calculation pass for this region - exactly like a reactively-discovered
+     * SiegeProject, except this one is chosen once by the route tree and never re-discovered
+     * via evaluateMacroProjects (a region's own internal flood never hits an obstacle, by
+     * construction - see RegionScanner).
+     */
+    public void setActiveConnectorProject(SiegeProject project) {
+        this.activeProjects.clear();
+        if (project != null) {
+            this.activeProjects.add(project);
+        }
+    }
+
     public void injectActiveProjects(TerrainAccess terrain,
                                      PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                      Map<BlockPos, Integer> nextCostMap,

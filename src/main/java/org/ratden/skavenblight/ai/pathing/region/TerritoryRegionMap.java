@@ -171,5 +171,107 @@ public class TerritoryRegionMap {
         return regionGraph;
     }
 
-    public void tick(ServerLevel level) { /* steady-state recompute wiring lands in Task 8 */ }
+    private static final long RECALC_COOLDOWN_TICKS = 80;
+
+    public void tick(ServerLevel level) {
+        if (isCalculatingAsync.get()) return;
+
+        BlockPos changed;
+        boolean anyChange = false;
+        while ((changed = pendingBlockChanges.poll()) != null) {
+            anyChange = true;
+            dirtySnapshotChunks.add(new ChunkPos(changed));
+            Integer regionId = regionIndex.regionIdAt(changed);
+            if (regionId != null) {
+                dirtyRegionIds.add(regionId);
+            }
+        }
+        if (anyChange) {
+            lastBlockChangeTime = System.currentTimeMillis();
+        }
+
+        if (dirtyRegionIds.isEmpty()) return;
+
+        boolean terrainSettled = (System.currentTimeMillis() - lastBlockChangeTime) >= Config.minimumSettleDelayMs;
+        boolean offCooldown = (level.getGameTime() - lastCalculationStart) >= RECALC_COOLDOWN_TICKS;
+        if (!terrainSettled || !offCooldown) return;
+
+        if (!isCalculatingAsync.compareAndSet(false, true)) return;
+        lastCalculationStart = level.getGameTime();
+
+        Set<Integer> regionsToProcess = Set.copyOf(dirtyRegionIds);
+        dirtyRegionIds.clear();
+
+        Set<ChunkPos> territoryChunks = terrainSnapshot != null ? Set.copyOf(getSnapshotChunks()) : Set.of();
+        TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(
+                level, terrainSnapshot, territoryChunks, dirtySnapshotChunks,
+                level.getMinBuildHeight(), level.getMaxBuildHeight(), 10);
+        dirtySnapshotChunks.removeAll(result.capturedChunks());
+        terrainSnapshot = result.snapshot();
+
+        LOGGER.info("[Skavenblight] TerritoryRegionMap recalculating {} dirty region(s)", regionsToProcess.size());
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                recomputeDirtyRegions(regionsToProcess, territoryChunks);
+            } catch (Exception e) {
+                LOGGER.error("[Skavenblight] TerritoryRegionMap dirty-region recompute crashed!", e);
+            } finally {
+                isCalculatingAsync.set(false);
+            }
+        }, Util.backgroundExecutor());
+    }
+
+    private Set<ChunkPos> getSnapshotChunks() {
+        Set<ChunkPos> chunks = new HashSet<>();
+        for (Region region : regionIndex.getRegions()) {
+            chunks.addAll(region.getChunkCells().keySet());
+        }
+        return chunks;
+    }
+
+    private void recomputeDirtyRegions(Set<Integer> dirtyIds, Set<ChunkPos> territoryChunks) {
+        TerrainSnapshot snapshot = this.terrainSnapshot;
+
+        for (int regionId : dirtyIds) {
+            Region oldRegion = regionIndex.getRegions().stream().filter(r -> r.getId() == regionId).findFirst().orElse(null);
+            if (oldRegion == null || oldRegion.getMin() == null || oldRegion.getMax() == null) continue;
+
+            // Rescan just this region's old footprint (plus its neighbors would require a wider
+            // bounding-box expansion - start with the region's own bounds; a merge/split that
+            // reaches beyond it is caught on the NEXT tick when the newly-adjacent region's own
+            // cells also get marked dirty by the same block-change event, since a merge implies a
+            // shared boundary cell whose neighbor set changed too).
+            Set<ChunkPos> localBounds = new HashSet<>();
+            for (int x = oldRegion.getMin().getX() >> 4; x <= oldRegion.getMax().getX() >> 4; x++) {
+                for (int z = oldRegion.getMin().getZ() >> 4; z <= oldRegion.getMax().getZ() >> 4; z++) {
+                    localBounds.add(new ChunkPos(x, z));
+                }
+            }
+
+            List<Region> rescanned = regionScanner.scan(snapshot, localBounds, oldRegion.getMin(),
+                    snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
+
+            boolean topologyChanged = rescanned.size() != 1;
+            if (!topologyChanged) {
+                // Same single region, just recompute its local field against the current route tree.
+                FlowFieldState state = regionStates.get(regionId);
+                if (state != null) {
+                    calculator.calculateFully(snapshot, state);
+                }
+                continue;
+            }
+
+            LOGGER.info("[Skavenblight] Region {} topology changed ({} sub-regions found) - full territory rebuild triggered", regionId, rescanned.size());
+            // A genuine split/merge is rare and the region count for a typical base is small (see
+            // RegionScanner's manual test notes) - falling back to a full rebuild here is simpler
+            // and safer than hand-patching RegionGraph/RegionRouteTree, and still only runs when
+            // topology actually changed, not on every terrain edit.
+            BlockPos rootTarget = regionIndex.getRegions().stream()
+                    .filter(r -> routeTree != null && r.getId() == routeTree.getRootRegionId())
+                    .findFirst().map(Region::getMin).orElse(oldRegion.getMin());
+            rebuildRegionsAndGraph(territoryChunks, rootTarget);
+            return;
+        }
+    }
 }
