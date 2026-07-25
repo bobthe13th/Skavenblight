@@ -116,6 +116,18 @@ public class DebugPathingCommands {
                                         region.getMax() != null ? region.getMax().toShortString() : "?"));
                             }
 
+                            org.ratden.skavenblight.ai.pathing.SiegeLineTracer lineTracer = new org.ratden.skavenblight.ai.pathing.SiegeLineTracer(evaluator);
+                            org.ratden.skavenblight.ai.pathing.region.RegionIndex regionIndex = new org.ratden.skavenblight.ai.pathing.region.RegionIndex(regions);
+                            org.ratden.skavenblight.ai.pathing.region.RegionGraph graph = org.ratden.skavenblight.ai.pathing.region.RegionGraph.build(
+                                    result.snapshot(), regionIndex, network.getTerritoryChunks(), pos, evaluator, lineTracer);
+
+                            sb.append("Connectors (").append(graph.getAllConnectors().size()).append("):\n");
+                            for (org.ratden.skavenblight.ai.pathing.region.RegionConnector connector : graph.getAllConnectors()) {
+                                sb.append(String.format("  region %d <-> region %d, cost %d, entry %s -> %s%n",
+                                        connector.regionA(), connector.regionB(), connector.cost(),
+                                        connector.entryInA().toShortString(), connector.entryInB().toShortString()));
+                            }
+
                             String finalOutput = sb.toString();
                             source.sendSuccess(() -> Component.literal(finalOutput), false);
                             return 1;
