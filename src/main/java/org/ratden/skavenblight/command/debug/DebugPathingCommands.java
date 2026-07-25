@@ -128,6 +128,23 @@ public class DebugPathingCommands {
                                         connector.entryInA().toShortString(), connector.entryInB().toShortString()));
                             }
 
+                            org.ratden.skavenblight.ai.pathing.region.Region rootRegion = regionIndex.regionAt(pos);
+                            if (rootRegion != null) {
+                                org.ratden.skavenblight.ai.pathing.region.RegionRouteTree routeTree =
+                                        org.ratden.skavenblight.ai.pathing.region.RegionRouteTree.compute(graph, rootRegion.getId());
+
+                                sb.append("Route tree (rooted at region ").append(rootRegion.getId()).append("):\n");
+                                for (org.ratden.skavenblight.ai.pathing.region.Region region : regions) {
+                                    if (!routeTree.isReachable(region.getId())) {
+                                        sb.append(String.format("  region %d: UNREACHABLE%n", region.getId()));
+                                        continue;
+                                    }
+                                    Integer parent = routeTree.getParentRegion(region.getId());
+                                    sb.append(String.format("  region %d: parent=%s cost=%d%n",
+                                            region.getId(), parent != null ? parent.toString() : "<root>", routeTree.getHopCost(region.getId())));
+                                }
+                            }
+
                             String finalOutput = sb.toString();
                             source.sendSuccess(() -> Component.literal(finalOutput), false);
                             return 1;
