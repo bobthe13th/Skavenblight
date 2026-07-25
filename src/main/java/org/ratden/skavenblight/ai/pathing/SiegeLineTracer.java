@@ -3,7 +3,9 @@ package org.ratden.skavenblight.ai.pathing;
 import net.minecraft.core.BlockPos;
 import org.ratden.skavenblight.Config;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
@@ -28,9 +30,27 @@ public class SiegeLineTracer {
         this.terrainEvaluator = terrainEvaluator;
     }
 
-    public record TraceResult(Map<BlockPos, SiegeNode> instructions, BlockPos endPos, int totalCost, boolean completed) {
+    /**
+     * @param instructions  the traced line as an ANCHOR-WARD instruction map, matching
+     *                      FlowFieldCalculator's own convention: the entry keyed at each position
+     *                      points one step back toward {@code anchorPos}, carrying the action that
+     *                      was computed for the KEY's position (i.e. one position further out than
+     *                      the node's own pos - the same off-by-one the core flood has). Consumed
+     *                      as-is by SiegeProjectManager's reactive projects and executed by key by
+     *                      StrandedGoal; left exactly as it was.
+     * @param orderedSteps  the same walk in direction-neutral form: one entry per hop, in trace
+     *                      order, each naming the position stepped INTO and the action
+     *                      determineMacroAction computed FOR that position. {@code orderedSteps[0]}
+     *                      is the first position past the anchor and the last one is {@code endPos}.
+     *                      A caller that has to guide mobs along this line in a specific direction
+     *                      (see RegionGraph, where a connector can be traversed from either end)
+     *                      builds its own correctly-paired map from this instead of trying to reuse
+     *                      {@code instructions}, which is locked to one orientation.
+     */
+    public record TraceResult(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps,
+                               BlockPos endPos, int totalCost, boolean completed) {
         static TraceResult aborted() {
-            return new TraceResult(Map.of(), null, Integer.MAX_VALUE, false);
+            return new TraceResult(Map.of(), List.of(), null, Integer.MAX_VALUE, false);
         }
     }
 
@@ -51,6 +71,9 @@ public class SiegeLineTracer {
         BlockPos currentTarget = anchorPos;
 
         Map<BlockPos, SiegeNode> instructions = new HashMap<>();
+        // Accumulated in the same loop, no extra terrain work: each hop paired with the action
+        // determineMacroAction computed for that very position - see TraceResult's doc.
+        List<SiegeNode> orderedSteps = new ArrayList<>();
 
         for (int i = 1; i <= MAX_PROJECT_LENGTH; i++) {
             BlockPos nextPos = currentTarget.offset(dx, dy, dz);
@@ -80,15 +103,20 @@ public class SiegeLineTracer {
             }
 
             instructions.put(nextPos, new SiegeNode(currentTarget, action));
+            orderedSteps.add(new SiegeNode(nextPos, action));
 
             if (terrainEvaluator.isWalkableTerrain(terrain, nextPos)) {
-                return new TraceResult(instructions, nextPos, totalCost, true);
+                return new TraceResult(instructions, List.copyOf(orderedSteps), nextPos, totalCost, true);
             }
 
             if (i == MAX_PROJECT_LENGTH) {
                 Map<BlockPos, SiegeNode> withLanding = new HashMap<>(instructions);
                 withLanding.put(nextPos, new SiegeNode(currentTarget, SiegeNode.SiegeAction.BUILD_LANDING));
-                return new TraceResult(withLanding, nextPos, totalCost, true);
+                // Mirror the substitution in the ordered form too, so every orientation derived
+                // from it terminates in the same synthetic landing rather than the raw action.
+                List<SiegeNode> stepsWithLanding = new ArrayList<>(orderedSteps);
+                stepsWithLanding.set(stepsWithLanding.size() - 1, new SiegeNode(nextPos, SiegeNode.SiegeAction.BUILD_LANDING));
+                return new TraceResult(withLanding, List.copyOf(stepsWithLanding), nextPos, totalCost, true);
             }
 
             currentTarget = nextPos;

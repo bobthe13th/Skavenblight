@@ -93,7 +93,14 @@ public class WarpFluxNetwork {
                 && !this.regionMap.isCalculating()
                 && level.getGameTime() >= this.nextRegionBootstrapTick) {
             this.nextRegionBootstrapTick = level.getGameTime() + REGION_BOOTSTRAP_RETRY_TICKS;
-            this.regionMap.rebuild(level, this.territoryChunks, generators.get(0).pos());
+            // Defensive copy, NOT the live field: rebuild() hands this set to a background thread
+            // (RegionScanner.scan iterates it, and every FlowFieldState keeps a reference for its
+            // bounds check), while updateTerritory() clears and refills this same HashSet on the
+            // main thread whenever a conduit is placed or broken. Sharing it risks a
+            // ConcurrentModificationException mid-rebuild, or - worse because it's silent - a
+            // transiently empty set, which FlowFieldState.isOutOfBounds treats as "global scope,
+            // no bounds check at all".
+            this.regionMap.rebuild(level, Set.copyOf(this.territoryChunks), generators.get(0).pos());
         }
 
         // This ticks the region map tied to this network.

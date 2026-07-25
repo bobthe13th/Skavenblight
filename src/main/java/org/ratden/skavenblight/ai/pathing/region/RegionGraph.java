@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.pathing.FlowFieldState;
 import org.ratden.skavenblight.ai.pathing.SiegeLineTracer;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.SiegeProject;
 import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
 import org.ratden.skavenblight.ai.pathing.TerrainSnapshot;
@@ -78,9 +79,57 @@ public class RegionGraph {
         RegionConnector existing = bestPerPair.get(pairKey);
         if (existing != null && existing.cost() <= result.totalCost()) return;
 
-        SiegeProject project = new SiegeProject(result.instructions(), result.endPos(), result.totalCost());
-        RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), anchor, result.endPos(), result.totalCost(), project);
+        // Two orientations of the one traced line - see RegionConnector's doc. The entry position
+        // differs per orientation because it names the block where mobs ENTER the project: crossing
+        // toward the anchor's region they enter at the far end (endPos), crossing away from it they
+        // enter at the anchor itself.
+        SiegeProject towardA = new SiegeProject(inboundInstructions(anchor, result.orderedSteps()), result.endPos(), result.totalCost());
+        SiegeProject towardB = new SiegeProject(outboundInstructions(anchor, result.orderedSteps()), anchor, result.totalCost());
+        RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), anchor, result.endPos(),
+                result.totalCost(), towardA, towardB);
         bestPerPair.put(pairKey, connector);
+    }
+
+    /**
+     * Instruction map for crossing a traced line in the OUTWARD direction: from {@code anchor}
+     * (a boundary cell of the region that discovered the line) to the far end. Each key is a
+     * position a mob can occupy; its node names the next position along the line plus the action
+     * needed AT that position, which is the pairing goal code consumes (RegionFlowField
+     * #getNextSiegeNode checks completion at {@code node.pos()}, then the construction/breach goals
+     * act on {@code node.pos()} with {@code node.action()}).
+     *
+     * <p>Deliberately NOT reusing SiegeLineTracer's own {@code instructions} map: that one pairs a
+     * position's action with the position one step BEFORE it, so its entry at the line's end reads
+     * "WALK into the next block" even when that block is solid stone needing a MINE - a mob there
+     * asks a breach goal for nothing and stalls (findEffectiveNode's look-ahead then reaches PAST
+     * the adjacent block, mining every other block and leaving gaps). Pairing each hop with its own
+     * action makes every step of the crossing adjacent and self-describing.
+     */
+    private static Map<BlockPos, SiegeNode> outboundInstructions(BlockPos anchor, List<SiegeNode> steps) {
+        Map<BlockPos, SiegeNode> map = new HashMap<>();
+        BlockPos from = anchor;
+        for (SiegeNode step : steps) {
+            // step already IS (position stepped into, action for that position).
+            map.put(from, step);
+            from = step.pos();
+        }
+        return map;
+    }
+
+    /**
+     * Mirror image of {@link #outboundInstructions}: crossing the same line INWARD, from its far end
+     * back to {@code anchor}. The anchor is walkable ground by construction (it's a region boundary
+     * cell the trace started from), so the last hop into it is a plain WALK.
+     */
+    private static Map<BlockPos, SiegeNode> inboundInstructions(BlockPos anchor, List<SiegeNode> steps) {
+        Map<BlockPos, SiegeNode> map = new HashMap<>();
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            BlockPos from = steps.get(i).pos();
+            BlockPos to = (i == 0) ? anchor : steps.get(i - 1).pos();
+            SiegeNode.SiegeAction action = (i == 0) ? SiegeNode.SiegeAction.WALK : steps.get(i - 1).action();
+            map.put(from, new SiegeNode(to, action));
+        }
+        return map;
     }
 
     private static long pairKey(int a, int b) {

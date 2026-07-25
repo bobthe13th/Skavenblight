@@ -121,14 +121,20 @@ public class TerritoryRegionMap {
         if (isCalculatingAsync.get()) return;
         if (!isCalculatingAsync.compareAndSet(false, true)) return;
 
+        // Snapshot the caller's set immediately. Everything below - including the background
+        // rebuild and every FlowFieldState's bounds check - uses this immutable copy, so a caller
+        // handing us a set it keeps mutating (WarpFluxNetwork.updateTerritory rebuilds its
+        // territory HashSet in place on the main thread) can't corrupt an in-flight pass.
+        Set<ChunkPos> territory = Set.copyOf(territoryChunks);
+
         // Remembered for tick()/recomputeDirtyRegions - see the field docs.
-        this.territoryChunks = Set.copyOf(territoryChunks);
+        this.territoryChunks = territory;
         this.nexusPos = nexusPos.immutable();
 
-        syncTerritoryChunkTickets(level, territoryChunks);
-        dirtySnapshotChunks.addAll(territoryChunks);
+        syncTerritoryChunkTickets(level, territory);
+        dirtySnapshotChunks.addAll(territory);
         TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(
-                level, terrainSnapshot, territoryChunks, dirtySnapshotChunks,
+                level, terrainSnapshot, territory, dirtySnapshotChunks,
                 level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE);
         dirtySnapshotChunks.removeAll(result.capturedChunks());
         terrainSnapshot = result.snapshot();
@@ -137,7 +143,7 @@ public class TerritoryRegionMap {
 
         CompletableFuture.runAsync(() -> {
             try {
-                rebuildRegionsAndGraph(territoryChunks, nexusPos);
+                rebuildRegionsAndGraph(territory, nexusPos);
             } catch (Exception e) {
                 LOGGER.error("[Skavenblight] TerritoryRegionMap rebuild crashed!", e);
             } finally {
@@ -177,7 +183,10 @@ public class TerritoryRegionMap {
             // Safe with one shared manager because regions are processed strictly sequentially
             // here - setActiveConnectorProject clears and re-seeds immediately before the pass
             // that consumes it, so no region can see another's project.
-            projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.project() : null);
+            // projectFor(region.getId()) picks the orientation that leads OUT of this (child)
+            // region: a connector's traced instructions are direction-locked, and this region can
+            // be on either end of it (see RegionConnector).
+            projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(region.getId()) : null);
 
             FlowFieldState state = new FlowFieldState(target, territoryChunks, region::contains);
             calculator.calculateFully(snapshot, state);
@@ -405,7 +414,7 @@ public class TerritoryRegionMap {
                     // call in rebuildRegionsAndGraph). Uses the CURRENT route tree - this is the
                     // steady-state single-region path, not a full rebuild, so no new tree exists.
                     RegionConnector parentConnector = routeTree != null ? routeTree.getParentConnector(regionId) : null;
-                    projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.project() : null);
+                    projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(regionId) : null);
                     calculator.calculateFully(snapshot, state);
                 }
                 continue;
