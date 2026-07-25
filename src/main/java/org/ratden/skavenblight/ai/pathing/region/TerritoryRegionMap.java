@@ -180,10 +180,18 @@ public class TerritoryRegionMap {
         boolean anyChange = false;
         while ((changed = pendingBlockChanges.poll()) != null) {
             anyChange = true;
-            dirtySnapshotChunks.add(new ChunkPos(changed));
-            Integer regionId = regionIndex.regionIdAt(changed);
-            if (regionId != null) {
-                dirtyRegionIds.add(regionId);
+            // Check the changed position AND its 6 orthogonal neighbors, marking every distinct
+            // region found dirty - not just whichever region (if any) owns the changed position
+            // itself. A wall block broken between two regions was never a member of either
+            // region (it wasn't walkable), so regionIdAt(changed) alone would find nothing; its
+            // flanking neighbor cells, however, resolve to the two regions on either side, so
+            // checking them is what actually lets a merge get detected.
+            for (BlockPos candidate : neighborsAndSelf(changed)) {
+                dirtySnapshotChunks.add(new ChunkPos(candidate));
+                Integer regionId = regionIndex.regionIdAt(candidate);
+                if (regionId != null) {
+                    dirtyRegionIds.add(regionId);
+                }
             }
         }
         if (anyChange) {
@@ -220,6 +228,10 @@ public class TerritoryRegionMap {
                 isCalculatingAsync.set(false);
             }
         }, Util.backgroundExecutor());
+    }
+
+    private static List<BlockPos> neighborsAndSelf(BlockPos pos) {
+        return List.of(pos, pos.above(), pos.below(), pos.north(), pos.south(), pos.east(), pos.west());
     }
 
     private Set<ChunkPos> getSnapshotChunks() {
