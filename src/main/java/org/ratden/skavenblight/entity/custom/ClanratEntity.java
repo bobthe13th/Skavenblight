@@ -14,6 +14,7 @@ import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.SpiralSapperGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.StrandedGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WarpSapperGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
@@ -25,6 +26,7 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
+import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
@@ -40,6 +42,7 @@ public class ClanratEntity extends Monster implements GeoEntity {
     private RegionFlowField currentFlowField = null;
     private int currentRegionId = -1;
     private int territoryCheckCooldown = 0;
+    private BlockPos strandedHeading = null;
 
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
@@ -70,6 +73,11 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(6, new BuildFlowFieldGoal(this));
         this.goalSelector.addGoal(7, new WidenStairsGoal(this));
         this.goalSelector.addGoal(8, new FollowFlowFieldGoal(this, 1.2D));
+        // Only engages when isStranded() is true (region found but unreachable per the route
+        // tree) - yields to the ordinary siege goals above, which naturally decline while
+        // currentFlowField == null in the stranded case, and to WaterAvoidingRandomStrollGoal
+        // below when not stranded.
+        this.goalSelector.addGoal(9, new StrandedGoal(this));
         this.goalSelector.addGoal(10, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(11, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(11, new RandomLookAroundGoal(this));
@@ -110,14 +118,29 @@ public class ClanratEntity extends Monster implements GeoEntity {
         Region region = regionIndex.regionAt(this.blockPosition());
 
         if (region == null) {
-            // True wilderness or stranded - handled by FollowFlowFieldGoal's/StrandedGoal's own
-            // null-flowField fallback paths (see Task 10). Clear any stale assignment.
+            // True wilderness - handled by FollowFlowFieldGoal's own null-flowField fallback
+            // path (getWildernessHeadingTarget). Clear any stale assignment.
             if (this.currentRegionId != -1) {
                 this.assignFlowField(null);
                 this.currentRegionId = -1;
             }
+            this.strandedHeading = null;
             return;
         }
+
+        // In-territory, but the region graph has no route from this region to the target
+        // (not yet scanned, or genuinely sealed off) - distinct from true wilderness above.
+        // StrandedGoal takes over: head toward the nearest region with a known route, and
+        // attempt a local breach if stalled at the boundary.
+        RegionRouteTree routeTree = closestNetwork.getRegionMap().getRouteTree();
+        if (routeTree == null || !routeTree.isReachable(region.getId())) {
+            this.assignFlowField(null);
+            this.currentRegionId = -1;
+            this.strandedHeading = closestNetwork.getRegionMap().getWildernessHeadingTarget(this.blockPosition());
+            return;
+        }
+
+        this.strandedHeading = null;
 
         if (region.getId() == this.currentRegionId) return; // still in the same region, no re-fetch needed
 
@@ -126,6 +149,14 @@ public class ClanratEntity extends Monster implements GeoEntity {
             this.currentRegionId = region.getId();
         }
         this.assignFlowField(field);
+    }
+
+    public boolean isStranded() {
+        return this.strandedHeading != null;
+    }
+
+    public BlockPos getStrandedHeading() {
+        return this.strandedHeading;
     }
 
     public void assignFlowField(RegionFlowField field) {

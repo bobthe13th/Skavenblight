@@ -26,8 +26,23 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
 
         BlockPos currentPos = this.mob.blockPosition();
 
-        // Must NOT be on an active Flow Field path node (means we fell or got pushed off)
-        if (this.flowField.getInstructionMap().containsKey(currentPos)) {
+        boolean onPath = this.flowField.getInstructionMap().containsKey(currentPos);
+
+        // Proactive trigger: even while still ON the active path, notice if the very next
+        // flow-field instruction sits on a connector lane that's already saturated with other
+        // mobs (see RegionFlowField.isLaneCrowded) - no need to wait until a rat actually falls
+        // off before widening a bridge/staircase that's clearly jammed.
+        boolean crowdedAhead = false;
+        if (onPath && this.mob.level() instanceof ServerLevel serverLevel) {
+            SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, currentPos);
+            crowdedAhead = nextNode != null && this.flowField.isLaneCrowded(nextNode.pos());
+        }
+
+        // Reactive trigger (original behavior): must NOT be on an active Flow Field path node
+        // (means we fell or got pushed off). Skip this precondition when the proactive trigger
+        // above already fired - a rat still on-path can usefully notice its upcoming lane is
+        // jammed and start widening it now instead of waiting to fall off first.
+        if (onPath && !crowdedAhead) {
             return Optional.empty();
         }
 

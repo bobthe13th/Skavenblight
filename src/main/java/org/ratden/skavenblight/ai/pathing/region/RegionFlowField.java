@@ -8,7 +8,9 @@ import org.ratden.skavenblight.ai.pathing.*;
 import org.slf4j.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-region query facade handed to SiegeGoals, replacing StandardFlowField's role for
@@ -28,6 +30,12 @@ public class RegionFlowField {
     private final CalculationThrottler throttler;
 
     private final Map<BlockPos, Mob> claimedTargets = new HashMap<>();
+
+    // Tracks how many mobs are currently funneling through a given connector lane (e.g. a
+    // narrow bridge/staircase's entry node), so WidenStairsGoal can widen a saturated lane
+    // proactively instead of only reacting after a rat is already stuck off-path.
+    private final Map<BlockPos, Set<Mob>> laneOccupants = new HashMap<>();
+    private static final int MAX_LANE_OCCUPANTS = 2;
 
     public RegionFlowField(TerritoryRegionMap owner, int regionId, FlowFieldState state,
                             SiegeProjectManager projectManager, FlowFieldCalculator calculator, CalculationThrottler throttler) {
@@ -71,6 +79,27 @@ public class RegionFlowField {
     public boolean isTargetClaimed(BlockPos pos) {
         Mob owner = claimedTargets.get(pos);
         return owner != null && owner.isAlive();
+    }
+
+    /** True if there's room for {@code mob} on the lane at {@code connectorEntry} - callers should widen (see WidenStairsGoal) once this starts returning false often. */
+    public boolean tryOccupyLane(BlockPos connectorEntry, Mob mob) {
+        Set<Mob> occupants = laneOccupants.computeIfAbsent(connectorEntry.immutable(), k -> new HashSet<>());
+        occupants.removeIf(m -> !m.isAlive());
+        if (occupants.size() >= MAX_LANE_OCCUPANTS && !occupants.contains(mob)) {
+            return false;
+        }
+        occupants.add(mob);
+        return true;
+    }
+
+    public void releaseLane(BlockPos connectorEntry, Mob mob) {
+        Set<Mob> occupants = laneOccupants.get(connectorEntry.immutable());
+        if (occupants != null) occupants.remove(mob);
+    }
+
+    public boolean isLaneCrowded(BlockPos connectorEntry) {
+        Set<Mob> occupants = laneOccupants.get(connectorEntry.immutable());
+        return occupants != null && occupants.size() >= MAX_LANE_OCCUPANTS;
     }
 
     public void forceRecalculation() {
