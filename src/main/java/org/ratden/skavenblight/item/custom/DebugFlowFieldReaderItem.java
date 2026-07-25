@@ -156,6 +156,7 @@ public class DebugFlowFieldReaderItem extends Item {
                         // pathing is now region-scoped rather than one field per whole territory.
                         TerritoryRegionMap regionMap = network.getRegionMap();
                         RegionFlowField sharedField = regionMap.getRegionFlowFieldFor(playerPos);
+                        boolean usingBorrowedWildernessField = false;
 
                         if (sharedField == null && currentMode == DebugMode.WILDERNESS_PATH) {
                             // Wilderness mode's whole purpose is showing a heading FROM outside
@@ -169,6 +170,7 @@ public class DebugFlowFieldReaderItem extends Item {
                                     .map(r -> regionMap.getRegionFlowFieldFor(r.getMin()))
                                     .filter(Objects::nonNull)
                                     .findFirst().orElse(null);
+                            usingBorrowedWildernessField = sharedField != null;
                         }
 
                         if (sharedField == null) {
@@ -180,12 +182,27 @@ public class DebugFlowFieldReaderItem extends Item {
                         Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
                         currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, regionMap, localNodes);
 
-                        RegionFlowField highlightField = sharedField;
-                        Set<ChunkPos> highlightedChunks = regionMap.getRegionIndex().getRegions().stream()
-                                .filter(r -> r.getId() == highlightField.getRegionId())
-                                .findFirst()
-                                .map(r -> r.getChunkCells().keySet())
-                                .orElse(Set.of());
+                        // The borrowed field above is picked arbitrarily (whichever region's
+                        // field happened to exist first) purely so getWildernessHeadingTarget's
+                        // network-wide lookup can be made - it has nothing to do with which
+                        // region the computed heading actually points toward (that's resolved
+                        // independently, by nearest-distance, inside TerritoryRegionMap). Chunk
+                        // highlighting that region would mislead the client into lighting up an
+                        // unrelated, possibly-distant region, so skip highlighting entirely in
+                        // that case - a missing highlight is better than a wrong one. The normal
+                        // (non-wilderness-fallback) case is untouched: sharedField there really is
+                        // the region the player is standing in, so highlighting it is correct.
+                        Set<ChunkPos> highlightedChunks;
+                        if (usingBorrowedWildernessField) {
+                            highlightedChunks = Set.of();
+                        } else {
+                            RegionFlowField highlightField = sharedField;
+                            highlightedChunks = regionMap.getRegionIndex().getRegions().stream()
+                                    .filter(r -> r.getId() == highlightField.getRegionId())
+                                    .findFirst()
+                                    .map(r -> r.getChunkCells().keySet())
+                                    .orElse(Set.of());
+                        }
 
                         serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
                                 network.getTerritoryChunks(),
