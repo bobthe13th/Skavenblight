@@ -73,11 +73,8 @@ public class WarpFluxNetwork {
         transferPower(batteries, consumers, level);
         transferPower(generators, batteries, level);
 
-        // This ticks every flow field tied to this network.
-        // It safely respects the 40-tick cooldown built into calculateMapIfNeeded!
-        for (StandardFlowField field : this.flowFields.values()) {
-            field.calculateMapIfNeeded(level);
-        }
+        // This ticks the region map tied to this network.
+        this.regionMap.tick(level);
     }
     public void scanForEndpoints(ServerLevel level) {
         this.endpoints.clear();
@@ -248,27 +245,19 @@ public class WarpFluxNetwork {
             case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
         };
     }
-    // Cache mapping a target Nexus to its specific flow field
-    private final Map<BlockPos, StandardFlowField> flowFields = new HashMap<>();
+    private final org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap regionMap =
+            new org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap();
 
-    /**
-     * Gets the shared flow field for a specific Nexus.
-     * Everything (Rats, Debug Item, Incursions) should use this single instance.
-     */
-    // === FIX: Added ServerLevel level to the method parameters ===
-    public StandardFlowField getSharedFlowField(ServerLevel level, BlockPos targetNexus) {
-        return flowFields.computeIfAbsent(targetNexus, pos ->
-                // === FIX: Passed level into the StandardFlowField constructor ===
-                new StandardFlowField(level, pos, this.getTerritoryChunks())
-        );
+    public org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap getRegionMap() {
+        return this.regionMap;
     }
 
     /**
-     * Call this whenever your base territory expands or shrinks
-     * so the maps know they need to be rebuilt!
+     * Call this whenever your base territory expands or shrinks, or a new nexus becomes active,
+     * so the region graph gets rebuilt against the current layout.
      */
-    public void clearFlowFields() {
-        this.flowFields.clear();
+    public void rebuildRegionMap(ServerLevel level, BlockPos nexusPos) {
+        this.regionMap.rebuild(level, this.getTerritoryChunks(), nexusPos);
     }
     private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
 }

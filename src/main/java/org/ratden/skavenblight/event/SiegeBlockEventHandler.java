@@ -6,7 +6,6 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.network.WarpFluxNetwork;
@@ -40,10 +39,7 @@ public class SiegeBlockEventHandler {
         for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
             for (BlockPos endpoint : network.getEndpoints()) {
                 if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                    StandardFlowField sharedField = network.getSharedFlowField(serverLevel, endpoint);
-                    if (sharedField != null) {
-                        sharedField.onBlockChanged(pos);
-                    }
+                    network.getRegionMap().onBlockChanged(pos);
                 }
             }
         }

@@ -51,6 +51,14 @@ public final class TerrainSnapshot implements TerrainAccess {
         return columns.size();
     }
 
+    public int getMinBuildHeight() {
+        return this.minBuildHeight;
+    }
+
+    public int getMaxBuildHeight() {
+        return this.maxBuildHeight;
+    }
+
     public record RefreshResult(TerrainSnapshot snapshot, Set<ChunkPos> capturedChunks) {}
 
     /**
