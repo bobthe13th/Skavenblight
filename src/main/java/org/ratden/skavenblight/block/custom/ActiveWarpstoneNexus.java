@@ -3,7 +3,6 @@ package org.ratden.skavenblight.block.custom;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.event.GameOverHandler;
@@ -88,15 +87,10 @@ public class ActiveWarpstoneNexus extends Block implements EntityBlock {
             boolean wasTrackedNexus = NexusTracker.isActiveNexus(serverLevel, pos);
 
             if (wasTrackedNexus) {
-
-                // Fetch the BlockEntity using your existing tracker method
-                WarpstoneNexusEntity nexusEntity = NexusTracker.getActiveNexusEntity(serverLevel);
-
-                // If the entity exists and has an active flow field, clean up the chunk tickets
-                if (nexusEntity != null && nexusEntity.getFlowField() != null) {
-                    nexusEntity.getFlowField().cleanup(serverLevel);
-                }
-
+                // Chunk-ticket cleanup for the destroyed nexus's territory is owned by
+                // WarpFluxNetwork/TerritoryRegionMap now, not by a flow field stashed directly on
+                // the block entity (that field was dead code - nothing ever called its setter, so
+                // this cleanup call never actually fired even before the region-pathing redesign).
                 NexusTracker.clearActiveNexus(serverLevel);
                 GameOverHandler.start(serverLevel, pos);
             }

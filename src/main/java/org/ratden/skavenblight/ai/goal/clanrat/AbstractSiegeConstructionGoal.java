@@ -10,7 +10,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.slf4j.Logger;
 
 import java.util.EnumSet;
@@ -34,7 +34,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     private static final Logger LOGGER = LogUtils.getLogger();
 
     protected final PathfinderMob mob;
-    protected StandardFlowField flowField;
+    protected RegionFlowField flowField;
 
     private long nextAllowedActionTime = 0;
     private int actionTicks = 0;
@@ -50,7 +50,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     }
 
     @Override
-    public void setFlowField(StandardFlowField flowField) {
+    public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
     }
 

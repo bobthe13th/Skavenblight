@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.debug.SiegeActivityLog;
 import org.slf4j.Logger;
 
@@ -32,7 +33,7 @@ public class SiegeInteractionHandler {
             BlockPos pos,
             Direction facing,
             SiegeNode.SiegeAction action,
-            StandardFlowField flowField,
+            RegionFlowField flowField,
             LivingEntity actor
     ) {
         if (action == SiegeNode.SiegeAction.WALK || action == SiegeNode.SiegeAction.LEAP) {
@@ -213,7 +214,7 @@ public class SiegeInteractionHandler {
         return Math.max(10, (int) (destroySpeed * 12.0F));
     }
 
-    public static void executeBreach(ServerLevel level, BlockPos pos, StandardFlowField flowField, LivingEntity actor) {
+    public static void executeBreach(ServerLevel level, BlockPos pos, RegionFlowField flowField, LivingEntity actor) {
         level.destroyBlock(pos, true);
         SiegeActivityLog.record(level.getGameTime(), actor, pos, SiegeNode.SiegeAction.MINE, "breached");
     }

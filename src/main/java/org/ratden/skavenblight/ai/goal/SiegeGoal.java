@@ -1,7 +1,7 @@
 package org.ratden.skavenblight.ai.goal;
 
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 public interface SiegeGoal {
-    void setFlowField(StandardFlowField flowField);
+    void setFlowField(RegionFlowField flowField);
 }

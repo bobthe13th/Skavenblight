@@ -12,7 +12,7 @@ import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.slf4j.Logger;
 
 import java.util.EnumSet;
@@ -21,7 +21,7 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final PathfinderMob mob;
-    private StandardFlowField flowField;
+    private RegionFlowField flowField;
 
     private BlockPos targetMinePos;
     private SapperState state = SapperState.SEARCHING;
@@ -50,7 +50,7 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     }
 
     @Override
-    public void setFlowField(StandardFlowField flowField) {
+    public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
     }
 

@@ -7,7 +7,7 @@ import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.slf4j.Logger;
 
@@ -18,7 +18,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
 
     private final PathfinderMob mob;
     private final double speedModifier;
-    private StandardFlowField flowField;
+    private RegionFlowField flowField;
 
     private int pathingUpdateTimer = 0;
     private Vec3 lastPosition = null;
@@ -30,7 +30,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
     }
 
-    public void setFlowField(StandardFlowField flowField) {
+    public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
     }
 

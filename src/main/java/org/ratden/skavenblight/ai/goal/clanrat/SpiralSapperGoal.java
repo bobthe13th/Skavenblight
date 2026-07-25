@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.Block;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.SiegeInteractionHandler;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.slf4j.Logger;
 
 import java.util.EnumSet;
@@ -21,7 +21,7 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
     private static final long GIVE_UP_COOLDOWN_TICKS = 100;
 
     private final PathfinderMob mob;
-    private StandardFlowField flowField;
+    private RegionFlowField flowField;
 
     private BlockPos currentTarget;
     private SapperState state;
@@ -50,7 +50,7 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
     }
 
     @Override
-    public void setFlowField(StandardFlowField flowField) {
+    public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
     }
 

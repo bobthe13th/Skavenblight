@@ -37,7 +37,13 @@ public class TerritoryRegionMap {
     private volatile RegionIndex regionIndex = new RegionIndex(List.of());
     private volatile RegionGraph regionGraph = null;
     private volatile RegionRouteTree routeTree = null;
-    private final Map<Integer, FlowFieldState> regionStates = new HashMap<>();
+    private volatile Map<Integer, FlowFieldState> regionStates = Map.of();
+    // Per-region query facades handed out to goal-facing code (see getRegionFlowFieldFor). Kept
+    // stable (same instance per regionId) across the "cheap path" in recomputeDirtyRegions - only
+    // rebuilt here, alongside regionStates, when a full rebuild produces brand-new FlowFieldState
+    // objects - so a RegionFlowField's claim table (scoped per-region, see Task 9's design note)
+    // stays meaningful across multiple goal lookups instead of resetting on every call.
+    private volatile Map<Integer, RegionFlowField> regionFlowFields = Map.of();
 
     private final AtomicBoolean isCalculatingAsync = new AtomicBoolean(false);
     private long lastCalculationStart = 0;
@@ -132,11 +138,31 @@ public class TerritoryRegionMap {
             newStates.put(region.getId(), state);
         }
 
+        Map<Integer, RegionFlowField> newFlowFields = new HashMap<>();
+        for (Map.Entry<Integer, FlowFieldState> entry : newStates.entrySet()) {
+            newFlowFields.put(entry.getKey(),
+                    new RegionFlowField(this, entry.getKey(), entry.getValue(), projectManager, calculator, throttler));
+        }
+
         this.regionIndex = newIndex;
         this.regionGraph = newGraph;
         this.routeTree = newRouteTree;
-        this.regionStates.clear();
-        this.regionStates.putAll(newStates);
+        this.regionStates = Map.copyOf(newStates);
+        this.regionFlowFields = Map.copyOf(newFlowFields);
+    }
+
+    /**
+     * Per-region query facade for the region containing {@code pos}, or null if {@code pos}
+     * isn't inside any known region (wilderness/unmapped) or that region has no local field yet
+     * (unreachable from the route tree - see rebuildRegionsAndGraph). Returns the SAME
+     * RegionFlowField instance across repeated calls for the same region (until the next full
+     * rebuild), so its claim table is actually shared by every mob currently assigned to that
+     * region rather than reset per lookup.
+     */
+    public RegionFlowField getRegionFlowFieldFor(BlockPos pos) {
+        Integer regionId = regionIndex.regionIdAt(pos);
+        if (regionId == null) return null;
+        return regionFlowFields.get(regionId);
     }
 
     public boolean isCalculating() {

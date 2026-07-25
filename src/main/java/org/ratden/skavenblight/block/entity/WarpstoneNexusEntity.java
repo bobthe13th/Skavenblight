@@ -7,7 +7,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.Config;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
 import org.ratden.skavenblight.capability.custom.WarpFluxStorage;
 
 public class WarpstoneNexusEntity extends BlockEntity {
@@ -15,11 +14,6 @@ public class WarpstoneNexusEntity extends BlockEntity {
     private int nexusTier;
     private int stability;
     private final WarpFluxStorage fluxStorage;
-
-    // =================================================================
-    // THE FIX: We actually have to declare the variable here!
-    // =================================================================
-    private StandardFlowField flowField;
 
     public WarpstoneNexusEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.WARPSTONE_NEXUS.get(), pos, blockState);
@@ -174,14 +168,4 @@ public class WarpstoneNexusEntity extends BlockEntity {
         setChanged();
     }
 
-    // =================================================================
-    // NEW METHODS: To interact with the newly declared FlowField
-    // =================================================================
-    public StandardFlowField getFlowField() {
-        return this.flowField;
-    }
-
-    public void setFlowField(StandardFlowField field) {
-        this.flowField = field;
-    }
 }

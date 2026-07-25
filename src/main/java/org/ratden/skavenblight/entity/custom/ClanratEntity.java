@@ -22,7 +22,9 @@ import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationController;
 import software.bernie.geckolib.animation.RawAnimation;
 import software.bernie.geckolib.util.GeckoLibUtil;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.Region;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
@@ -31,12 +33,12 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.player.Player;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.network.WarpFluxNetwork;
-import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
-    private StandardFlowField currentFlowField = null;
+    private RegionFlowField currentFlowField = null;
+    private int currentRegionId = -1;
     private int territoryCheckCooldown = 0;
 
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
@@ -77,51 +79,54 @@ public class ClanratEntity extends Monster implements GeoEntity {
     protected void customServerAiStep() {
         super.customServerAiStep();
 
-        if (this.currentFlowField == null && --this.territoryCheckCooldown <= 0) {
-            this.territoryCheckCooldown = 40;
+        if (--this.territoryCheckCooldown > 0) return;
+        this.territoryCheckCooldown = 40;
 
-            if (this.level() instanceof ServerLevel serverLevel) {
-                WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
-                ChunkPos currentChunk = this.chunkPosition();
+        if (!(this.level() instanceof ServerLevel serverLevel)) return;
 
-                WarpFluxNetwork closestNetwork = null;
-                double closestDist = Double.MAX_VALUE;
+        WarpFluxGridManager gridManager = WarpFluxGridManager.get(serverLevel);
+        ChunkPos currentChunk = this.chunkPosition();
 
-                for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
-                    if (network.getTerritoryChunks().contains(currentChunk)) {
-                        closestNetwork = network;
-                        break;
-                    }
+        WarpFluxNetwork closestNetwork = null;
+        double closestDist = Double.MAX_VALUE;
 
-                    for (BlockPos endpoint : network.getEndpoints()) {
-                        double dist = this.blockPosition().distSqr(endpoint);
-                        if (dist < closestDist) {
-                            closestDist = dist;
-                            closestNetwork = network;
-                        }
-                    }
-                }
-
-                if (closestNetwork != null) {
-                    BlockPos activeNexus = null;
-
-                    for (BlockPos endpoint : closestNetwork.getEndpoints()) {
-                        if (serverLevel.getBlockEntity(endpoint) instanceof WarpstoneNexusEntity) {
-                            activeNexus = endpoint;
-                            break;
-                        }
-                    }
-
-                    if (activeNexus != null) {
-                        StandardFlowField sharedField = closestNetwork.getSharedFlowField(serverLevel, activeNexus);
-                        this.assignFlowField(sharedField);
-                    }
+        for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+            if (network.getTerritoryChunks().contains(currentChunk)) {
+                closestNetwork = network;
+                break;
+            }
+            for (BlockPos endpoint : network.getEndpoints()) {
+                double dist = this.blockPosition().distSqr(endpoint);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestNetwork = network;
                 }
             }
         }
+
+        if (closestNetwork == null) return;
+
+        RegionIndex regionIndex = closestNetwork.getRegionMap().getRegionIndex();
+        Region region = regionIndex.regionAt(this.blockPosition());
+
+        if (region == null) {
+            // True wilderness or stranded - handled by FollowFlowFieldGoal's/StrandedGoal's own
+            // null-flowField fallback paths (see Task 10). Clear any stale assignment.
+            if (this.currentRegionId != -1) {
+                this.assignFlowField(null);
+                this.currentRegionId = -1;
+            }
+            return;
+        }
+
+        if (region.getId() == this.currentRegionId) return; // still in the same region, no re-fetch needed
+
+        RegionFlowField field = closestNetwork.getRegionMap().getRegionFlowFieldFor(this.blockPosition());
+        this.currentRegionId = region.getId();
+        this.assignFlowField(field);
     }
 
-    public void assignFlowField(StandardFlowField field) {
+    public void assignFlowField(RegionFlowField field) {
         this.currentFlowField = field;
         this.goalSelector.getAvailableGoals().forEach(wrappedGoal -> {
             if (wrappedGoal.getGoal() instanceof SiegeGoal siegeGoal) {
