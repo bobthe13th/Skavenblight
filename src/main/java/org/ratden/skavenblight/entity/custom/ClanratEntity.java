@@ -41,6 +41,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
     private RegionFlowField currentFlowField = null;
     private int currentRegionId = -1;
+    // TerritoryRegionMap.getGeneration() as of the last successful field fetch - paired with
+    // currentRegionId because region ids are renumbered on every rebuild (see below).
+    private long lastKnownGeneration = -1;
     private int territoryCheckCooldown = 0;
     private BlockPos strandedHeading = null;
 
@@ -142,11 +145,20 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         this.strandedHeading = null;
 
-        if (region.getId() == this.currentRegionId) return; // still in the same region, no re-fetch needed
+        // Still in the same region AND that region id still means the same thing - no re-fetch
+        // needed. The generation check is not optional: RegionScanner renumbers region ids from 0
+        // on every rebuild (over an unordered chunk set), so "region 3" before a rebuild is not
+        // "region 3" after one. Comparing the raw int alone let this short-circuit skip the
+        // re-fetch straight through a rebuild, leaving the mob holding a RegionFlowField that
+        // wraps a FlowFieldState the TerritoryRegionMap has since dropped and will never
+        // recompute again.
+        long mapGeneration = closestNetwork.getRegionMap().getGeneration();
+        if (region.getId() == this.currentRegionId && mapGeneration == this.lastKnownGeneration) return;
 
         RegionFlowField field = closestNetwork.getRegionMap().getRegionFlowFieldFor(this.blockPosition());
         if (field != null) {
             this.currentRegionId = region.getId();
+            this.lastKnownGeneration = mapGeneration;
         }
         this.assignFlowField(field);
     }

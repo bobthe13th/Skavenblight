@@ -38,11 +38,17 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
             crowdedAhead = nextNode != null && this.flowField.isLaneCrowded(nextNode.pos());
         }
 
+        // Proactive case: the rat is standing ON an active path node, so currentPos IS part of the
+        // lane - the reactive logic below (which always targets currentPos) would "widen" the path
+        // by building a stair in the middle of it, which widens nothing. Hand off to a variant
+        // that proposes an adjacent, off-path cell instead.
+        if (onPath && crowdedAhead) {
+            return findParallelLaneTarget(currentPos);
+        }
+
         // Reactive trigger (original behavior): must NOT be on an active Flow Field path node
-        // (means we fell or got pushed off). Skip this precondition when the proactive trigger
-        // above already fired - a rat still on-path can usefully notice its upcoming lane is
-        // jammed and start widening it now instead of waiting to fall off first.
-        if (onPath && !crowdedAhead) {
+        // (means we fell or got pushed off).
+        if (onPath) {
             return Optional.empty();
         }
 
@@ -76,6 +82,51 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
         }
 
         return Optional.empty();
+    }
+
+    /**
+     * Proactive (crowded-lane) target selection. The rat is still on the path, so the cell to build
+     * in is an ADJACENT one - the parallel lane beside the jammed one - never currentPos itself.
+     * Candidates must be off-path (a cell that's already a path node is the same lane, not a
+     * parallel one) and must satisfy the same physical checks the reactive branch applies to
+     * currentPos: replaceable, solid support beneath, two blocks of headroom above.
+     */
+    private Optional<Target> findParallelLaneTarget(BlockPos currentPos) {
+        Direction laneFacing = findLaneFacing(currentPos);
+        if (laneFacing == null) return Optional.empty();
+
+        for (int[] offset : HORIZONTAL_OFFSETS) {
+            BlockPos candidate = currentPos.offset(offset[0], 0, offset[1]);
+
+            if (this.flowField.getInstructionMap().containsKey(candidate)) continue;
+            if (!canHostStair(candidate)) continue;
+            if (this.flowField.isTargetClaimed(candidate)) continue;
+
+            return Optional.of(new Target(candidate, SiegeNode.SiegeAction.BUILD_STAIR, laneFacing));
+        }
+        return Optional.empty();
+    }
+
+    /** Facing of the lane the rat is currently on, so the new lane runs alongside it instead of crossing it. */
+    private Direction findLaneFacing(BlockPos currentPos) {
+        BlockState self = this.mob.level().getBlockState(currentPos);
+        if (self.is(Blocks.COBBLESTONE_STAIRS)) return self.getValue(StairBlock.FACING);
+
+        BlockState below = this.mob.level().getBlockState(currentPos.below());
+        if (below.is(Blocks.COBBLESTONE_STAIRS)) return below.getValue(StairBlock.FACING);
+
+        for (int[] offset : HORIZONTAL_OFFSETS) {
+            BlockState adjacent = this.mob.level().getBlockState(currentPos.offset(offset[0], 0, offset[1]));
+            if (adjacent.is(Blocks.COBBLESTONE_STAIRS)) return adjacent.getValue(StairBlock.FACING);
+        }
+        return null;
+    }
+
+    private boolean canHostStair(BlockPos pos) {
+        return this.mob.level().getBlockState(pos).canBeReplaced()
+                && this.mob.level().getBlockState(pos.below()).blocksMotion()
+                && !this.mob.level().getBlockState(pos.above()).blocksMotion()
+                && !this.mob.level().getBlockState(pos.above(2)).blocksMotion();
     }
 
     @Override

@@ -159,7 +159,8 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
                         serverLevel.setBlockAndUpdate(placePos, Blocks.LADDER.defaultBlockState()
                                 .setValue(LadderBlock.FACING, this.wallFacing));
                         serverLevel.levelEvent(2001, placePos, Block.getId(Blocks.LADDER.defaultBlockState()));
-                        SiegeActivityLog.record(serverLevel.getGameTime(), this.mob, placePos, SiegeNode.SiegeAction.BUILD_LADDER, "ladder placed");
+                        SiegeActivityLog.record(serverLevel.getGameTime(), this.mob, placePos, SiegeNode.SiegeAction.BUILD_LADDER,
+                                "ladder placed", this.flowField != null ? this.flowField.getRegionId() : null);
 
                         BlockPos targetTunnel = placePos.above().relative(this.wallFacing.getOpposite());
                         if (serverLevel.getBlockState(targetTunnel).canBeReplaced()) {

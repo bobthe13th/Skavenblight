@@ -141,7 +141,7 @@ public class SiegeInteractionHandler {
                         }
                     }
                 }
-                SiegeActivityLog.record(level.getGameTime(), actor, pos, action, "landing platform + headroom cleared");
+                SiegeActivityLog.record(level.getGameTime(), actor, pos, action, "landing platform + headroom cleared", regionIdOf(flowField));
                 // Return early so cobblestone isn't placed inside the target node standing area
                 return;
             }
@@ -157,7 +157,12 @@ public class SiegeInteractionHandler {
 
         level.setBlockAndUpdate(pos, stateToPlace);
         level.levelEvent(2001, pos, Block.getId(stateToPlace));
-        SiegeActivityLog.record(level.getGameTime(), actor, pos, action, stateToPlace.getBlock().getDescriptionId());
+        SiegeActivityLog.record(level.getGameTime(), actor, pos, action, stateToPlace.getBlock().getDescriptionId(), regionIdOf(flowField));
+    }
+
+    /** Region id to attribute a logged action to, or null when the actor has no field assigned. */
+    private static Integer regionIdOf(RegionFlowField flowField) {
+        return flowField != null ? flowField.getRegionId() : null;
     }
 
     public static boolean isSpaceClear(ServerLevel level, BlockPos pos, LivingEntity builder) {
@@ -216,6 +221,6 @@ public class SiegeInteractionHandler {
 
     public static void executeBreach(ServerLevel level, BlockPos pos, RegionFlowField flowField, LivingEntity actor) {
         level.destroyBlock(pos, true);
-        SiegeActivityLog.record(level.getGameTime(), actor, pos, SiegeNode.SiegeAction.MINE, "breached");
+        SiegeActivityLog.record(level.getGameTime(), actor, pos, SiegeNode.SiegeAction.MINE, "breached", regionIdOf(flowField));
     }
 }

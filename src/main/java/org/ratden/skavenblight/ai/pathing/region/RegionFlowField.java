@@ -28,6 +28,9 @@ public class RegionFlowField {
     private final SiegeProjectManager projectManager;
     private final FlowFieldCalculator calculator;
     private final CalculationThrottler throttler;
+    // Stateless, but getNextSiegeNode runs per-mob per-tick on the hottest path in a system meant
+    // to carry hundreds of mobs - allocate it once here instead of once per call.
+    private final TerrainEvaluator terrainEvaluator = new TerrainEvaluator();
 
     private final Map<BlockPos, Mob> claimedTargets = new HashMap<>();
 
@@ -56,8 +59,7 @@ public class RegionFlowField {
         if (node == null) return null;
 
         LiveTerrainAccess live = new LiveTerrainAccess(level);
-        TerrainEvaluator evaluator = new TerrainEvaluator();
-        return evaluator.isActionCompleted(live, node)
+        return terrainEvaluator.isActionCompleted(live, node)
                 ? new SiegeNode(node.action() == SiegeNode.SiegeAction.MINE ? node.pos() : node.pos().above(), SiegeNode.SiegeAction.WALK)
                 : node;
     }
@@ -102,11 +104,19 @@ public class RegionFlowField {
         return occupants != null && occupants.size() >= MAX_LANE_OCCUPANTS;
     }
 
+    /**
+     * Asks the owning TerritoryRegionMap to recompute this region. Routed through
+     * {@link TerritoryRegionMap#onBlockChanged(BlockPos)} rather than kicking off a calculation
+     * directly, so it reuses the existing queue + dirty-region tracking (and with it the
+     * settle-delay/cooldown gating in {@code tick()}) instead of needing a throttle of its own.
+     *
+     * <p>This used to be an empty no-op, on the assumption that a construction goal finishing a
+     * build step already marked its own position dirty like any other block change. Nothing does:
+     * the only dirty-marking path is SiegeBlockEventHandler listening to NeoForge BlockEvents, and
+     * SiegeInteractionHandler's direct level.setBlock/destroyBlock calls don't fire those.
+     */
     public void forceRecalculation() {
-        // Region recalculation is driven by TerritoryRegionMap.tick's dirty-region tracking;
-        // a construction goal finishing a build step marks its own position dirty the same way
-        // an ordinary block change would, so the next tick's settle-delay/cooldown gating picks
-        // it up naturally.
+        owner.onBlockChanged(state.getTargetPos());
     }
 
     public boolean isCalculating() {
