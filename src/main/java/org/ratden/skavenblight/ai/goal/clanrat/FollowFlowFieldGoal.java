@@ -23,6 +23,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
     private int pathingUpdateTimer = 0;
     private Vec3 lastPosition = null;
     private int escapeHatchTicks = 0;
+    private BlockPos occupiedLane = null;
 
     public FollowFlowFieldGoal(PathfinderMob mob, double speedModifier) {
         this.mob = mob;
@@ -141,6 +142,20 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 nextInChain = next.pos();
             }
 
+            // Lane-occupancy tracking (see RegionFlowField.tryOccupyLane/isLaneCrowded): the
+            // mob occupies the tile it's actually about to walk toward, not any intermediate
+            // node inspected by the look-ahead loop above. Release the previously-held lane
+            // first if it's changing, then try to claim the new one - if it's already
+            // saturated, tryOccupyLane just returns false with no side effects and
+            // occupiedLane stays null until a future tick's retry succeeds.
+            if (this.occupiedLane != null && !this.occupiedLane.equals(nextInChain)) {
+                this.flowField.releaseLane(this.occupiedLane, this.mob);
+                this.occupiedLane = null;
+            }
+            if (this.flowField.tryOccupyLane(nextInChain, this.mob)) {
+                this.occupiedLane = nextInChain;
+            }
+
             this.mob.getNavigation().moveTo(
                     nextInChain.getX() + 0.5D,
                     nextInChain.getY(),
@@ -148,6 +163,14 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                     this.speedModifier
             );
         }
+    }
+
+    @Override
+    public void stop() {
+        if (this.occupiedLane != null && this.flowField != null) {
+            this.flowField.releaseLane(this.occupiedLane, this.mob);
+        }
+        this.occupiedLane = null;
     }
 
     private BlockPos findEscapePos(BlockPos startPos) {
