@@ -161,14 +161,13 @@ public class SiegeProjectManager {
                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
 
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos));
+                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos),
+                pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE));
 
         if (!result.completed() || result.instructions().isEmpty()) return;
 
         BlockPos endPos = result.endPos();
         int totalCost = result.totalCost();
-
-        if (totalCost >= nextCostMap.getOrDefault(endPos, Integer.MAX_VALUE)) return;
 
         LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Cost: {})",
                 anchorPos.toShortString(), endPos.toShortString(), totalCost);

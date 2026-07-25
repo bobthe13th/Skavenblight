@@ -6,6 +6,7 @@ import org.ratden.skavenblight.Config;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 /**
  * Pure line-tracing core shared by SiegeProjectManager's reactive obstacle-bridging
@@ -37,9 +38,14 @@ public class SiegeLineTracer {
      * @param costBiasTarget passed straight through to determineMacroAction's cost-bias logic (the
      *                        flow field's target position - unrelated to this trace's own endpoint).
      * @param outOfBounds     true if a position is outside whatever bounds this caller is tracing within.
+     * @param costCeiling     per-step early-abort ceiling, mirroring nextCostMap's role in the flood fill:
+     *                        the trace aborts as soon as its running cost at a step is no better than
+     *                        whatever the caller already knows about that position, so a completed trace
+     *                        can never overwrite an already-cheaper position with a worse instruction.
      */
     public TraceResult trace(TerrainAccess terrain, BlockPos anchorPos, int dx, int dy, int dz,
-                              BlockPos costBiasTarget, int startingCost, Predicate<BlockPos> outOfBounds) {
+                              BlockPos costBiasTarget, int startingCost, Predicate<BlockPos> outOfBounds,
+                              ToIntFunction<BlockPos> costCeiling) {
         int projectCost = Config.buildingBasePenalty * COST_MULTIPLIER;
         int mineChainLength = 0;
         BlockPos currentTarget = anchorPos;
@@ -68,6 +74,10 @@ public class SiegeLineTracer {
             projectCost += terrainEvaluator.calculateActionCostForAction(terrain, nextPos, action);
             int evaluatedProjectCost = (dy != 0) ? (int) ((projectCost * 2) * 0.75f) : (projectCost * 2);
             int totalCost = startingCost + evaluatedProjectCost;
+
+            if (totalCost >= costCeiling.applyAsInt(nextPos)) {
+                return TraceResult.aborted();
+            }
 
             instructions.put(nextPos, new SiegeNode(currentTarget, action));
 
