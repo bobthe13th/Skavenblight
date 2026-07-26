@@ -90,21 +90,30 @@ public class DebugFlowFieldReaderItem extends Item {
                 ChunkPos nexusChunk = new ChunkPos(nexusPos);
 
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
-                    if (network.getTerritoryChunks().contains(nexusChunk)) {
-                        activeRegionMap = network.getRegionMap();
+                    // Skip a network with no live nexus - its region map never bootstraps.
+                    if (!network.isValid(serverLevel)) continue;
+                    if (!network.getTerritoryChunks().contains(nexusChunk)) continue;
 
-                        // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS
-                        // in ModBlocks), so it's never a member of any region and a direct
-                        // getRegionFlowFieldFor(nexusPos) lookup always misses - check its orthogonal
-                        // neighbors too, same fix as TerritoryRegionMap's own root-region resolution.
-                        for (BlockPos candidate : new BlockPos[]{
-                                nexusPos, nexusPos.above(), nexusPos.below(),
-                                nexusPos.north(), nexusPos.south(), nexusPos.east(), nexusPos.west()}) {
-                            activeField = activeRegionMap.getRegionFlowFieldFor(candidate);
-                            if (activeField != null) break;
-                        }
-                        break;
+                    activeRegionMap = network.getRegionMap();
+
+                    // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS
+                    // in ModBlocks), so it's never a member of any region and a direct
+                    // getRegionFlowFieldFor(nexusPos) lookup always misses - check its orthogonal
+                    // neighbors too, same fix as TerritoryRegionMap's own root-region resolution.
+                    for (BlockPos candidate : new BlockPos[]{
+                            nexusPos, nexusPos.above(), nexusPos.below(),
+                            nexusPos.north(), nexusPos.south(), nexusPos.east(), nexusPos.west()}) {
+                        activeField = activeRegionMap.getRegionFlowFieldFor(candidate);
+                        if (activeField != null) break;
                     }
+
+                    if (activeField != null) break;
+
+                    // This network's territory geometrically contains the nexus's chunk, but
+                    // yielded no field (region map still bootstrapping, or - since territory
+                    // bubbles are flat 2D chunk radii - a different network's territory overlaps
+                    // this exact spot at another height). Keep checking other networks.
+                    activeRegionMap = null;
                 }
 
                 // 4. Export the data - PathingDebugFileWriter handles empty/calculating/ready
@@ -159,6 +168,10 @@ public class DebugFlowFieldReaderItem extends Item {
                 DebugMode currentMode = DebugMode.values()[currentModeIndex % DebugMode.values().length];
 
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+                    // Skip a network with no live nexus - its region map never bootstraps (see
+                    // WarpFluxNetwork.tick), so it can never yield a real field here.
+                    if (!network.isValid(serverLevel)) continue;
+
                     if (network.getTerritoryChunks().contains(serverPlayer.chunkPosition())) {
 
                         // Position-based lookup against the player's current region - replaces
@@ -184,9 +197,13 @@ public class DebugFlowFieldReaderItem extends Item {
                         }
 
                         if (sharedField == null) {
-                            // Player standing outside every scanned region (or nothing built yet
-                            // for this network) - nothing to visualize here this tick.
-                            return;
+                            // This network's territory geometrically contains the player's
+                            // current chunk, but it has no usable field here - its region map may
+                            // still be bootstrapping, or (since territory bubbles are flat 2D
+                            // chunk radii with no Y-awareness) a DIFFERENT network's territory
+                            // happens to overlap this exact spot at another height. Keep checking
+                            // other networks rather than giving up on the first geometric match.
+                            continue;
                         }
 
                         Map<BlockPos, SiegeNode> localNodes = new HashMap<>();

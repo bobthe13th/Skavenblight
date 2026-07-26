@@ -86,6 +86,11 @@ public class DebugPathingCommands {
                             net.minecraft.world.level.ChunkPos currentChunk = new net.minecraft.world.level.ChunkPos(pos);
 
                             for (org.ratden.skavenblight.network.WarpFluxNetwork candidate : gridManager.getAllNetworks()) {
+                                // Skip a network with no live nexus - it never bootstraps a real
+                                // region map, and (since territory bubbles are flat 2D chunk radii
+                                // with no Y-awareness) a stale/dead network's leftover territory
+                                // can otherwise "win" this lookup by chunk collision alone.
+                                if (!candidate.isValid(level)) continue;
                                 if (candidate.getTerritoryChunks().contains(currentChunk)) {
                                     network = candidate;
                                     break;
@@ -168,6 +173,11 @@ public class DebugPathingCommands {
                             net.minecraft.world.level.ChunkPos currentChunk = new net.minecraft.world.level.ChunkPos(pos);
 
                             for (org.ratden.skavenblight.network.WarpFluxNetwork candidate : gridManager.getAllNetworks()) {
+                                // Skip a network with no live nexus - it never bootstraps a real
+                                // region map, and (since territory bubbles are flat 2D chunk radii
+                                // with no Y-awareness) a stale/dead network's leftover territory
+                                // can otherwise "win" this lookup by chunk collision alone.
+                                if (!candidate.isValid(level)) continue;
                                 if (candidate.getTerritoryChunks().contains(currentChunk)) {
                                     network = candidate;
                                     break;
