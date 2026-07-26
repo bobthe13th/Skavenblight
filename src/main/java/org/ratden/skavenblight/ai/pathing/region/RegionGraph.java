@@ -23,6 +23,7 @@ public class RegionGraph {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int[][] CARDINAL_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    private static final int MAX_CHAIN_HOPS = 12; // 12 * MAX_PROJECT_LENGTH(32) = 384 blocks, comfortably more than Minecraft's full build-height range
 
     private final RegionIndex regionIndex;
     private final Map<Integer, List<RegionConnector>> connectorsByRegion = new HashMap<>();
@@ -39,55 +40,84 @@ public class RegionGraph {
 
         // regionId pair -> cheapest connector found so far for that pair
         Map<Long, RegionConnector> bestPerPair = new HashMap<>();
+        // regionId pair -> hop count the winning connector in bestPerPair took to discover
+        Map<Long, Integer> hopsPerPair = new HashMap<>();
 
         for (Region region : regionIndex.getRegions()) {
             for (BlockPos boundaryCell : region.getBoundaryCells()) {
                 for (int dy : new int[]{-1, 1}) {
-                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, bestPerPair);
+                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, bestPerPair, hopsPerPair);
                 }
                 for (int[] dir : CARDINAL_OFFSETS) {
                     for (int dy : new int[]{-1, 0, 1}) {
-                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], bestPerPair);
+                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], bestPerPair, hopsPerPair);
                     }
                 }
             }
         }
 
-        for (RegionConnector connector : bestPerPair.values()) {
+        int chainedCount = 0;
+        int maxHops = 0;
+        for (Map.Entry<Long, RegionConnector> entry : bestPerPair.entrySet()) {
+            RegionConnector connector = entry.getValue();
             graph.allConnectors.add(connector);
             graph.connectorsByRegion.computeIfAbsent(connector.regionA(), k -> new ArrayList<>()).add(connector);
             graph.connectorsByRegion.computeIfAbsent(connector.regionB(), k -> new ArrayList<>()).add(connector);
+
+            int hops = hopsPerPair.getOrDefault(entry.getKey(), 1);
+            if (hops > 1) chainedCount++;
+            maxHops = Math.max(maxHops, hops);
         }
 
-        LOGGER.info("[Skavenblight] RegionGraph built: {} regions, {} connectors", regionIndex.getRegions().size(), graph.allConnectors.size());
+        LOGGER.info("[Skavenblight] RegionGraph built: {} regions, {} connectors ({} chained, max {} hops)",
+                regionIndex.getRegions().size(), graph.allConnectors.size(), chainedCount, maxHops);
         return graph;
     }
 
     private static void tryTrace(TerrainSnapshot snapshot, TerrainEvaluator evaluator, SiegeLineTracer lineTracer,
                                   RegionIndex regionIndex, FlowFieldState boundsState, Region fromRegion,
-                                  BlockPos anchor, int dx, int dy, int dz, Map<Long, RegionConnector> bestPerPair) {
+                                  BlockPos boundaryCell, int dx, int dy, int dz,
+                                  Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair) {
 
-        SiegeLineTracer.TraceResult result = lineTracer.trace(snapshot, anchor, dx, dy, dz, anchor, 0,
-                pos -> evaluator.isOutOfBounds(snapshot, pos, boundsState), pos -> Integer.MAX_VALUE);
+        List<SiegeNode> combinedOrderedSteps = new ArrayList<>();
+        BlockPos currentAnchor = boundaryCell;
+        int cost = 0;
 
-        if (!result.completed() || result.instructions().isEmpty()) return;
+        for (int hop = 1; hop <= MAX_CHAIN_HOPS; hop++) {
+            SiegeLineTracer.TraceResult result = lineTracer.trace(snapshot, currentAnchor, dx, dy, dz, currentAnchor, cost,
+                    pos -> evaluator.isOutOfBounds(snapshot, pos, boundsState), pos -> Integer.MAX_VALUE);
 
-        Region toRegion = regionIndex.regionAt(result.endPos());
-        if (toRegion == null || toRegion.getId() == fromRegion.getId()) return;
+            if (!result.completed()) return; // genuine abort (out of bounds, invalid action, cost ceiling) - give up entirely
+
+            combinedOrderedSteps.addAll(result.orderedSteps());
+            cost = result.totalCost();
+
+            Region toRegion = regionIndex.regionAt(result.endPos());
+            if (toRegion != null && toRegion.getId() != fromRegion.getId()) {
+                registerConnector(fromRegion, toRegion, boundaryCell, result.endPos(), cost, combinedOrderedSteps, hop, bestPerPair, hopsPerPair);
+                return;
+            }
+
+            // Landed in mid-air (or, degenerately, back inside the same region) - keep extending.
+            currentAnchor = result.endPos();
+        }
+        // Hop cap exhausted without reaching a new region - no connector for this direction.
+    }
+
+    private static void registerConnector(Region fromRegion, Region toRegion, BlockPos boundaryCell, BlockPos endPos, int cost,
+                                           List<SiegeNode> orderedSteps, int hops,
+                                           Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair) {
+        if (orderedSteps.isEmpty()) return;
 
         long pairKey = pairKey(fromRegion.getId(), toRegion.getId());
         RegionConnector existing = bestPerPair.get(pairKey);
-        if (existing != null && existing.cost() <= result.totalCost()) return;
+        if (existing != null && existing.cost() <= cost) return;
 
-        // Two orientations of the one traced line - see RegionConnector's doc. The entry position
-        // differs per orientation because it names the block where mobs ENTER the project: crossing
-        // toward the anchor's region they enter at the far end (endPos), crossing away from it they
-        // enter at the anchor itself.
-        SiegeProject towardA = new SiegeProject(inboundInstructions(anchor, result.orderedSteps()), result.endPos(), result.totalCost());
-        SiegeProject towardB = new SiegeProject(outboundInstructions(anchor, result.orderedSteps()), anchor, result.totalCost());
-        RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), anchor, result.endPos(),
-                result.totalCost(), towardA, towardB);
+        SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), endPos, cost);
+        SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), boundaryCell, cost);
+        RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), boundaryCell, endPos, cost, towardA, towardB);
         bestPerPair.put(pairKey, connector);
+        hopsPerPair.put(pairKey, hops);
     }
 
     /**
