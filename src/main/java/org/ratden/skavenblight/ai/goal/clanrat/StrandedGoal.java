@@ -72,8 +72,9 @@ public class StrandedGoal extends Goal {
 
         BlockPos current = this.mob.blockPosition();
         int dx = Integer.compare(heading.getX(), current.getX());
+        int dy = Integer.compare(heading.getY(), current.getY());
         int dz = Integer.compare(heading.getZ(), current.getZ());
-        if (dx == 0 && dz == 0) return;
+        if (dx == 0 && dy == 0 && dz == 0) return;
 
         LiveTerrainAccess live = new LiveTerrainAccess(serverLevel);
         // Bounds check is deliberately loaded/build-height only, not
@@ -81,7 +82,7 @@ public class StrandedGoal extends Goal {
         // FlowFieldState.isOutOfBounds(pos) and would NPE with no FlowFieldState behind a
         // live, unbounded breach attempt. Cost ceiling is unbounded (this is a one-off local
         // attempt, not a flood fill comparing against an existing cheaper-cost map).
-        SiegeLineTracer.TraceResult result = lineTracer.trace(live, current, dx, 0, dz, heading, 0,
+        SiegeLineTracer.TraceResult result = lineTracer.trace(live, current, dx, dy, dz, heading, 0,
                 pos -> live.isOutsideBuildHeight(pos) || !live.isLoaded(pos),
                 pos -> Integer.MAX_VALUE);
 
