@@ -102,6 +102,11 @@ public class ClanratEntity extends Monster implements GeoEntity {
         double closestDist = Double.MAX_VALUE;
 
         for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
+            // A network with no nexus never bootstraps a region map (see WarpFluxNetwork.tick),
+            // so picking one here would just strand this rat with no field forever, even if a
+            // real network exists further away - skip it and keep looking.
+            if (!network.isValid(serverLevel)) continue;
+
             if (network.getTerritoryChunks().contains(currentChunk)) {
                 closestNetwork = network;
                 break;

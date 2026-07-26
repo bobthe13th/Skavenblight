@@ -41,8 +41,25 @@ public class WarpFluxNetwork {
     public void addConduit(BlockPos pos) { this.conduits.add(pos); }
     public void addEndpoint(BlockPos pos) { this.endpoints.add(pos); }
 
+    /**
+     * True if this network has at least one endpoint whose block entity is a
+     * {@code WarpstoneNexusEntity}. A network with no nexus at all (e.g. a battery + consumer
+     * left over after conduits were rearranged) has nothing for the siege/pathing system to
+     * target - see {@link #tick}, which uses this to stay fully dormant until a nexus is added.
+     */
+    public boolean isValid(ServerLevel level) {
+        for (BlockPos pos : endpoints) {
+            if (level.getBlockEntity(pos) instanceof WarpstoneNexusEntity) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void tick(ServerLevel level) {
-        if (endpoints.isEmpty()) return;
+        // No nexus endpoint - no power transfer, no region-map bootstrap or tick. Stay dormant
+        // (cheap: just this one endpoint scan) until a nexus is added to this network.
+        if (!isValid(level)) return;
 
         List<EndpointData> generators = new ArrayList<>();
         List<EndpointData> batteries = new ArrayList<>();
