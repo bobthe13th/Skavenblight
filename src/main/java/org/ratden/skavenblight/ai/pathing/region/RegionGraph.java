@@ -24,6 +24,7 @@ public class RegionGraph {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int[][] CARDINAL_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     private static final int MAX_CHAIN_HOPS = 12; // 12 * MAX_PROJECT_LENGTH(32) = 384 blocks, comfortably more than Minecraft's full build-height range
+    private static final int VERTICAL_CHAIN_SLACK = 32; // one hop's worth of margin past the known region Y-range, so a landing exactly at a region's edge isn't cut off early
 
     private final RegionIndex regionIndex;
     private final Map<Integer, List<RegionConnector>> connectorsByRegion = new HashMap<>();
@@ -43,14 +44,17 @@ public class RegionGraph {
         // regionId pair -> hop count the winning connector in bestPerPair took to discover
         Map<Long, Integer> hopsPerPair = new HashMap<>();
 
+        int minKnownY = regionIndex.getRegions().stream().mapToInt(r -> r.getMin().getY()).min().orElse(Integer.MIN_VALUE);
+        int maxKnownY = regionIndex.getRegions().stream().mapToInt(r -> r.getMax().getY()).max().orElse(Integer.MAX_VALUE);
+
         for (Region region : regionIndex.getRegions()) {
             for (BlockPos boundaryCell : region.getBoundaryCells()) {
                 for (int dy : new int[]{-1, 1}) {
-                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, bestPerPair, hopsPerPair);
+                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, minKnownY, maxKnownY, bestPerPair, hopsPerPair);
                 }
                 for (int[] dir : CARDINAL_OFFSETS) {
                     for (int dy : new int[]{-1, 0, 1}) {
-                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], bestPerPair, hopsPerPair);
+                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], minKnownY, maxKnownY, bestPerPair, hopsPerPair);
                     }
                 }
             }
@@ -76,7 +80,7 @@ public class RegionGraph {
 
     private static void tryTrace(TerrainSnapshot snapshot, TerrainEvaluator evaluator, SiegeLineTracer lineTracer,
                                   RegionIndex regionIndex, FlowFieldState boundsState, Region fromRegion,
-                                  BlockPos boundaryCell, int dx, int dy, int dz,
+                                  BlockPos boundaryCell, int dx, int dy, int dz, int minKnownY, int maxKnownY,
                                   Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair) {
 
         List<SiegeNode> combinedOrderedSteps = new ArrayList<>();
@@ -97,6 +101,10 @@ public class RegionGraph {
                 registerConnector(fromRegion, toRegion, boundaryCell, result.endPos(), cost, combinedOrderedSteps, hop, bestPerPair, hopsPerPair);
                 return;
             }
+
+            if (snapshot.getBlockState(result.endPos()).blocksMotion()) return; // tracer's synthetic landing can't be honored inside solid rock
+            if (dy > 0 && result.endPos().getY() > maxKnownY + VERTICAL_CHAIN_SLACK) return;
+            if (dy < 0 && result.endPos().getY() < minKnownY - VERTICAL_CHAIN_SLACK) return;
 
             // Landed in mid-air (or, degenerately, back inside the same region) - keep extending.
             currentAnchor = result.endPos();
