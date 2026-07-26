@@ -20,7 +20,6 @@ import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.debug.PathingDebugFileWriter;
-import org.ratden.skavenblight.debug.TopologyExporter;
 import org.ratden.skavenblight.debug.mode.server.DetailedServerMode;
 import org.ratden.skavenblight.debug.mode.server.IServerDebugMode;
 import org.ratden.skavenblight.debug.mode.server.MacroServerMode;

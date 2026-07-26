@@ -165,6 +165,8 @@ public class ClientRenderHandler {
             case BUILD_LANDING -> { r = 255; g = 215; b = 0; }
             case BUILD_PILLAR -> { r = 255; g = 140; b = 0; }
             case LEAP -> { r = 255; g = 255; b = 0; }
+            case BUILD_LADDER -> { r = 138; g = 43; b = 226; }
+            case BUILD_SPIRAL -> { r = 0; g = 250; b = 154; }
             case WALK -> {
                 int traffic = ClientDebugData.trafficMap.getOrDefault(pos, 1);
                 float ratio = (float) (Math.log(traffic) / Math.log(Math.max(2, ClientDebugData.maxTraffic)));
@@ -303,6 +305,8 @@ public class ClientRenderHandler {
             case BUILD_LANDING -> { r = 255; g = 215; b = 0; }
             case BUILD_PILLAR -> { r = 255; g = 69; b = 0; }
             case LEAP -> { r = 124; g = 252; b = 0; }
+            case BUILD_LADDER -> { r = 138; g = 43; b = 226; }
+            case BUILD_SPIRAL -> { r = 0; g = 250; b = 154; }
         }
 
         float minX = (float) (pos.getX() - camPos.x());
