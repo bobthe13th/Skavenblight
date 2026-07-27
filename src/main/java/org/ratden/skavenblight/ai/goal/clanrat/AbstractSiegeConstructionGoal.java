@@ -85,8 +85,21 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     /** Extra per-tick bookkeeping a subclass needs regardless of animation phase (e.g. cooldown timers). */
     protected void onTick() {}
 
-    /** Called right after a successful execute(); override to react to finishing a chain of actions. */
-    protected void onChainComplete(ServerLevel level, BlockPos completedPos) {}
+    private long nextRecalculationTime = 0;
+
+    /**
+     * Default: mark the affected region dirty after every completed action, debounced the same
+     * way BuildFlowFieldGoal already debounces its own explicit call - without this, subclasses
+     * that don't override this hook (WidenStairsGoal, SmartBreachGoal) never tell the region
+     * system about their own construction (confirmed bug - see the "a mess lol" commit history's
+     * fix for BuildFlowFieldGoal, which never generalized to these siblings).
+     */
+    protected void onChainComplete(ServerLevel level, BlockPos completedPos) {
+        if (level.getGameTime() >= this.nextRecalculationTime && !this.flowField.isCalculating()) {
+            this.flowField.forceRecalculation(completedPos);
+            this.nextRecalculationTime = level.getGameTime() + 100;
+        }
+    }
 
     public record Target(BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {
         public Target(BlockPos pos, SiegeNode.SiegeAction action) {
