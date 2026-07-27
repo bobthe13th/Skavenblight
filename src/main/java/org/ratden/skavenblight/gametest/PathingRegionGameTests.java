@@ -51,6 +51,31 @@ import java.util.Set;
  * the floor there was already stone) nexus marker at helper y=1, which is why the test still reads
  * as targeting "one above the floor" in its own comments despite that being template y=0. Any
  * later test carving gaps/walls into the floor must add 1 to whatever Y it means in template terms.</li>
+ * <li><b>Territory wider than one chunk picks up GameTest's own encasement as bogus extra
+ * regions.</b> {@code skyAccess = true} (above) only suppresses the encasement's ROOF; its side
+ * walls and a floor beneath the whole structure+padding bounding box remain. Confirmed
+ * empirically while writing {@link #testTwoDisconnectedRegionsGetOneConnector}: a territory
+ * spanning multiple chunks (needed to see both sides of a >16-block-wide split) picked up (a) a
+ * walkable "basement" ledge one layer below the structure's own floor, spanning the padding
+ * around the structure, wherever that floor's overhead clearance is open - which is EVERYWHERE
+ * in the padding (nothing of ours blocks it there) and also under any gap WE carve into our own
+ * floor (removing the floor's solidity opens head clearance for the layer below it too), and (b)
+ * a one-cell-wide walkable ledge along the TOP of the encasement's side walls, one ring outside
+ * the structure's own footprint. Both are real, fully-connected Regions by the scanner's own
+ * rules - not a bug in the scanner, just terrain we didn't intend to test. Because GameTest
+ * doesn't chunk-align structure placement, a territory that spans the structure's full 0..31
+ * necessarily spills into this padding on at least one side. The fix used here: keep territory
+ * to exactly ONE chunk (as {@link #testSingleConnectedRegion} already did) so the encasement's
+ * padding is never in scope at all, and derive every other coordinate from THAT chunk's actual
+ * (run-dependent) alignment rather than the structure's own fixed 0..31 - see
+ * {@link #testTwoDisconnectedRegionsGetOneConnector}'s own comments for the alignment proof.</li>
+ * <li><b>A single-layer floor carve still leaves a walkable cell directly underneath it.</b>
+ * Removing only the floor block (helper y=1) opens head clearance for the layer below (helper
+ * y=0) too, and that layer has its own solid support courtesy of the same encasement floor
+ * mentioned above - so a "gap" carved only at helper y=1 registers as two disconnected pieces
+ * PLUS a third sliver Region exactly matching the gap's own footprint, one layer down. Carving
+ * the full vertical range down to {@code level.getMinBuildHeight()} (not just the floor layer)
+ * removes the support entirely and avoids this.</li>
  * </ul>
  */
 @GameTestHolder(Skavenblight.MODID)
@@ -80,6 +105,96 @@ public class PathingRegionGameTests {
             check(regions.get(0).cellCount() > 100,
                     "expected the single region to cover most of the open floor, found only "
                             + regions.get(0).cellCount() + " cells");
+        });
+    }
+
+    /**
+     * End-to-end validation of the headline region-graph requirement: a trench splits the floor
+     * into two disconnected regions, {@code RegionGraph} proposes exactly one connector across
+     * it, and {@code RegionRouteTree} marks the far side reachable via that connector.
+     *
+     * <p>The task-4 brief this test was transcribed from used helper-Y=0 for the trench carve,
+     * helper-Y=1 for the nexus marker, and {@code Set.of(new ChunkPos(nexusPos))} (a single
+     * chunk) as territory, with the trench/nexus/far-side placed at fixed structure-relative
+     * coordinates (x=14..17, nexus x=6, far side x>17). None of that survived contact with a real
+     * run - see the class javadoc's last two bullets for the two terrain artifacts this
+     * discovered (the encasement's padding-side regions, and the floor-only-carve underside
+     * sliver). The geometry actually used here fixes both by staying inside a single chunk (like
+     * {@link #testSingleConnectedRegion}) whose alignment is discovered at runtime rather than
+     * assumed:
+     *
+     * <ul>
+     * <li><b>Why anchor on relative (16, *, 16) to pick the chunk.</b> GameTest doesn't
+     * chunk-align structure placement (confirmed empirically - two different runs of this file
+     * produced two different nexus world positions with two different chunk-alignment offsets).
+     * For a 32-wide structure, let {@code r = structureOriginX mod 16}. The chunk containing
+     * world x = structureOriginX + 16 starts at relative x = 16 - r (r in [0,15], so this is in
+     * [1,16]) and ends at relative x = 31 - r (in [16,31]) - i.e. for ANY alignment, that chunk's
+     * 16-wide window is entirely contained in [1,31], never touching the structure's own edges,
+     * let alone the encasement padding beyond them. Same proof applies to z. This is also why
+     * {@link #testSingleConnectedRegion}'s nexus at relative (16,1,16) was never contaminated by
+     * the padding despite nobody having diagnosed why at the time.</li>
+     * <li><b>Everything else is placed relative to that chunk's OWN (run-dependent) window</b> -
+     * {@code baseX}/{@code baseZ} below - not against the structure's fixed 0..31, so the test's
+     * geometry always lands inside the one safe chunk regardless of where GameTest happens to
+     * place the structure this run.</li>
+     * <li><b>The trench is carved full-depth</b> (from {@code level.getMinBuildHeight()} up
+     * through the floor layer), not just at the floor layer, per the class javadoc's underside-
+     * sliver note.</li>
+     * </ul>
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
+    public static void testTwoDisconnectedRegionsGetOneConnector(GameTestHelper helper) {
+        BlockPos structureOrigin = helper.absolutePos(BlockPos.ZERO);
+        ChunkPos chunk = new ChunkPos(helper.absolutePos(new BlockPos(16, 2, 16)));
+        Set<ChunkPos> territory = Set.of(chunk);
+
+        // This chunk's own structure-relative window - see the method javadoc's alignment proof
+        // for why this 16-wide window is always entirely inside the structure's own [1,31], no
+        // matter where GameTest actually placed the structure this run.
+        int baseX = chunk.getMinBlockX() - structureOrigin.getX();
+        int baseZ = chunk.getMinBlockZ() - structureOrigin.getZ();
+
+        // A 4-block-wide trench (exceeds LEAP's documented 1-block-only range - see
+        // SiegeNode.SiegeAction.LEAP's javadoc - so only a BUILD_BRIDGE-type connector can cross
+        // it), splitting the chunk into a nexus side (local x 0-5) and a far side (local x 10-15).
+        // Carved full-depth (see method javadoc) so no walkable sliver survives underneath it.
+        int minRelY = helper.getLevel().getMinBuildHeight() - structureOrigin.getY();
+        for (int lx = 6; lx <= 9; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+
+        // helper-Y=2 (template-Y=1, the walkable layer) so the block it occupies goes solid
+        // (matching how a real Nexus block replaces a walkable cell) while its horizontal
+        // neighbor - nexusPos.north(), the probe used below - stays open air over an intact floor
+        // and resolves to a real region id (placing the marker at helper-Y=1 instead would embed
+        // it in the already-stone floor, and north() of an embedded marker sits on that same
+        // solid floor too - not a member of any region, so regionIdAt returns null and the
+        // probe's int != Integer comparison below throws on unboxing).
+        BlockPos relativeNexusPos = new BlockPos(baseX + 1, 2, baseZ + 8);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(regions.size() == 2, "expected exactly 2 regions (split by the trench), found " + regions.size());
+            check(regionMap.getRegionGraph().getAllConnectors().size() == 1,
+                    "expected exactly 1 connector between the 2 regions, found "
+                            + regionMap.getRegionGraph().getAllConnectors().size());
+
+            int farRegionId = regions.stream().mapToInt(Region::getId)
+                    .filter(id -> id != regionMap.getRegionIndex().regionIdAt(nexusPos.north())) // arbitrary non-nexus-side probe
+                    .findFirst().orElseThrow();
+            check(regionMap.getRouteTree().isReachable(farRegionId),
+                    "far region should be reachable via the planned connector");
         });
     }
 }
