@@ -54,6 +54,16 @@ public class RegionFlowField {
         return regionId;
     }
 
+    /**
+     * The raw computed instruction at {@code pos} within this region's own field, with none of
+     * getNextSiegeNode's live "is this action already done" resolution - for debug rendering
+     * (PathingDebugFileWriter's grid), which wants to show exactly what the last Dijkstra pass
+     * produced, cell by cell, not what a mob standing there right now would be told to do next.
+     */
+    public SiegeNode getRawInstruction(BlockPos pos) {
+        return state.getInstruction(pos);
+    }
+
     public SiegeNode getNextSiegeNode(ServerLevel level, BlockPos ratPos) {
         SiegeNode node = state.getInstruction(ratPos);
         if (node == null) return null;
@@ -114,9 +124,20 @@ public class RegionFlowField {
      * build step already marked its own position dirty like any other block change. Nothing does:
      * the only dirty-marking path is SiegeBlockEventHandler listening to NeoForge BlockEvents, and
      * SiegeInteractionHandler's direct level.setBlock/destroyBlock calls don't fire those.
+     *
+     * @param changedPos the actual position that was just built/mined - NOT this region's own
+     * local target. Passing {@code state.getTargetPos()} here (the previous, no-arg version of
+     * this method) marks the wrong chunk's terrain snapshot for refresh: onBlockChanged refreshes
+     * whichever chunk CONTAINS the position it's given, so a caller reporting its own unrelated
+     * target instead of the real construction site left that site's chunk permanently stale,
+     * even across generation-incrementing rebuilds - RegionScanner (and FlowFieldCalculator)
+     * kept seeing pre-construction terrain there forever. Confirmed in testing: a mob built a
+     * real, walkable pillar (SiegeActivityLog recorded the placement), but that position stayed
+     * "wilderness" (no region) three rebuild generations later, sending the mob right back to
+     * rebuild the same pillar in an endless loop.
      */
-    public void forceRecalculation() {
-        owner.onBlockChanged(state.getTargetPos());
+    public void forceRecalculation(BlockPos changedPos) {
+        owner.onBlockChanged(changedPos);
     }
 
     public boolean isCalculating() {

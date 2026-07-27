@@ -72,15 +72,38 @@ public class FlowFieldCalculator {
     }
 
     /**
+     * Runs the full Dijkstra pass against {@code terrain}, throttled by the live MSPT-based
+     * budget - see the 3-arg overload's doc for when that's the wrong choice.
+     */
+    public void calculateFully(TerrainAccess terrain, FlowFieldState state) {
+        calculateFully(terrain, state, true);
+    }
+
+    /**
      * Runs the full Dijkstra pass against {@code terrain}. In normal use this is a
      * TerrainSnapshot captured just before this method was kicked off on a background
      * thread - this method itself has no thread affinity, it's only as safe as whatever
      * TerrainAccess it's given. Never pass a LiveTerrainAccess here from a background
      * thread.
+     *
+     * @param respectThrottle true for the steady-state per-region recompute path
+     * (TerritoryRegionMap.recomputeDirtyRegions), where the calculation genuinely repeats
+     * under whatever server load exists at the time and CalculationThrottler's live MSPT
+     * budget is doing its intended job. False for the one-shot initial/topology-change
+     * rebuild (TerritoryRegionMap.rebuildRegionsAndGraph): that pass runs exactly once at
+     * world-join or territory change, competing with unrelated transient MSPT spikes (chunk
+     * loading, resource/model loading) that have nothing to do with this calculation's own
+     * cost - and unlike the steady-state path, there is no "next pass" to make up a region
+     * left permanently truncated by a throttle floor hit on this single chance. Confirmed in
+     * testing: the very first rebuild after world-join hit the throttle's MIN_THROTTLE_FRACTION
+     * floor (2250 of 25000 configured nodes) before the ground region's ~10000-cell pass could
+     * finish, leaving the large majority of its cells with no instruction - every clanrat outside
+     * the truncated radius fell back to wilderness wandering until an unrelated block change
+     * happened to trigger a full recompute later, by which point the throttle had recovered.
      */
-    public void calculateFully(TerrainAccess terrain, FlowFieldState state) {
+    public void calculateFully(TerrainAccess terrain, FlowFieldState state, boolean respectThrottle) {
         startCalculation(terrain, state);
-        processCalculationQueue(terrain, state);
+        processCalculationQueue(terrain, state, respectThrottle);
     }
 
     private void startCalculation(TerrainAccess terrain, FlowFieldState state) {
@@ -100,9 +123,13 @@ public class FlowFieldCalculator {
         projectManager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
     }
 
-    private void processCalculationQueue(TerrainAccess terrain, FlowFieldState state) {
-        // Dynamically throttle max allowed nodes per calculation using MSPT metric
-        int maxAllowedNodes = Math.min(Config.maxFlowFieldNodes, throttler.getNodesPerTick());
+    private void processCalculationQueue(TerrainAccess terrain, FlowFieldState state, boolean respectThrottle) {
+        // Dynamically throttle max allowed nodes per calculation using MSPT metric - unless this
+        // is the one-shot rebuild pass, which gets the full configured budget regardless of
+        // current throttle fraction (see the 3-arg calculateFully's doc for why).
+        int maxAllowedNodes = respectThrottle
+                ? Math.min(Config.maxFlowFieldNodes, throttler.getNodesPerTick())
+                : Config.maxFlowFieldNodes;
         lastPassBudgetExhausted = false;
 
         while (!calcQueue.isEmpty()) {

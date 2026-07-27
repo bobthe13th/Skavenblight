@@ -9,14 +9,13 @@ import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
 import org.ratden.skavenblight.ai.pathing.TerrainSnapshot;
 import org.slf4j.Logger;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -63,11 +62,13 @@ public final class RegionScanner {
         FlowFieldState boundsState = new FlowFieldState(boundsAnchor, bounds);
         int height = maxBuildHeight - minBuildHeight;
 
-        Set<BlockPos> visited = new HashSet<>();
+        // Settled (finalized) cells across the WHOLE scan, shared by every region's flood, so a
+        // cell claimed by one region can never be re-seeded or re-claimed by another.
+        Set<BlockPos> settled = new HashSet<>();
         List<Region> regions = new ArrayList<>();
         int nextId = 0;
-        // Mutable, shared across the whole scan() call (including every floodFill it drives) so
-        // the budget check inside floodFill's own loop sees the true running total, not just the
+        // Mutable, shared across the whole scan() call (including every flood it drives) so the
+        // budget check inside the flood's own loop sees the true running total, not just the
         // count for the region currently being flooded.
         int[] scannedCells = {0};
         boolean[] budgetExhausted = {false};
@@ -81,7 +82,7 @@ public final class RegionScanner {
                     for (int localZ = 0; localZ < 16; localZ++) {
                         BlockPos seed = new BlockPos(chunk.getMinBlockX() + localX, y, chunk.getMinBlockZ() + localZ);
 
-                        if (visited.contains(seed) || !terrainEvaluator.isWalkableTerrain(snapshot, seed)) continue;
+                        if (settled.contains(seed) || !terrainEvaluator.isWalkableTerrain(snapshot, seed)) continue;
 
                         if (scannedCells[0] >= MAX_SCANNED_CELLS) {
                             budgetExhausted[0] = true;
@@ -89,12 +90,12 @@ public final class RegionScanner {
                         }
 
                         Region region = new Region(nextId++, minBuildHeight, height);
-                        floodFill(snapshot, boundsState, seed, visited, region, scannedCells, budgetExhausted);
+                        floodFill(snapshot, boundsState, seed, settled, region, scannedCells, budgetExhausted);
                         regions.add(region);
 
-                        // floodFill can itself exhaust the budget mid-flood (the common case for
-                        // one large connected region) - stop seeding any further regions the
-                        // moment that happens, same as the between-seeds check above.
+                        // A region's flood can itself exhaust the budget mid-flood (the common
+                        // case for one large connected region) - stop seeding any further regions
+                        // the moment that happens, same as the between-seeds check above.
                         if (budgetExhausted[0]) {
                             break outer;
                         }
@@ -111,16 +112,53 @@ public final class RegionScanner {
         return regions;
     }
 
+    /**
+     * Dijkstra flood-fill, not a plain BFS: connectivity within one region must agree EXACTLY
+     * with FlowFieldCalculator.processOrthogonalNeighbors - the same step generator
+     * (TerrainEvaluator.getValidOrthogonalSteps), the same MAX_CONSECUTIVE_MINE_DEPTH cap, and
+     * critically the same cost-relaxation rule for both cost AND mine-chain-depth - or the two
+     * can settle a shared cell's mine-chain-depth differently and disagree on whether a
+     * downstream cell is within the cap. Confirmed in testing: a clean, monotonic flow-field
+     * path terminated by pointing into a cell that belonged to no region at all, nowhere near a
+     * territory boundary, causing affected mobs to lose their field assignment mid-route, fall
+     * back to wilderness wandering, wander back into the mapped area, and repeat the same walk
+     * out to the same dead end - visually indistinguishable in-game from a literal loop.
+     *
+     * A plain unweighted BFS (the previous implementation) locks in whichever mine-chain-depth
+     * its first, queue-order-dependent visit to a cell happens to find, via
+     * {@code visited.add(pos)} as the sole gate, and never revisits it even when a shorter chain
+     * is later discovered through a different neighbor. FlowFieldCalculator's real Dijkstra, by
+     * contrast, continuously relaxes both cost and mine-chain-depth whenever a cheaper path is
+     * found. In a braided area mixing WALK and MINE steps, an unweighted hop-order search and a
+     * cost-weighted search settle nodes in genuinely different sequences and can lock in
+     * different (and sometimes wrongly-too-deep) mine-chain-depths for the same intermediate
+     * cells - which can push a cell just past the cap in one algorithm while the other, having
+     * found the true minimum-depth route, brings it in under the cap. Making this a real Dijkstra
+     * with the identical relaxation rule removes the divergence at its source: region membership
+     * now always reflects the true minimum mine-chain-depth to reach a cell, exactly like the
+     * flow field's own instructions do.
+     */
     private void floodFill(TerrainSnapshot snapshot, FlowFieldState boundsState, BlockPos seed,
-                            Set<BlockPos> visited, Region region, int[] scannedCells, boolean[] budgetExhausted) {
-        Deque<BlockPos> queue = new ArrayDeque<>();
-        queue.add(seed);
-        visited.add(seed);
+                            Set<BlockPos> settled, Region region, int[] scannedCells, boolean[] budgetExhausted) {
+        record QueueNode(BlockPos pos, int cost) implements Comparable<QueueNode> {
+            @Override
+            public int compareTo(QueueNode other) {
+                return Integer.compare(this.cost, other.cost);
+            }
+        }
 
-        // Consecutive-MINE-steps-taken-to-reach-this-position, exactly as
-        // FlowFieldCalculator.processOrthogonalNeighbors tracks it. Local to one floodFill call
-        // (so it resets per region); the seed is walkable ground, hence depth 0 by omission.
+        PriorityQueue<QueueNode> queue = new PriorityQueue<>();
+        // Best known cost to reach each cell (this flood only - fresh per region, exactly like
+        // FlowFieldCalculator.startCalculation clears nextCostMap per calculateFully call).
+        Map<BlockPos, Integer> costMap = new HashMap<>();
+        // Consecutive-MINE-steps-taken-to-reach-this-position along the CURRENT cheapest known
+        // path, exactly as FlowFieldCalculator.processOrthogonalNeighbors tracks it - relaxed
+        // (updated) in lockstep with costMap whenever a cheaper path is found, not locked on
+        // first visit.
         Map<BlockPos, Integer> mineChainDepth = new HashMap<>();
+
+        costMap.put(seed, 0);
+        queue.add(new QueueNode(seed, 0));
 
         while (!queue.isEmpty()) {
             // Checked every iteration (not just between seeds in scan()) so a single large
@@ -132,7 +170,15 @@ public final class RegionScanner {
                 return;
             }
 
-            BlockPos current = queue.poll();
+            QueueNode qNode = queue.poll();
+            BlockPos current = qNode.pos();
+            int currentCost = qNode.cost();
+
+            // Stale entry - a cheaper path to `current` was already settled via an earlier pop.
+            // Standard lazy-deletion Dijkstra: cheaper than removing from the queue's middle.
+            if (currentCost > costMap.getOrDefault(current, Integer.MAX_VALUE)) continue;
+            if (!settled.add(current)) continue; // already claimed - by this same flood or an earlier region's
+
             region.addCell(current);
             scannedCells[0]++;
 
@@ -157,6 +203,8 @@ public final class RegionScanner {
 
             int currentMineDepth = mineChainDepth.getOrDefault(current, 0);
             for (TerrainEvaluator.EvaluatedStep step : steps) {
+                if (settled.contains(step.pos())) continue; // already claimed by another region
+
                 // Reset to 0 on WALK/BUILD_* (the step lands on solid ground); only MINE chains
                 // deeper. Past the cap the branch is dropped entirely - it isn't enqueued, so it
                 // never becomes a member of this region and can't fuse it to whatever lies on the
@@ -164,9 +212,12 @@ public final class RegionScanner {
                 int stepMineDepth = step.action() == SiegeNode.SiegeAction.MINE ? currentMineDepth + 1 : 0;
                 if (stepMineDepth > MAX_CONSECUTIVE_MINE_DEPTH) continue;
 
-                if (visited.add(step.pos())) {
+                int totalCost = currentCost + step.cost();
+
+                if (totalCost < costMap.getOrDefault(step.pos(), Integer.MAX_VALUE)) {
+                    costMap.put(step.pos(), totalCost);
                     mineChainDepth.put(step.pos(), stepMineDepth);
-                    queue.add(step.pos());
+                    queue.add(new QueueNode(step.pos(), totalCost));
                 }
             }
         }

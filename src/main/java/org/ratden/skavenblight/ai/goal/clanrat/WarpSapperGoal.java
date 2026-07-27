@@ -151,7 +151,10 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
 
         level.playSound(null, spawnPos, SoundEvents.TNT_PRIMED, SoundSource.HOSTILE, 1.0F, 1.2F);
 
-        this.flowField.forceRecalculation();
+        // targetMinePos, not spawnPos: the TNT hasn't detonated yet (40-tick fuse), so this is
+        // marking the eventual blast site dirty a little early rather than late - still the
+        // right chunk, unlike the region's own unrelated local target the old no-arg version used.
+        this.flowField.forceRecalculation(this.targetMinePos);
     }
 
     @Override

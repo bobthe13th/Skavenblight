@@ -78,7 +78,7 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
         boolean isEndOfMacroProject = (nextNode == null || !isBuildAction(nextNode.action()));
 
         if (isEndOfMacroProject && this.recalculateCooldown == 0 && !this.flowField.isCalculating()) {
-            this.flowField.forceRecalculation();
+            this.flowField.forceRecalculation(completedPos);
             this.recalculateCooldown = 100;
         }
     }

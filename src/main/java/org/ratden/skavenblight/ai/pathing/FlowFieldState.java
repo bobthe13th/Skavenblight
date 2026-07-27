@@ -22,7 +22,13 @@ public class FlowFieldState {
 
     private final BlockPos targetPos;
     private final Set<ChunkPos> territoryChunks;
-    private final java.util.function.Predicate<BlockPos> cellFilter;
+    // Not final: TerritoryRegionMap's steady-state dirty-region recompute needs to swap in a
+    // freshly-rescanned Region's ::contains predicate in place (see Region.withId) without
+    // discarding this FlowFieldState object - replacing it wholesale would also discard the
+    // RegionFlowField wrapping it, and with it that region's claim/lane-occupancy tables. Same
+    // volatile-publish pattern as indexed below: readers on the main thread always see either
+    // the old predicate or the new one, never a half-updated reference.
+    private volatile java.util.function.Predicate<BlockPos> cellFilter;
 
     private volatile Indexed indexed = Indexed.EMPTY;
 
@@ -49,6 +55,15 @@ public class FlowFieldState {
      */
     public void updateInstructions(Map<BlockPos, SiegeNode> newMap) {
         this.indexed = Indexed.build(newMap);
+    }
+
+    /**
+     * Swaps the region-membership predicate this state's bounds check uses - see the field doc
+     * on {@code cellFilter} for why this needs to be replaceable in place rather than requiring
+     * a brand-new FlowFieldState.
+     */
+    public void updateCellFilter(java.util.function.Predicate<BlockPos> cellFilter) {
+        this.cellFilter = cellFilter;
     }
 
     public SiegeNode getInstruction(BlockPos pos) {
