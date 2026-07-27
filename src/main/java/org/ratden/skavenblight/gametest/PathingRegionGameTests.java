@@ -68,7 +68,10 @@ import java.util.Set;
  * to exactly ONE chunk (as {@link #testSingleConnectedRegion} already did) so the encasement's
  * padding is never in scope at all, and derive every other coordinate from THAT chunk's actual
  * (run-dependent) alignment rather than the structure's own fixed 0..31 - see
- * {@link #testTwoDisconnectedRegionsGetOneConnector}'s own comments for the alignment proof.</li>
+ * {@link #anchorChunkFor} for the reusable helper that does this (including the alignment proof)
+ * and {@link #testTwoDisconnectedRegionsGetOneConnector} for an example caller. Later tasks
+ * adding their own {@code @GameTest} methods to this file should call {@link #anchorChunkFor}
+ * rather than re-deriving this by hand.</li>
  * <li><b>A single-layer floor carve still leaves a walkable cell directly underneath it.</b>
  * Removing only the floor block (helper y=1) opens head clearance for the layer below (helper
  * y=0) too, and that layer has its own solid support courtesy of the same encasement floor
@@ -85,6 +88,52 @@ public class PathingRegionGameTests {
     /** Throws (so {@code succeedWhen} keeps retrying) until {@code condition} holds. */
     static void check(boolean condition, String message) {
         if (!condition) throw new GameTestAssertException(message);
+    }
+
+    /**
+     * A single chunk to use as territory (see the class javadoc's "territory wider than one
+     * chunk" bullet for why one chunk is deliberate), plus that chunk's own structure-relative
+     * origin ({@code baseX}/{@code baseZ}) so callers can place trench/nexus/etc. geometry as
+     * OFFSETS into the chunk's local 0..15 window instead of against the structure's fixed
+     * 0..31 - the whole point being that this window's actual position varies per run (GameTest
+     * doesn't chunk-align structure placement) and callers should never need to know or assume
+     * where it lands.
+     */
+    private record ChunkAnchor(ChunkPos chunk, int baseX, int baseZ) {}
+
+    /**
+     * Picks the chunk containing structure-relative point (16, *, 16) and returns it as a
+     * {@link ChunkAnchor}. This exact anchor point is load-bearing, not arbitrary - the
+     * following holds for ANY GameTest placement offset:
+     *
+     * <p>Let {@code r = structureOriginX mod 16} (r in [0,15]). The chunk containing world-x =
+     * {@code structureOriginX + 16} starts at relative x = {@code 16 - r} (in [1,16]) and ends at
+     * relative x = {@code 31 - r} (in [16,31]) - i.e. that chunk's 16-wide window is ALWAYS
+     * entirely contained in [1,31], regardless of alignment, never touching the structure's own
+     * edges, let alone the encasement padding beyond them (see the class javadoc's "territory
+     * wider than one chunk" bullet for what that padding contaminates). The same proof applies to
+     * z. Confirmed empirically across multiple {@code runGameTestServer} invocations, each
+     * placing the structure at a different world position/chunk-alignment offset (see
+     * task-4-report.md) - this always produced a single clean chunk fully inside the structure's
+     * own footprint. This is also why {@link #testSingleConnectedRegion}'s nexus at relative
+     * (16,1,16) was never contaminated by the padding despite nobody having diagnosed why at the
+     * time it was written.
+     */
+    private static ChunkAnchor anchorChunkFor(GameTestHelper helper) {
+        BlockPos structureOrigin = helper.absolutePos(BlockPos.ZERO);
+        ChunkPos chunk = new ChunkPos(helper.absolutePos(new BlockPos(16, 2, 16)));
+        int baseX = chunk.getMinBlockX() - structureOrigin.getX();
+        int baseZ = chunk.getMinBlockZ() - structureOrigin.getZ();
+        return new ChunkAnchor(chunk, baseX, baseZ);
+    }
+
+    /**
+     * Structure-relative Y of the world's actual minimum build height, for full-depth carves
+     * (see the class javadoc's "single-layer floor carve" bullet for why a floor-only carve
+     * isn't enough).
+     */
+    private static int minRelY(GameTestHelper helper) {
+        return helper.getLevel().getMinBuildHeight() - helper.absolutePos(BlockPos.ZERO).getY();
     }
 
     @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
@@ -120,46 +169,36 @@ public class PathingRegionGameTests {
      * run - see the class javadoc's last two bullets for the two terrain artifacts this
      * discovered (the encasement's padding-side regions, and the floor-only-carve underside
      * sliver). The geometry actually used here fixes both by staying inside a single chunk (like
-     * {@link #testSingleConnectedRegion}) whose alignment is discovered at runtime rather than
-     * assumed:
+     * {@link #testSingleConnectedRegion}) whose alignment is discovered at runtime via
+     * {@link #anchorChunkFor} rather than assumed - see that method's own javadoc for the
+     * alignment proof (why anchoring on relative (16, *, 16) always keeps the chosen chunk fully
+     * inside the structure's own footprint, regardless of where GameTest actually places it this
+     * run). Every coordinate below is an offset from that chunk's own {@code baseX}/{@code baseZ},
+     * not against the structure's fixed 0..31. The trench is carved full-depth (down to
+     * {@link #minRelY}, not just the floor layer) per the class javadoc's underside-sliver note.
      *
-     * <ul>
-     * <li><b>Why anchor on relative (16, *, 16) to pick the chunk.</b> GameTest doesn't
-     * chunk-align structure placement (confirmed empirically - two different runs of this file
-     * produced two different nexus world positions with two different chunk-alignment offsets).
-     * For a 32-wide structure, let {@code r = structureOriginX mod 16}. The chunk containing
-     * world x = structureOriginX + 16 starts at relative x = 16 - r (r in [0,15], so this is in
-     * [1,16]) and ends at relative x = 31 - r (in [16,31]) - i.e. for ANY alignment, that chunk's
-     * 16-wide window is entirely contained in [1,31], never touching the structure's own edges,
-     * let alone the encasement padding beyond them. Same proof applies to z. This is also why
-     * {@link #testSingleConnectedRegion}'s nexus at relative (16,1,16) was never contaminated by
-     * the padding despite nobody having diagnosed why at the time.</li>
-     * <li><b>Everything else is placed relative to that chunk's OWN (run-dependent) window</b> -
-     * {@code baseX}/{@code baseZ} below - not against the structure's fixed 0..31, so the test's
-     * geometry always lands inside the one safe chunk regardless of where GameTest happens to
-     * place the structure this run.</li>
-     * <li><b>The trench is carved full-depth</b> (from {@code level.getMinBuildHeight()} up
-     * through the floor layer), not just at the floor layer, per the class javadoc's underside-
-     * sliver note.</li>
-     * </ul>
+     * <p><b>On the connector-count assertion below:</b> {@code RegionGraph.build} dedups
+     * candidate connectors per unordered region-id pair ({@code bestPerPair}/{@code pairKey}), so
+     * with exactly 2 regions the count is guaranteed to be AT MOST 1 - it cannot double-count the
+     * one possible pair. It does NOT guarantee the count is exactly 1 rather than 0: whether
+     * {@code tryTrace} actually finds a connector at all depends on the trench's width/depth
+     * being within {@code SiegeLineTracer}'s reach and {@code RegionGraph.MAX_CHAIN_HOPS}, a
+     * property of this test's geometry, not of the dedup map. That it comes out to exactly 1 here
+     * is confirmed empirically (see task-4-report.md's two independent runs), not derived from
+     * the dedup guarantee alone.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
     public static void testTwoDisconnectedRegionsGetOneConnector(GameTestHelper helper) {
-        BlockPos structureOrigin = helper.absolutePos(BlockPos.ZERO);
-        ChunkPos chunk = new ChunkPos(helper.absolutePos(new BlockPos(16, 2, 16)));
-        Set<ChunkPos> territory = Set.of(chunk);
-
-        // This chunk's own structure-relative window - see the method javadoc's alignment proof
-        // for why this 16-wide window is always entirely inside the structure's own [1,31], no
-        // matter where GameTest actually placed the structure this run.
-        int baseX = chunk.getMinBlockX() - structureOrigin.getX();
-        int baseZ = chunk.getMinBlockZ() - structureOrigin.getZ();
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
 
         // A 4-block-wide trench (exceeds LEAP's documented 1-block-only range - see
         // SiegeNode.SiegeAction.LEAP's javadoc - so only a BUILD_BRIDGE-type connector can cross
         // it), splitting the chunk into a nexus side (local x 0-5) and a far side (local x 10-15).
         // Carved full-depth (see method javadoc) so no walkable sliver survives underneath it.
-        int minRelY = helper.getLevel().getMinBuildHeight() - structureOrigin.getY();
+        int minRelY = minRelY(helper);
         for (int lx = 6; lx <= 9; lx++) {
             for (int lz = 0; lz <= 15; lz++) {
                 for (int y = minRelY; y <= 1; y++) {
