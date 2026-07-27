@@ -139,7 +139,7 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
                         this.flowField,
                         this.mob
                 );
-                this.flowField.forceRecalculation();
+                this.flowField.forceRecalculation(this.currentTarget);
                 this.stalledTicks = 0;
                 this.transitionTo(SapperState.WAITING);
             } else {

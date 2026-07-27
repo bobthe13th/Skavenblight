@@ -68,9 +68,10 @@ public class PathingDebugFileWriter {
             writeHeader(writer, flowField, regionMap, center, radiusX, heightY, radiusZ, calculating, renderMap);
             writeRegionGraph(writer, regionMap);
             writeMetrics(writer, renderMap);
-            writeNearbyMobs(writer, level, flowField, center, Math.max(radiusX, radiusZ), heightY);
+            writeNearbyMobs(writer, level, regionMap, center, Math.max(radiusX, radiusZ), heightY);
+            writeMobPathTraces(writer, regionMap, level, center, Math.max(radiusX, radiusZ), heightY);
             writeRecentActivity(writer, center, Math.max(radiusX, radiusZ) * 2);
-            writeGrid(writer, level, renderMap, center, radiusX, heightY, radiusZ);
+            writeGrid(writer, level, renderMap, regionMap, calculating, center, radiusX, heightY, radiusZ);
 
             writer.write("\n================ END OF DIAGNOSTIC DUMP ================\n");
             return dumpFile.getAbsolutePath();
@@ -196,7 +197,7 @@ public class PathingDebugFileWriter {
      * "<idle>" and a non-WALK next instruction is a rat whose construction goal declined to
      * claim a target it should have - previously invisible from outside the entity itself.
      */
-    private static void writeNearbyMobs(FileWriter writer, ServerLevel level, RegionFlowField flowField, BlockPos center, int radius, int heightY) throws IOException {
+    private static void writeNearbyMobs(FileWriter writer, ServerLevel level, TerritoryRegionMap regionMap, BlockPos center, int radius, int heightY) throws IOException {
         writer.write("--- NEARBY MOBS (goal state) ---\n");
 
         AABB box = new AABB(center).inflate(radius, heightY, radius);
@@ -222,13 +223,92 @@ public class PathingDebugFileWriter {
             BlockPos pos = mob.blockPosition();
             String goals = (mob instanceof ClanratEntity clanrat) ? clanrat.getActiveGoalNames() : "n/a";
 
-            SiegeNode next = flowField.getNextSiegeNode(level, pos);
+            // Each mob's OWN region field, not the single field this dump happens to be centered
+            // on - a mob dozens of blocks away in a different region always fell through to
+            // "no-instruction (wilderness)" here even when its actual assigned field had a real
+            // instruction, because it was being asked the exported region's field instead of its own.
+            RegionFlowField mobField = regionMap.getRegionFlowFieldFor(pos);
+            SiegeNode next = mobField != null ? mobField.getNextSiegeNode(level, pos) : null;
             String nextDesc = next == null ? "no-instruction (wilderness)" : String.format("%s -> %s", next.action(), next.pos().toShortString());
 
             String jamFlag = occupancy.getOrDefault(pos, 1) > 1 ? String.format(" [JAM: %d mobs on this block]", occupancy.get(pos)) : "";
 
             writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s\n",
                     BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc, jamFlag));
+        }
+        writer.write("\n");
+    }
+
+    // Bound on writeMobPathTraces's forward walk - generously above MAX_CHAIN_HOPS *
+    // MAX_PROJECT_LENGTH (see RegionGraph) so a genuinely long but correct multi-region route
+    // isn't mistaken for a stuck trace; a real loop reveals itself in a handful of steps anyway.
+    private static final int MAX_TRACE_STEPS = 60;
+
+    /**
+     * Forward-simulates each nearby mob's raw instruction chain, one region-owned cell at a
+     * time, independent of goal/claim-table/live-completion state - the ASCII grid only encodes
+     * each cell's action (W/M/etc), not which neighbor it points to, so a genuine cycle in the
+     * computed field (as opposed to goal-level oscillation from lane contention) was invisible
+     * without actually walking the chain. Added after a live report of "arrows pointing in a
+     * loop rather than a path that leads to the nexus" that the grid alone couldn't confirm.
+     */
+    private static void writeMobPathTraces(FileWriter writer, TerritoryRegionMap regionMap, ServerLevel level,
+                                            BlockPos center, int radius, int heightY) throws IOException {
+        writer.write("--- MOB PATH TRACE (raw instruction chain, ignores goal/claim state) ---\n");
+
+        AABB box = new AABB(center).inflate(radius, heightY, radius);
+        List<Mob> mobs = level.getEntitiesOfClass(Mob.class, box);
+
+        if (mobs.isEmpty()) {
+            writer.write("(none within range)\n\n");
+            return;
+        }
+
+        for (Mob mob : mobs) {
+            BlockPos start = mob.blockPosition();
+            List<BlockPos> path = new ArrayList<>();
+            Set<BlockPos> visited = new HashSet<>();
+            BlockPos current = start;
+            String outcome = "trace budget exhausted (" + MAX_TRACE_STEPS + " steps) without reaching a local objective";
+
+            for (int step = 0; step < MAX_TRACE_STEPS; step++) {
+                if (!visited.add(current)) {
+                    outcome = "LOOP DETECTED - revisited " + current.toShortString();
+                    break;
+                }
+                path.add(current);
+
+                RegionFlowField field = regionMap.getRegionFlowFieldFor(current);
+                if (field == null) {
+                    outcome = "left mapped territory (wilderness) at " + current.toShortString();
+                    break;
+                }
+                SiegeNode node = field.getRawInstruction(current);
+                if (node == null) {
+                    outcome = "no instruction at " + current.toShortString();
+                    break;
+                }
+                if (node.pos().equals(current)) {
+                    // Every region's own local Dijkstra target self-references (see
+                    // FlowFieldCalculator.startCalculation) - reaching one is the correct, expected
+                    // end of this region's portion of the chain, not a bug. Actually crossing a
+                    // connector into the next region is a separate active-project mechanic this
+                    // pure data trace doesn't simulate.
+                    outcome = "reached region " + field.getRegionId() + "'s local objective at " + current.toShortString();
+                    break;
+                }
+                current = node.pos();
+            }
+
+            StringBuilder pathStr = new StringBuilder();
+            for (int i = 0; i < path.size(); i++) {
+                if (i > 0) pathStr.append(" -> ");
+                pathStr.append(path.get(i).toShortString());
+            }
+
+            writer.write(String.format("  %s from %s (%d cells): %s\n",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), start.toShortString(), path.size(), outcome));
+            writer.write("    " + pathStr + "\n");
         }
         writer.write("\n");
     }
@@ -262,7 +342,21 @@ public class PathingDebugFileWriter {
         writer.write("\n");
     }
 
-    private static void writeGrid(FileWriter writer, ServerLevel level, Map<BlockPos, SiegeNode> renderMap, BlockPos center,
+    /**
+     * @param renderMap the dump's SINGLE targeted region's map (the region containing the nexus -
+     * see DebugFlowFieldReaderItem) - used only as the live-progress fallback while a calculation
+     * is running (getLiveDebugMap() reflects whichever one region the shared calculator happens to
+     * be processing at this instant; there's no per-region live view to fall back to instead).
+     * @param regionMap owner of every region's flow field - used once ready to look up each grid
+     * cell's OWN region and read ITS instruction, not the single targeted region's. Grid cells
+     * routinely belong to a completely different region than the one the debug item is aimed at
+     * (e.g. the player standing in the ground region while the item targets the nexus's own tiny
+     * platform region) - rendering only the targeted region's map left every other region's cells
+     * blank, making a real flow field (arrows, including loops) invisible in the dump whenever it
+     * wasn't in the exact region the item happened to be pointed at.
+     */
+    private static void writeGrid(FileWriter writer, ServerLevel level, Map<BlockPos, SiegeNode> renderMap,
+                                   TerritoryRegionMap regionMap, boolean calculating, BlockPos center,
                                    int radiusX, int heightY, int radiusZ) throws IOException {
         writer.write("LEGEND:\n");
         writer.write("  Blocks : [#] Solid   [.] Air   [/] Stair/Slab   [H] Ladder   [~] Fluid\n");
@@ -307,7 +401,17 @@ public class PathingDebugFileWriter {
                     }
                     rowBlocks.append(blockChar);
 
-                    SiegeNode node = renderMap.get(pos);
+                    // While calculating there's only one live progress snapshot to show (whichever
+                    // region the shared calculator is presently working through) - fall back to the
+                    // targeted region's map, same as before this fix. Once ready, look up THIS
+                    // cell's own region rather than assuming it belongs to the targeted region.
+                    SiegeNode node;
+                    if (calculating) {
+                        node = renderMap.get(pos);
+                    } else {
+                        RegionFlowField cellField = regionMap.getRegionFlowFieldFor(pos);
+                        node = cellField != null ? cellField.getRawInstruction(pos) : null;
+                    }
                     char nodeChar = '.';
                     boolean isOob = (pos.getY() < level.getMinBuildHeight() || pos.getY() > level.getMaxBuildHeight());
 

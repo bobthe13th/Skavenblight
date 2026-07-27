@@ -166,12 +166,18 @@ public class DebugFlowFieldReaderItem extends Item {
                 int currentModeIndex = customData.copyTag().getInt("DebugMode");
                 DebugMode currentMode = DebugMode.values()[currentModeIndex % DebugMode.values().length];
 
+                // Territory of the last network whose chunk geometrically matched the player,
+                // even if it had no usable field for the current mode/position - used below to
+                // send a clearing update if every match falls through empty-handed.
+                Set<ChunkPos> lastMatchedTerritory = null;
+
                 for (WarpFluxNetwork network : gridManager.getAllNetworks()) {
                     // Skip a network with no live nexus - its region map never bootstraps (see
                     // WarpFluxNetwork.tick), so it can never yield a real field here.
                     if (!network.isValid(serverLevel)) continue;
 
                     if (network.getTerritoryChunks().contains(serverPlayer.chunkPosition())) {
+                        lastMatchedTerritory = network.getTerritoryChunks();
 
                         // Position-based lookup against the player's current region - replaces
                         // the old nexus-lookup + network-wide getSharedFlowField call, since
@@ -238,6 +244,19 @@ public class DebugFlowFieldReaderItem extends Item {
                         ));
                         return;
                     }
+                }
+
+                if (lastMatchedTerritory != null) {
+                    // Every matching network fell through empty-handed (e.g. Detailed/Macro mode
+                    // while standing in an unmapped or route-unreachable region). Send an
+                    // empty-but-current-mode update so the client clears whatever it last
+                    // rendered instead of leaving stale data on screen - previously this case sent
+                    // nothing at all, which left the display frozen on the last mode that DID
+                    // produce data (almost always Wilderness, since its borrow-fallback above
+                    // rarely fails), making the tool look permanently stuck in that mode.
+                    serverPlayer.connection.send(new SyncFlowFieldDebugPayload(
+                            lastMatchedTerritory, Map.of(), Set.of(), currentMode.ordinal()
+                    ));
                 }
             }
         }

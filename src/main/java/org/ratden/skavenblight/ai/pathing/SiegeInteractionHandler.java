@@ -83,6 +83,16 @@ public class SiegeInteractionHandler {
                     BlockPos headroomPos = pos.above(y);
                     BlockState headroomState = level.getBlockState(headroomPos);
                     if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
+                        // Diagnostic only (systematic-debugging evidence-gathering): this destroy
+                        // was previously silent - only the main placement below got logged - so a
+                        // headroom-clear that happens to hit an already-completed sibling step
+                        // (e.g. in a tight vertical spiral shaft) left zero trace of what knocked
+                        // it down, even though SiegeActivityLog otherwise records every siege
+                        // action. Investigating a report of repeated identical BUILD_SPIRAL
+                        // executions at the same position - this will show directly whether a
+                        // later step's headroom-clear is destroying an earlier, already-built one.
+                        SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, SiegeNode.SiegeAction.MINE,
+                                "headroom-clear for " + action + " at " + pos.toShortString(), regionIdOf(flowField));
                         level.destroyBlock(headroomPos, false);
                     }
                 }
@@ -136,6 +146,10 @@ public class SiegeInteractionHandler {
                             BlockPos headroomPos = pos.offset(x, y, z);
                             BlockState headroomState = level.getBlockState(headroomPos);
                             if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
+                                // See the matching comment on BUILD_STAIR's headroom clear above -
+                                // same previously-silent-destroy diagnostic gap.
+                                SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, SiegeNode.SiegeAction.MINE,
+                                        "headroom-clear for BUILD_LANDING at " + pos.toShortString(), regionIdOf(flowField));
                                 level.destroyBlock(headroomPos, false);
                             }
                         }

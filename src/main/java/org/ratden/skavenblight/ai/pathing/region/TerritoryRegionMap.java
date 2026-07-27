@@ -201,8 +201,25 @@ public class TerritoryRegionMap {
             projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(region.getId()) : null);
 
             FlowFieldState state = new FlowFieldState(target, territoryChunks, region::contains);
-            calculator.calculateFully(snapshot, state);
+            // Unthrottled: this is the one-shot rebuild pass, run once at world-join/territory
+            // change - see FlowFieldCalculator.calculateFully's 3-arg overload doc for why it
+            // must not inherit the live MSPT throttle meant for steady-state recompute.
+            calculator.calculateFully(snapshot, state, false);
             newStates.put(region.getId(), state);
+
+            // Diagnostic only (systematic-debugging Phase 1 evidence-gathering): the deep dump
+            // only ever reports budget/exhaustion stats for whichever single region the debug
+            // item is currently targeting, so a large region's Dijkstra pass getting cut short by
+            // CalculationThrottler mid-rebuild - while still being marked reachable at the graph
+            // level - was previously invisible. See docs/superpowers/plans for the investigation
+            // this is gathering evidence for.
+            if (calculator.isLastPassBudgetExhausted()) {
+                LOGGER.warn("[Skavenblight] Region {} flow field pass hit its node budget ({} nodes, throttled cap {}) - {} region cells may be left without instructions this rebuild",
+                        region.getId(), calculator.getLastPassNodeCount(), throttler.getNodesPerTick(), region.cellCount());
+            } else {
+                LOGGER.info("[Skavenblight] Region {} flow field pass completed: {} nodes for {} region cells (throttled cap {})",
+                        region.getId(), calculator.getLastPassNodeCount(), region.cellCount(), throttler.getNodesPerTick());
+            }
         }
 
         Map<Integer, RegionFlowField> newFlowFields = new HashMap<>();
@@ -420,8 +437,36 @@ public class TerritoryRegionMap {
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
+                //
+                // Critical fix: rescanned.get(0) is discarded here in the old code, and the
+                // recompute below ran against oldRegion's STALE membership forever - any cell
+                // that became newly walkable (a rat-built stair, a mined tunnel) got a real
+                // Dijkstra instruction reaching it (the terrain snapshot IS fresh), but
+                // FlowFieldState.isOutOfBounds kept rejecting it as "out of region bounds" via
+                // oldRegion::contains, since oldRegion's own BitSet was never updated to include
+                // it. Confirmed in testing: a mob built a real, walkable pillar, but that exact
+                // position stayed "wilderness" three rebuild generations later - only a FULL
+                // rebuild (which replaces Region objects wholesale) ever picked up growth, so a
+                // region only advanced by roughly whatever a mob managed to build before the
+                // next full rebuild happened to fire, not fluidly as construction progressed.
+                //
+                // Stamped with the OLD regionId (not the local rescan's own 0-based numbering)
+                // so RegionRouteTree/RegionGraph/regionStates/regionFlowFields - all keyed by
+                // this int - keep referring to the same region, just with membership that now
+                // matches current terrain.
+                Region freshRegion = rescanned.get(0).withId(regionId);
+                List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+                updatedRegions.replaceAll(r -> r.getId() == regionId ? freshRegion : r);
+                this.regionIndex = new RegionIndex(updatedRegions);
+
                 FlowFieldState state = regionStates.get(regionId);
                 if (state != null) {
+                    // Swap in the fresh membership predicate in place - see FlowFieldState's
+                    // cellFilter field doc for why this mutates the existing state rather than
+                    // building a new one (which would also orphan this region's RegionFlowField,
+                    // and with it its claim/lane-occupancy tables).
+                    state.updateCellFilter(freshRegion::contains);
+
                     // Re-seed this region's connector instructions for the pass (see the matching
                     // call in rebuildRegionsAndGraph). Uses the CURRENT route tree - this is the
                     // steady-state single-region path, not a full rebuild, so no new tree exists.

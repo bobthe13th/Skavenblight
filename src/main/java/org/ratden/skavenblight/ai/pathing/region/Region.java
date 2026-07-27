@@ -85,6 +85,25 @@ public class Region {
         return chunkCells.values().stream().mapToInt(BitSet::cardinality).sum();
     }
 
+    /**
+     * Copies this region's cell/boundary/bounds data into a NEW Region stamped with
+     * {@code newId} instead of this one's own id. Used by TerritoryRegionMap's steady-state
+     * dirty-region recompute to swap in a freshly-rescanned region's membership while keeping
+     * the STABLE external id every other structure (RegionRouteTree, RegionGraph's connectors,
+     * the regionStates/regionFlowFields maps) keys off of - those all reference the id, not
+     * object identity, so silently renumbering would break every one of them.
+     */
+    public Region withId(int newId) {
+        Region copy = new Region(newId, this.minBuildHeight, this.height);
+        for (Map.Entry<ChunkPos, BitSet> entry : this.chunkCells.entrySet()) {
+            copy.chunkCells.put(entry.getKey(), (BitSet) entry.getValue().clone());
+        }
+        copy.boundaryCells.addAll(this.boundaryCells);
+        copy.min = this.min;
+        copy.max = this.max;
+        return copy;
+    }
+
     private int cellIndex(BlockPos pos) {
         int localX = pos.getX() & 15;
         int localZ = pos.getZ() & 15;
