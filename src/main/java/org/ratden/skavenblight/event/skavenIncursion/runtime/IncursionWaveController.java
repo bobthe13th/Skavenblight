@@ -3,6 +3,7 @@ package org.ratden.skavenblight.event.skavenIncursion.runtime;
 import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceWaveExecutionState;
 
@@ -420,14 +421,66 @@ public class IncursionWaveController {
     }
 
     /**
-     * Advances the current wave by one server tick.
+     * Temporary compatibility route for callers that have not yet propagated
+     * persistent mob-tracking ownership into the wave controller.
+     *
+     * Persistence-aware Scenario runtime should use the three-argument
+     * overload. This bridge will be removed after the complete spawn path has
+     * been converted.
+     */
+    @Deprecated
+    public TickResult tick(
+            ServerLevel level,
+            LeadershipContext leadershipContext
+    ) {
+        return tickInternal(
+                level,
+                leadershipContext,
+                null
+        );
+    }
+
+    /**
+     * Advances the current wave by one server tick using the authoritative
+     * persistent mob-tracking state owned by the same incursion.
      *
      * A newly selected wave begins ticking on the following server tick rather
      * than immediately consuming the transition tick.
      */
     public TickResult tick(
             ServerLevel level,
-            LeadershipContext leadershipContext
+            LeadershipContext leadershipContext,
+            IncursionMobTrackingState mobTrackingState
+    ) {
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "Wave-controller mob-tracking state cannot be null."
+            );
+        }
+
+        if (!getIncursionId().equals(
+                mobTrackingState.getIncursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "Wave-controller incursion ID "
+                            + getIncursionId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        return tickInternal(
+                level,
+                leadershipContext,
+                mobTrackingState
+        );
+    }
+
+    private TickResult tickInternal(
+            ServerLevel level,
+            LeadershipContext leadershipContext,
+            IncursionMobTrackingState mobTrackingState
     ) {
         if (level == null) {
             throw new IllegalArgumentException(
@@ -450,12 +503,24 @@ public class IncursionWaveController {
         int tickedWaveIndex =
                 currentWaveExecutionState.getWaveIndex();
 
-        WaveExecutionState.TickResult waveTickResult =
-                currentWaveExecutionState.tick(
-                        level,
-                        SourceState.ACTIVE,
-                        leadershipContext
-                );
+        WaveExecutionState.TickResult waveTickResult;
+
+        if (mobTrackingState == null) {
+            waveTickResult =
+                    currentWaveExecutionState.tick(
+                            level,
+                            SourceState.ACTIVE,
+                            leadershipContext
+                    );
+        } else {
+            waveTickResult =
+                    currentWaveExecutionState.tick(
+                            level,
+                            SourceState.ACTIVE,
+                            leadershipContext,
+                            mobTrackingState
+                    );
+        }
 
         boolean advancedToNextWave =
                 false;

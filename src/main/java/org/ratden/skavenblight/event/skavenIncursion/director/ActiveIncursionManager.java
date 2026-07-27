@@ -11,6 +11,7 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import net.minecraft.server.MinecraftServer;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.chunk.IncursionChunkTicketService;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -295,6 +296,198 @@ public final class ActiveIncursionManager {
         }
 
         return false;
+    }
+
+    /**
+     * Records the confirmed defeat of one successfully delivered persistent
+     * incursion mob.
+     *
+     * The incursion is resolved by its canonical Scenario/incursion ID. The
+     * entity UUID must already exist in that incursion's authoritative mob-
+     * tracking state.
+     *
+     * A changed lifecycle resolution is checkpointed immediately because a
+     * confirmed defeat is a critical persistent transition.
+     *
+     * Legacy incursions are intentionally ignored because they do not own
+     * authoritative persistent mob-tracking state.
+     *
+     * @return true when the entity belongs to the resolved persistent
+     *         incursion, including when it was already marked defeated
+     */
+    public static boolean reportTrackedMobDefeated(
+            net.minecraft.server.level.ServerLevel level,
+            UUID incursionId,
+            UUID entityId
+    ) {
+        if (level == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob defeat level cannot be null."
+            );
+        }
+
+        if (incursionId == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob defeat incursion ID cannot be null."
+            );
+        }
+
+        if (entityId == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob defeat entity ID cannot be null."
+            );
+        }
+
+        LivePersistentIncursion persistentIncursion =
+                PERSISTENT_INCURSIONS_BY_ID.get(
+                        incursionId
+                );
+
+        if (persistentIncursion == null) {
+            return false;
+        }
+
+        if (persistentIncursion.getLevel()
+                != level) {
+
+            throw new IllegalStateException(
+                    "Persistent incursion "
+                            + incursionId
+                            + " is attached to level "
+                            + persistentIncursion
+                            .getLevel()
+                            .dimension()
+                            .location()
+                            + ", but tracked entity "
+                            + entityId
+                            + " died in level "
+                            + level.dimension().location()
+                            + "."
+            );
+        }
+
+        if (!persistentIncursion
+                .getMobTrackingState()
+                .containsEntity(
+                        entityId
+                )) {
+
+            return false;
+        }
+
+        boolean trackingChanged =
+                persistentIncursion
+                        .getMobTrackingState()
+                        .markDefeated(
+                                entityId
+                        );
+
+        if (trackingChanged) {
+            synchronisePersistentSnapshot(
+                    persistentIncursion
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Records the permanent non-death removal of one successfully delivered
+     * persistent incursion mob.
+     *
+     * The entity must already exist in the authoritative mob-tracking state
+     * belonging to the supplied incursion.
+     *
+     * Ordinary chunk unloading and dimension transfer must not call this
+     * method. The NeoForge lifecycle adapter is responsible for classifying
+     * the entity's RemovalReason before routing the event here.
+     *
+     * A changed lifecycle resolution is checkpointed immediately because a
+     * permanent entity removal is a critical persistent transition.
+     *
+     * A mob already marked DEFEATED is not downgraded. A mob already marked
+     * OTHER_TERMINAL_REMOVAL remains unchanged.
+     *
+     * Legacy incursions are intentionally ignored because they do not own
+     * authoritative persistent mob-tracking state.
+     *
+     * @return true when the entity belongs to the resolved persistent
+     *         incursion, including when it was already terminal
+     */
+    public static boolean reportTrackedMobOtherTerminalRemoval(
+            net.minecraft.server.level.ServerLevel level,
+            UUID incursionId,
+            UUID entityId
+    ) {
+        if (level == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob removal level cannot be null."
+            );
+        }
+
+        if (incursionId == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob removal incursion ID cannot be null."
+            );
+        }
+
+        if (entityId == null) {
+            throw new IllegalArgumentException(
+                    "Tracked-mob removal entity ID cannot be null."
+            );
+        }
+
+        LivePersistentIncursion persistentIncursion =
+                PERSISTENT_INCURSIONS_BY_ID.get(
+                        incursionId
+                );
+
+        if (persistentIncursion == null) {
+            return false;
+        }
+
+        if (persistentIncursion.getLevel()
+                != level) {
+
+            throw new IllegalStateException(
+                    "Persistent incursion "
+                            + incursionId
+                            + " is attached to level "
+                            + persistentIncursion
+                            .getLevel()
+                            .dimension()
+                            .location()
+                            + ", but tracked entity "
+                            + entityId
+                            + " was permanently removed in level "
+                            + level.dimension().location()
+                            + "."
+            );
+        }
+
+        if (!persistentIncursion
+                .getMobTrackingState()
+                .containsEntity(
+                        entityId
+                )) {
+
+            return false;
+        }
+
+        boolean trackingChanged =
+                persistentIncursion
+                        .getMobTrackingState()
+                        .markOtherTerminalRemoval(
+                                entityId
+                        );
+
+        if (trackingChanged) {
+            synchronisePersistentSnapshot(
+                    persistentIncursion
+            );
+        }
+
+        return true;
     }
 
     /**
@@ -822,6 +1015,17 @@ public final class ActiveIncursionManager {
      * Performs idempotent world-side cleanup before deleting the persistent
      * record.
      *
+     * Cleanup ordering is deliberate:
+     *
+     * 1. release authoritative chunk tickets;
+     * 2. remove optional debug anchors;
+     * 3. release physical source reservations;
+     * 4. delete the authoritative SavedData record.
+     *
+     * If ticket release fails, the persistent record and remaining runtime
+     * ownership stay present so cleanup may be retried rather than silently
+     * leaving loaded chunks with no owning incursion.
+     *
      * Debug anchors and static reservation entries may already be absent,
      * particularly after a restart. Their removal methods therefore tolerate
      * a missing entry.
@@ -831,6 +1035,11 @@ public final class ActiveIncursionManager {
     private static void removePersistentWorldState(
             LivePersistentIncursion incursion
     ) {
+        IncursionChunkTicketService.releaseAllTickets(
+                incursion.getLevel(),
+                incursion.getChunkLoadPlan()
+        );
+
         DebugIncursionAnchorTracker.removeAndForget(
                 incursion.getLevel(),
                 incursion.getIncursionId()

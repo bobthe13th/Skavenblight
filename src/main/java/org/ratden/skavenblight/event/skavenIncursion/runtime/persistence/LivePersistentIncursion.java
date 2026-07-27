@@ -2,8 +2,11 @@ package org.ratden.skavenblight.event.skavenIncursion.runtime.persistence;
 
 import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionChunkLoadPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.event.SourceDestroyedEvent;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
 
 import java.util.UUID;
 
@@ -15,22 +18,28 @@ import java.util.UUID;
  * - the ServerLevel in which the incursion is running;
  * - the restored or freshly completed immutable IncursionPlan;
  * - the immutable snapshot of that plan used for persistence;
+ * - the exact immutable chunk-load plan admitted with that tactical plan;
+ * - the immutable snapshot of that chunk-load plan;
  * - the selected Scenario and Stratagem identities;
  * - the original target snapshot;
  * - the live persistable Scenario;
+ * - persistent tracking for every successfully delivered incursion mob;
  * - the persistence-layer lifecycle phase.
  *
  * The live Scenario continues to own mutable combat execution. This owner
  * coordinates that runtime with persistent metadata and determines when the
  * record should move from ACTIVE to CLEANUP_PENDING.
  *
- * This class does not write SavedData directly. ActiveIncursionManager will
- * later use createPersistentSnapshot() to add or replace the corresponding
- * record in SkavenIncursionSavedData.
+ * Pending mobs remain authoritative in the Scenario's source-spawn queues.
+ * Successfully delivered mobs become authoritative in mobTrackingState.
+ *
+ * This class does not write SavedData directly. ActiveIncursionManager uses
+ * createPersistentSnapshot() to add or replace the corresponding record in
+ * SkavenIncursionSavedData.
  *
  * Restoration performed here is logical only. The supplied IncursionPlan and
  * Scenario must already have been reconstructed from the saved snapshots.
- * World reconciliation remains a later operation.
+ * World reconciliation remains a separate operation.
  */
 public final class LivePersistentIncursion {
 
@@ -46,6 +55,11 @@ public final class LivePersistentIncursion {
     private final IncursionPlan incursionPlan;
     private final IncursionPlanSnapshot incursionPlanSnapshot;
 
+    private final IncursionChunkLoadPlan chunkLoadPlan;
+    private final IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot;
+
+    private final IncursionMobTrackingState mobTrackingState;
+
     private final PersistableSkavenScenario<
             PlannedScenarioRuntimeSnapshot
             > scenario;
@@ -59,6 +73,9 @@ public final class LivePersistentIncursion {
             IncursionTargetSnapshot targetSnapshot,
             IncursionPlan incursionPlan,
             IncursionPlanSnapshot incursionPlanSnapshot,
+            IncursionChunkLoadPlan chunkLoadPlan,
+            IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot,
+            IncursionMobTrackingState mobTrackingState,
             PersistableSkavenScenario<
                     PlannedScenarioRuntimeSnapshot
                     > scenario,
@@ -99,6 +116,26 @@ public final class LivePersistentIncursion {
             );
         }
 
+        if (chunkLoadPlan == null) {
+            throw new IllegalArgumentException(
+                    "Live persistent incursion chunk-load plan cannot be null."
+            );
+        }
+
+        if (chunkLoadPlanSnapshot == null) {
+            throw new IllegalArgumentException(
+                    "Live persistent incursion chunk-load plan snapshot "
+                            + "cannot be null."
+            );
+        }
+
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "Live persistent incursion mob-tracking state cannot be "
+                            + "null."
+            );
+        }
+
         if (scenario == null) {
             throw new IllegalArgumentException(
                     "Live persistent incursion Scenario cannot be null."
@@ -117,6 +154,32 @@ public final class LivePersistentIncursion {
         if (plannedIncursionId == null) {
             throw new IllegalArgumentException(
                     "Live persistent IncursionPlan has no incursion ID."
+            );
+        }
+
+        if (!plannedIncursionId.equals(
+                mobTrackingState.getIncursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "Live persistent IncursionPlan ID "
+                            + plannedIncursionId
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        IncursionChunkLoadPlanSnapshot capturedChunkLoadPlanSnapshot =
+                IncursionChunkLoadPlanSnapshot.capture(
+                        chunkLoadPlan
+                );
+
+        if (!chunkLoadPlanSnapshot.equals(
+                capturedChunkLoadPlanSnapshot
+        )) {
+            throw new IllegalArgumentException(
+                    "Live persistent incursion chunk-load plan does not "
+                            + "exactly match its immutable snapshot."
             );
         }
 
@@ -141,6 +204,15 @@ public final class LivePersistentIncursion {
         this.incursionPlanSnapshot =
                 incursionPlanSnapshot;
 
+        this.chunkLoadPlan =
+                chunkLoadPlan;
+
+        this.chunkLoadPlanSnapshot =
+                chunkLoadPlanSnapshot;
+
+        this.mobTrackingState =
+                mobTrackingState;
+
         this.scenario =
                 scenario;
 
@@ -153,9 +225,14 @@ public final class LivePersistentIncursion {
     /**
      * Creates the live owner for a newly planned and admitted incursion.
      *
+     * Fresh incursions begin with an empty persistent mob-tracking state.
+     * Entities enter that state only after they have successfully been added
+     * to the world.
+     *
      * The supplied Scenario must represent fresh unfinished runtime state.
-     * The caller supplies the immutable plan snapshot separately so this
-     * owner remains independent of the planning snapshot-capture mechanism.
+     * The caller supplies the immutable tactical and chunk-load snapshots
+     * separately so this owner remains independent of their calculation and
+     * capture mechanisms.
      */
     public static LivePersistentIncursion createFresh(
             ServerLevel level,
@@ -163,10 +240,18 @@ public final class LivePersistentIncursion {
             IncursionTargetSnapshot targetSnapshot,
             IncursionPlan incursionPlan,
             IncursionPlanSnapshot incursionPlanSnapshot,
+            IncursionChunkLoadPlan chunkLoadPlan,
+            IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot,
             PersistableSkavenScenario<
                     PlannedScenarioRuntimeSnapshot
                     > scenario
     ) {
+        if (incursionPlan == null) {
+            throw new IllegalArgumentException(
+                    "Fresh persistent incursion plan cannot be null."
+            );
+        }
+
         if (scenario == null) {
             throw new IllegalArgumentException(
                     "Fresh persistent incursion Scenario cannot be null."
@@ -183,6 +268,11 @@ public final class LivePersistentIncursion {
             );
         }
 
+        IncursionMobTrackingState mobTrackingState =
+                new IncursionMobTrackingState(
+                        incursionPlan.getIncursionId()
+                );
+
         return new LivePersistentIncursion(
                 level,
                 scenario.getId(),
@@ -190,19 +280,23 @@ public final class LivePersistentIncursion {
                 targetSnapshot,
                 incursionPlan,
                 incursionPlanSnapshot,
+                chunkLoadPlan,
+                chunkLoadPlanSnapshot,
+                mobTrackingState,
                 scenario,
                 PersistentIncursionPhase.ACTIVE
         );
     }
 
     /**
-     * Reassembles the live owner around an already restored immutable plan
-     * and Scenario.
+     * Reassembles the live owner around an already restored immutable tactical
+     * plan and Scenario.
      *
-     * The supplied plan and Scenario must have been restored from the nested
-     * snapshots contained in persistentSnapshot. This method confirms that
-     * their newly captured persistent representation exactly matches the
-     * original saved record.
+     * The immutable chunk-load plan and persistent mob-tracking state are
+     * restored from their own nested snapshots.
+     *
+     * The newly captured complete persistent representation must exactly match
+     * the original saved record.
      */
     public static LivePersistentIncursion restore(
             ServerLevel level,
@@ -218,6 +312,16 @@ public final class LivePersistentIncursion {
             );
         }
 
+        IncursionChunkLoadPlan restoredChunkLoadPlan =
+                persistentSnapshot
+                        .chunkLoadPlanSnapshot()
+                        .restore();
+
+        IncursionMobTrackingState restoredMobTrackingState =
+                IncursionMobTrackingState.restore(
+                        persistentSnapshot.mobTrackingSnapshot()
+                );
+
         LivePersistentIncursion restoredIncursion =
                 new LivePersistentIncursion(
                         level,
@@ -226,6 +330,9 @@ public final class LivePersistentIncursion {
                         persistentSnapshot.targetSnapshot(),
                         restoredIncursionPlan,
                         persistentSnapshot.incursionPlanSnapshot(),
+                        restoredChunkLoadPlan,
+                        persistentSnapshot.chunkLoadPlanSnapshot(),
+                        restoredMobTrackingState,
                         restoredScenario,
                         persistentSnapshot.phase()
                 );
@@ -275,6 +382,25 @@ public final class LivePersistentIncursion {
         return incursionPlanSnapshot;
     }
 
+    public IncursionChunkLoadPlan getChunkLoadPlan() {
+        return chunkLoadPlan;
+    }
+
+    public IncursionChunkLoadPlanSnapshot getChunkLoadPlanSnapshot() {
+        return chunkLoadPlanSnapshot;
+    }
+
+    /**
+     * Returns the persistent authority for successfully delivered mobs.
+     *
+     * Callers may register successful spawns or terminal lifecycle changes
+     * through this state. ActiveIncursionManager will capture those changes
+     * during its next persistence checkpoint.
+     */
+    public IncursionMobTrackingState getMobTrackingState() {
+        return mobTrackingState;
+    }
+
     public PersistableSkavenScenario<
             PlannedScenarioRuntimeSnapshot
             > getScenario() {
@@ -305,6 +431,9 @@ public final class LivePersistentIncursion {
     /**
      * Advances the live Scenario when this persistent incursion is ACTIVE.
      *
+     * The Scenario receives the same authoritative mob-tracking state owned
+     * and persisted by this LivePersistentIncursion.
+     *
      * When the Scenario finishes, the persistent record moves immediately to
      * CLEANUP_PENDING. The manager will later save that finished state before
      * performing cleanup and removing the record.
@@ -316,7 +445,9 @@ public final class LivePersistentIncursion {
             return;
         }
 
-        scenario.tick();
+        scenario.tickPersistent(
+                mobTrackingState
+        );
 
         synchronisePhaseWithScenario();
 
@@ -426,22 +557,27 @@ public final class LivePersistentIncursion {
      */
     public PersistentIncursionSnapshot createPersistentSnapshot() {
         /*
-         * Lightweight live ownership is checked first. Scenario snapshot
-         * creation then performs the complete nested runtime validation only
-         * at the actual persistence boundary.
+         * Lightweight live ownership is checked first. Scenario and
+         * mob-tracking snapshot creation then perform their complete nested
+         * validation only at the actual persistence boundary.
          */
         validateInternalState();
 
         PlannedScenarioRuntimeSnapshot runtimeSnapshot =
                 scenario.createSnapshot();
 
+        IncursionMobTrackingState.Snapshot mobTrackingSnapshot =
+                mobTrackingState.createSnapshot();
+
         return createPersistentSnapshot(
-                runtimeSnapshot
+                runtimeSnapshot,
+                mobTrackingSnapshot
         );
     }
 
     private PersistentIncursionSnapshot createPersistentSnapshot(
-            PlannedScenarioRuntimeSnapshot runtimeSnapshot
+            PlannedScenarioRuntimeSnapshot runtimeSnapshot,
+            IncursionMobTrackingState.Snapshot mobTrackingSnapshot
     ) {
         return new PersistentIncursionSnapshot(
                 incursionId,
@@ -449,7 +585,9 @@ public final class LivePersistentIncursion {
                 stratagemId,
                 targetSnapshot,
                 incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
                 runtimeSnapshot,
+                mobTrackingSnapshot,
                 phase
         );
     }
@@ -476,10 +614,11 @@ public final class LivePersistentIncursion {
      *
      * This method is called during ordinary ticking and lifecycle changes. It
      * must therefore avoid constructing the complete Scenario persistence
-     * graph.
+     * graph or scanning the mob-tracking records.
      *
-     * Full plan, wave, source, queue and lifecycle validation occurs through
-     * createPersistentSnapshot() when runtime is actually checkpointed.
+     * Full plan, wave, source, queue, mob-tracking and lifecycle validation
+     * occurs through createPersistentSnapshot() when runtime is actually
+     * checkpointed.
      */
     private void validateInternalState() {
         if (!incursionId.equals(
@@ -497,6 +636,33 @@ public final class LivePersistentIncursion {
             throw new IllegalStateException(
                     "Live persistent incursion ID does not match its immutable "
                             + "plan snapshot."
+            );
+        }
+
+        if (!incursionId.equals(
+                chunkLoadPlan.getIncursionId()
+        )) {
+            throw new IllegalStateException(
+                    "Live persistent incursion ID does not match its "
+                            + "chunk-load plan."
+            );
+        }
+
+        if (!incursionId.equals(
+                chunkLoadPlanSnapshot.incursionId()
+        )) {
+            throw new IllegalStateException(
+                    "Live persistent incursion ID does not match its immutable "
+                            + "chunk-load plan snapshot."
+            );
+        }
+
+        if (!incursionId.equals(
+                mobTrackingState.getIncursionId()
+        )) {
+            throw new IllegalStateException(
+                    "Live persistent incursion ID does not match its "
+                            + "mob-tracking state."
             );
         }
 

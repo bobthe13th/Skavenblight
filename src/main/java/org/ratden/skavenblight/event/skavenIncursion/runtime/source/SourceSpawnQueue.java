@@ -4,7 +4,6 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.composition.Source
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,12 +15,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * Mutable runtime queue for one planned SourceComposition.
  *
  * SourceComposition remains the immutable planning authority. This queue
- * expands the purchased mob counts into individual delivery entries and
- * shuffles those entries once when fresh runtime is created.
+ * expands the purchased mob entries into individual delivery entries carrying
+ * both:
  *
- * The resulting sequence is then authoritative for baseline ordinary
- * delivery. It is persisted exactly and is never shuffled again during
- * restoration.
+ * - the mob ID to spawn;
+ * - the exact amount of planned threat represented by that individual mob.
+ *
+ * Fresh runtime shuffles those delivery entries once. The exact remaining
+ * sequence is then authoritative, persisted, and restored without another
+ * shuffle.
  *
  * One queue represents one source composition in one wave. Cancelling this
  * queue therefore does not affect compositions assigned to the same physical
@@ -30,7 +32,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * Attached-mob assignments may deliberately select a particular remaining
  * mob ID. This allows BEFORE_ORDINARY, WITH_ORDINARY and AFTER_ORDINARY
  * assignments to promote an already-budgeted mob without adding another mob
- * to the composition.
+ * to the composition. When several remaining entries share the same mob ID,
+ * the first occurrence in the exact delivery sequence is selected, including
+ * its represented threat.
  */
 public final class SourceSpawnQueue {
 
@@ -46,9 +50,20 @@ public final class SourceSpawnQueue {
     private final List<String> mobOrder;
 
     /**
-     * Original immutable-plan counts.
+     * Original immutable-plan counts by mob ID.
      */
     private final Map<String, Integer> plannedCounts;
+
+    /**
+     * Exact individual deliveries contained in the immutable plan before
+     * shuffling.
+     */
+    private final List<DeliveryEntry> plannedDeliveryEntries;
+
+    /**
+     * Fixed original planned threat for this source composition.
+     */
+    private final int plannedThreat;
 
     /**
      * Mutable remaining count for every canonical mob ID.
@@ -58,9 +73,14 @@ public final class SourceSpawnQueue {
     /**
      * Exact remaining individual delivery sequence.
      *
-     * Duplicate mob IDs represent separate already-purchased mobs.
+     * Duplicate entries represent separate already-purchased mobs.
      */
-    private final List<String> remainingMobOrder;
+    private final List<DeliveryEntry> remainingDeliveryEntries;
+
+    /**
+     * Cached sum of represented threat still pending in the queue.
+     */
+    private int remainingThreat;
 
     /**
      * Creates a fresh randomly ordered queue from one immutable source
@@ -74,13 +94,13 @@ public final class SourceSpawnQueue {
                         sourceComposition
                 );
 
-        List<String> shuffledMobOrder =
-                expandPlannedMobOrder(
-                        queuePlan
+        List<DeliveryEntry> shuffledDeliveryEntries =
+                new ArrayList<>(
+                        queuePlan.plannedDeliveryEntries()
                 );
 
         Collections.shuffle(
-                shuffledMobOrder,
+                shuffledDeliveryEntries,
                 ThreadLocalRandom.current()
         );
 
@@ -93,15 +113,22 @@ public final class SourceSpawnQueue {
         this.plannedCounts =
                 queuePlan.plannedCounts();
 
+        this.plannedDeliveryEntries =
+                queuePlan.plannedDeliveryEntries();
+
+        this.plannedThreat =
+                queuePlan.plannedThreat();
+
         this.remainingCounts =
                 new LinkedHashMap<>(
                         queuePlan.plannedCounts()
                 );
 
-        this.remainingMobOrder =
-                new ArrayList<>(
-                        shuffledMobOrder
-                );
+        this.remainingDeliveryEntries =
+                shuffledDeliveryEntries;
+
+        this.remainingThreat =
+                queuePlan.plannedThreat();
 
         validateInternalState();
     }
@@ -111,7 +138,7 @@ public final class SourceSpawnQueue {
      */
     private SourceSpawnQueue(
             QueuePlan queuePlan,
-            List<String> remainingMobOrder
+            List<DeliveryEntry> remainingDeliveryEntries
     ) {
         if (queuePlan == null) {
             throw new IllegalArgumentException(
@@ -119,9 +146,9 @@ public final class SourceSpawnQueue {
             );
         }
 
-        if (remainingMobOrder == null) {
+        if (remainingDeliveryEntries == null) {
             throw new IllegalArgumentException(
-                    "Restored source queue order cannot be null."
+                    "Restored source queue delivery entries cannot be null."
             );
         }
 
@@ -134,27 +161,73 @@ public final class SourceSpawnQueue {
         this.plannedCounts =
                 queuePlan.plannedCounts();
 
+        this.plannedDeliveryEntries =
+                queuePlan.plannedDeliveryEntries();
+
+        this.plannedThreat =
+                queuePlan.plannedThreat();
+
         this.remainingCounts =
                 createEmptyRemainingCounts(
                         queuePlan
                 );
 
-        this.remainingMobOrder =
+        this.remainingDeliveryEntries =
                 new ArrayList<>();
 
-        for (String mobId
-                : remainingMobOrder) {
+        this.remainingThreat =
+                0;
 
-            requireMobId(
-                    mobId
-            );
+        Map<DeliveryEntry, Integer> availablePlannedEntries =
+                countDeliveryEntries(
+                        plannedDeliveryEntries
+                );
+
+        Map<DeliveryEntry, Integer> restoredEntryCounts =
+                new LinkedHashMap<>();
+
+        for (DeliveryEntry deliveryEntry
+                : remainingDeliveryEntries) {
+
+            if (deliveryEntry == null) {
+                throw new IllegalArgumentException(
+                        "Restored source queue cannot contain a null delivery "
+                                + "entry."
+                );
+            }
+
+            int restoredEntryCount =
+                    restoredEntryCounts.merge(
+                            deliveryEntry,
+                            1,
+                            Math::addExact
+                    );
+
+            int plannedEntryCount =
+                    availablePlannedEntries.getOrDefault(
+                            deliveryEntry,
+                            0
+                    );
+
+            if (restoredEntryCount > plannedEntryCount) {
+                throw new IllegalArgumentException(
+                        "Restored source queue contains more delivery entries "
+                                + "for mob ID "
+                                + deliveryEntry.mobId()
+                                + " representing "
+                                + deliveryEntry.representedThreat()
+                                + " threat than immutable source composition "
+                                + sourceCompositionId
+                                + " planned."
+                );
+            }
 
             if (!plannedCounts.containsKey(
-                    mobId
+                    deliveryEntry.mobId()
             )) {
                 throw new IllegalArgumentException(
                         "Restored source queue contains mob ID "
-                                + mobId
+                                + deliveryEntry.mobId()
                                 + " that does not belong to immutable source "
                                 + "composition "
                                 + sourceCompositionId
@@ -162,16 +235,25 @@ public final class SourceSpawnQueue {
                 );
             }
 
-            this.remainingMobOrder.add(
-                    mobId
+            this.remainingDeliveryEntries.add(
+                    deliveryEntry
             );
 
-            remainingCounts.put(
-                    mobId,
-                    remainingCounts.get(
-                            mobId
-                    ) + 1
+            this.remainingCounts.put(
+                    deliveryEntry.mobId(),
+                    Math.addExact(
+                            this.remainingCounts.get(
+                                    deliveryEntry.mobId()
+                            ),
+                            1
+                    )
             );
+
+            this.remainingThreat =
+                    Math.addExact(
+                            this.remainingThreat,
+                            deliveryEntry.representedThreat()
+                    );
         }
 
         validateInternalState();
@@ -213,7 +295,7 @@ public final class SourceSpawnQueue {
         SourceSpawnQueue restoredQueue =
                 new SourceSpawnQueue(
                         queuePlan,
-                        snapshot.remainingMobOrder()
+                        snapshot.remainingDeliveryEntries()
                 );
 
         Snapshot reconstructedSnapshot =
@@ -247,16 +329,36 @@ public final class SourceSpawnQueue {
     }
 
     /**
-     * Returns the exact remaining individual delivery sequence.
+     * Compatibility view of the exact remaining delivery sequence as mob IDs.
+     *
+     * New threat-aware consumers should use getRemainingDeliveryEntries().
      */
     public List<String> getRemainingMobOrder() {
-        return List.copyOf(
-                remainingMobOrder
+        return extractMobOrder(
+                remainingDeliveryEntries
         );
     }
 
+    /**
+     * Returns the exact remaining individual delivery sequence, including the
+     * represented threat carried by every pending mob.
+     */
+    public List<DeliveryEntry> getRemainingDeliveryEntries() {
+        return List.copyOf(
+                remainingDeliveryEntries
+        );
+    }
+
+    public int getPlannedThreat() {
+        return plannedThreat;
+    }
+
+    public int getRemainingThreat() {
+        return remainingThreat;
+    }
+
     public boolean hasRemainingMobs() {
-        return !remainingMobOrder.isEmpty();
+        return !remainingDeliveryEntries.isEmpty();
     }
 
     public boolean isEmpty() {
@@ -264,7 +366,7 @@ public final class SourceSpawnQueue {
     }
 
     public int getRemainingMobCount() {
-        return remainingMobOrder.size();
+        return remainingDeliveryEntries.size();
     }
 
     public int getRemainingCount(
@@ -339,16 +441,29 @@ public final class SourceSpawnQueue {
      *
      * This does not alter the queue.
      *
-     * @return the next remaining mob ID, or null when the queue is empty
+     * @return the next remaining delivery entry, or null when the queue is
+     * empty
      */
-    public String peekNextMobId() {
+    public DeliveryEntry peekNextDeliveryEntry() {
         if (!hasRemainingMobs()) {
             return null;
         }
 
-        return remainingMobOrder.get(
+        return remainingDeliveryEntries.get(
                 0
         );
+    }
+
+    /**
+     * Compatibility view of peekNextDeliveryEntry().
+     */
+    public String peekNextMobId() {
+        DeliveryEntry deliveryEntry =
+                peekNextDeliveryEntry();
+
+        return deliveryEntry == null
+                ? null
+                : deliveryEntry.mobId();
     }
 
     /**
@@ -361,21 +476,283 @@ public final class SourceSpawnQueue {
      * Attached-assignment runtime uses this to protect mobs reserved for later
      * attachment phases without destroying the randomised baseline order.
      *
-     * @return the next eligible remaining mob ID, or null when none exists
+     * @return the next eligible remaining delivery entry, or null when none
+     * exists
+     */
+    public DeliveryEntry peekNextDeliveryEntry(
+            Set<String> eligibleMobIds
+    ) {
+        validateEligibleMobIds(
+                eligibleMobIds
+        );
+
+        if (eligibleMobIds.isEmpty()
+                || !hasRemainingMobs()) {
+
+            return null;
+        }
+
+        for (DeliveryEntry candidateEntry
+                : remainingDeliveryEntries) {
+
+            if (eligibleMobIds.contains(
+                    candidateEntry.mobId()
+            )) {
+                return candidateEntry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Compatibility view of peekNextDeliveryEntry(Set).
      */
     public String peekNextMobId(
+            Set<String> eligibleMobIds
+    ) {
+        DeliveryEntry deliveryEntry =
+                peekNextDeliveryEntry(
+                        eligibleMobIds
+                );
+
+        return deliveryEntry == null
+                ? null
+                : deliveryEntry.mobId();
+    }
+
+    /**
+     * Confirms that the first naturally selected queue entry successfully
+     * spawned and returns the exact consumed delivery entry.
+     */
+    public DeliveryEntry confirmNextMobSpawned(
+            String spawnedMobId
+    ) {
+        requireMobId(
+                spawnedMobId
+        );
+
+        DeliveryEntry expectedEntry =
+                peekNextDeliveryEntry();
+
+        if (expectedEntry == null) {
+            throw new IllegalStateException(
+                    "Cannot confirm a mob spawn because the source queue is "
+                            + "empty."
+            );
+        }
+
+        if (!expectedEntry.mobId().equals(
+                spawnedMobId
+        )) {
+            throw new IllegalArgumentException(
+                    "Source queue expected mob ID "
+                            + expectedEntry.mobId()
+                            + " but runtime reported "
+                            + spawnedMobId
+                            + "."
+            );
+        }
+
+        return consumeDeliveryAtIndex(
+                0
+        );
+    }
+
+    /**
+     * Compatibility operation for existing runtime callers.
+     */
+    public void markNextMobSpawned(
+            String spawnedMobId
+    ) {
+        confirmNextMobSpawned(
+                spawnedMobId
+        );
+    }
+
+    /**
+     * Confirms the successful spawn of one deliberately selected remaining
+     * mob and returns the exact consumed delivery entry.
+     *
+     * The first remaining occurrence of that mob ID is consumed. This
+     * preserves the relative order of every other purchased mob and retains
+     * the represented threat assigned to the selected occurrence.
+     */
+    public DeliveryEntry confirmMobSpawned(
+            String spawnedMobId
+    ) {
+        requireMobId(
+                spawnedMobId
+        );
+
+        if (!plannedCounts.containsKey(
+                spawnedMobId
+        )) {
+            throw new IllegalArgumentException(
+                    "Mob ID "
+                            + spawnedMobId
+                            + " does not belong to source composition "
+                            + sourceCompositionId
+                            + "."
+            );
+        }
+
+        int queueIndex =
+                findFirstDeliveryIndex(
+                        spawnedMobId
+                );
+
+        if (queueIndex < 0) {
+            throw new IllegalStateException(
+                    "Source queue has no remaining "
+                            + spawnedMobId
+                            + " to confirm as spawned."
+            );
+        }
+
+        return consumeDeliveryAtIndex(
+                queueIndex
+        );
+    }
+
+    /**
+     * Compatibility operation for existing runtime callers.
+     */
+    public void markMobSpawned(
+            String spawnedMobId
+    ) {
+        confirmMobSpawned(
+                spawnedMobId
+        );
+    }
+
+    /**
+     * Cancels every spawn still pending in this wave-specific queue and
+     * returns both its mob count and represented threat.
+     */
+    public CancellationResult cancelRemainingDeliveries() {
+        CancellationResult cancellationResult =
+                new CancellationResult(
+                        remainingDeliveryEntries.size(),
+                        remainingThreat
+                );
+
+        remainingDeliveryEntries.clear();
+
+        for (String mobId
+                : mobOrder) {
+
+            remainingCounts.put(
+                    mobId,
+                    0
+            );
+        }
+
+        remainingThreat =
+                0;
+
+        validateInternalState();
+
+        return cancellationResult;
+    }
+
+    /**
+     * Compatibility operation returning only the number of mobs cancelled.
+     */
+    public int cancelRemainingMobs() {
+        return cancelRemainingDeliveries()
+                .cancelledMobCount();
+    }
+
+    /**
+     * Captures the exact remaining individual delivery sequence.
+     */
+    public Snapshot createSnapshot() {
+        return new Snapshot(
+                sourceCompositionId,
+                remainingDeliveryEntries
+        );
+    }
+
+    /**
+     * Consumes one exact entry from the remaining delivery sequence.
+     */
+    private DeliveryEntry consumeDeliveryAtIndex(
+            int queueIndex
+    ) {
+        if (queueIndex < 0
+                || queueIndex >= remainingDeliveryEntries.size()) {
+
+            throw new IllegalArgumentException(
+                    "Source queue index "
+                            + queueIndex
+                            + " is outside the remaining delivery sequence."
+            );
+        }
+
+        DeliveryEntry consumedEntry =
+                remainingDeliveryEntries.remove(
+                        queueIndex
+                );
+
+        int remainingForMob =
+                remainingCounts.getOrDefault(
+                        consumedEntry.mobId(),
+                        0
+                );
+
+        if (remainingForMob <= 0) {
+            throw new IllegalStateException(
+                    "Source queue selected mob ID "
+                            + consumedEntry.mobId()
+                            + " with no remaining count."
+            );
+        }
+
+        remainingCounts.put(
+                consumedEntry.mobId(),
+                remainingForMob - 1
+        );
+
+        remainingThreat =
+                Math.subtractExact(
+                        remainingThreat,
+                        consumedEntry.representedThreat()
+                );
+
+        validateInternalState();
+
+        return consumedEntry;
+    }
+
+    private int findFirstDeliveryIndex(
+            String mobId
+    ) {
+        for (int deliveryIndex = 0;
+             deliveryIndex < remainingDeliveryEntries.size();
+             deliveryIndex++) {
+
+            if (mobId.equals(
+                    remainingDeliveryEntries
+                            .get(
+                                    deliveryIndex
+                            )
+                            .mobId()
+            )) {
+                return deliveryIndex;
+            }
+        }
+
+        return -1;
+    }
+
+    private void validateEligibleMobIds(
             Set<String> eligibleMobIds
     ) {
         if (eligibleMobIds == null) {
             throw new IllegalArgumentException(
                     "Eligible mob-ID set cannot be null."
             );
-        }
-
-        if (eligibleMobIds.isEmpty()
-                || !hasRemainingMobs()) {
-
-            return null;
         }
 
         for (String eligibleMobId
@@ -397,187 +774,6 @@ public final class SourceSpawnQueue {
                 );
             }
         }
-
-        for (String candidateMobId
-                : remainingMobOrder) {
-
-            if (eligibleMobIds.contains(
-                    candidateMobId
-            )) {
-                return candidateMobId;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Confirms that the first naturally selected queue entry successfully
-     * spawned.
-     *
-     * Attached assignments or reservation-aware ordinary delivery that
-     * deliberately select a later eligible entry must instead call
-     * markMobSpawned(...).
-     */
-    public void markNextMobSpawned(
-            String spawnedMobId
-    ) {
-        requireMobId(
-                spawnedMobId
-        );
-
-        String expectedMobId =
-                peekNextMobId();
-
-        if (expectedMobId == null) {
-            throw new IllegalStateException(
-                    "Cannot confirm a mob spawn because the source queue is "
-                            + "empty."
-            );
-        }
-
-        if (!expectedMobId.equals(
-                spawnedMobId
-        )) {
-            throw new IllegalArgumentException(
-                    "Source queue expected mob ID "
-                            + expectedMobId
-                            + " but runtime reported "
-                            + spawnedMobId
-                            + "."
-            );
-        }
-
-        consumeMobAtIndex(
-                0
-        );
-    }
-
-    /**
-     * Confirms the successful spawn of one deliberately selected remaining
-     * mob.
-     *
-     * The first remaining occurrence of that mob ID is consumed. This
-     * preserves the relative order of every other purchased mob.
-     *
-     * This is used by:
-     *
-     * - attached assignments whose spawn priority overrides ordinary order;
-     * - ordinary delivery that skipped entries reserved for attachments.
-     */
-    public void markMobSpawned(
-            String spawnedMobId
-    ) {
-        requireMobId(
-                spawnedMobId
-        );
-
-        if (!plannedCounts.containsKey(
-                spawnedMobId
-        )) {
-            throw new IllegalArgumentException(
-                    "Mob ID "
-                            + spawnedMobId
-                            + " does not belong to source composition "
-                            + sourceCompositionId
-                            + "."
-            );
-        }
-
-        int queueIndex =
-                remainingMobOrder.indexOf(
-                        spawnedMobId
-                );
-
-        if (queueIndex < 0) {
-            throw new IllegalStateException(
-                    "Source queue has no remaining "
-                            + spawnedMobId
-                            + " to confirm as spawned."
-            );
-        }
-
-        consumeMobAtIndex(
-                queueIndex
-        );
-    }
-
-    /**
-     * Cancels every spawn still pending in this wave-specific queue.
-     *
-     * @return number of mobs newly cancelled
-     */
-    public int cancelRemainingMobs() {
-        int cancelledCount =
-                remainingMobOrder.size();
-
-        remainingMobOrder.clear();
-
-        for (String mobId
-                : mobOrder) {
-
-            remainingCounts.put(
-                    mobId,
-                    0
-            );
-        }
-
-        validateInternalState();
-
-        return cancelledCount;
-    }
-
-    /**
-     * Captures the exact remaining individual delivery sequence.
-     */
-    public Snapshot createSnapshot() {
-        return new Snapshot(
-                sourceCompositionId,
-                remainingMobOrder
-        );
-    }
-
-    /**
-     * Consumes one exact entry from the remaining delivery sequence.
-     */
-    private void consumeMobAtIndex(
-            int queueIndex
-    ) {
-        if (queueIndex < 0
-                || queueIndex >= remainingMobOrder.size()) {
-
-            throw new IllegalArgumentException(
-                    "Source queue index "
-                            + queueIndex
-                            + " is outside the remaining delivery sequence."
-            );
-        }
-
-        String spawnedMobId =
-                remainingMobOrder.remove(
-                        queueIndex
-                );
-
-        int remainingForMob =
-                remainingCounts.getOrDefault(
-                        spawnedMobId,
-                        0
-                );
-
-        if (remainingForMob <= 0) {
-            throw new IllegalStateException(
-                    "Source queue selected mob ID "
-                            + spawnedMobId
-                            + " with no remaining count."
-            );
-        }
-
-        remainingCounts.put(
-                spawnedMobId,
-                remainingForMob - 1
-        );
-
-        validateInternalState();
     }
 
     private void validateInternalState() {
@@ -597,8 +793,9 @@ public final class SourceSpawnQueue {
         }
 
         if (plannedCounts == null
+                || plannedDeliveryEntries == null
                 || remainingCounts == null
-                || remainingMobOrder == null) {
+                || remainingDeliveryEntries == null) {
 
             throw new IllegalStateException(
                     "Source spawn queue collections cannot be null."
@@ -625,82 +822,148 @@ public final class SourceSpawnQueue {
             );
         }
 
-        LinkedHashMap<String, Integer>
-                calculatedRemainingCounts =
-                new LinkedHashMap<>();
+        LinkedHashMap<String, Integer> calculatedPlannedCounts =
+                createEmptyCountMap(
+                        mobOrder
+                );
 
-        for (String mobId
-                : mobOrder) {
+        int calculatedPlannedThreat =
+                0;
 
-            Integer plannedCount =
-                    plannedCounts.get(
-                            mobId
-                    );
+        for (DeliveryEntry plannedEntry
+                : plannedDeliveryEntries) {
 
-            Integer remainingCount =
-                    remainingCounts.get(
-                            mobId
-                    );
-
-            if (plannedCount == null
-                    || plannedCount <= 0) {
-
+            if (plannedEntry == null) {
                 throw new IllegalStateException(
-                        "Source spawn queue contains invalid planned count for "
-                                + mobId
+                        "Source spawn queue planned deliveries cannot contain "
+                                + "null."
+                );
+            }
+
+            if (!calculatedPlannedCounts.containsKey(
+                    plannedEntry.mobId()
+            )) {
+                throw new IllegalStateException(
+                        "Source spawn queue planned delivery contains "
+                                + "unrecognised mob ID "
+                                + plannedEntry.mobId()
                                 + "."
                 );
             }
 
-            if (remainingCount == null
-                    || remainingCount < 0) {
+            calculatedPlannedCounts.put(
+                    plannedEntry.mobId(),
+                    Math.addExact(
+                            calculatedPlannedCounts.get(
+                                    plannedEntry.mobId()
+                            ),
+                            1
+                    )
+            );
 
-                throw new IllegalStateException(
-                        "Source spawn queue contains invalid remaining count "
-                                + "for "
-                                + mobId
-                                + "."
-                );
-            }
+            calculatedPlannedThreat =
+                    Math.addExact(
+                            calculatedPlannedThreat,
+                            plannedEntry.representedThreat()
+                    );
+        }
 
-            if (remainingCount > plannedCount) {
-                throw new IllegalStateException(
-                        "Source spawn queue contains more remaining "
-                                + mobId
-                                + " than were originally planned."
-                );
-            }
-
-            calculatedRemainingCounts.put(
-                    mobId,
-                    0
+        if (!calculatedPlannedCounts.equals(
+                plannedCounts
+        )) {
+            throw new IllegalStateException(
+                    "Source spawn queue planned counts do not match its "
+                            + "individual planned delivery entries."
             );
         }
 
-        for (String mobId
-                : remainingMobOrder) {
-
-            requireMobId(
-                    mobId
+        if (calculatedPlannedThreat
+                != plannedThreat) {
+            throw new IllegalStateException(
+                    "Source spawn queue planned delivery entries represent "
+                            + calculatedPlannedThreat
+                            + " threat, but the queue records "
+                            + plannedThreat
+                            + "."
             );
+        }
 
-            if (!plannedCounts.containsKey(
-                    mobId
+        LinkedHashMap<String, Integer> calculatedRemainingCounts =
+                createEmptyCountMap(
+                        mobOrder
+                );
+
+        int calculatedRemainingThreat =
+                0;
+
+        Map<DeliveryEntry, Integer> plannedEntryCounts =
+                countDeliveryEntries(
+                        plannedDeliveryEntries
+                );
+
+        Map<DeliveryEntry, Integer> remainingEntryCounts =
+                new LinkedHashMap<>();
+
+        for (DeliveryEntry remainingEntry
+                : remainingDeliveryEntries) {
+
+            if (remainingEntry == null) {
+                throw new IllegalStateException(
+                        "Source spawn queue delivery sequence cannot contain "
+                                + "null."
+                );
+            }
+
+            if (!calculatedRemainingCounts.containsKey(
+                    remainingEntry.mobId()
             )) {
                 throw new IllegalStateException(
                         "Source spawn queue delivery sequence contains "
                                 + "unplanned mob ID "
-                                + mobId
+                                + remainingEntry.mobId()
                                 + "."
                 );
             }
 
+            int remainingEntryCount =
+                    remainingEntryCounts.merge(
+                            remainingEntry,
+                            1,
+                            Math::addExact
+                    );
+
+            int plannedEntryCount =
+                    plannedEntryCounts.getOrDefault(
+                            remainingEntry,
+                            0
+                    );
+
+            if (remainingEntryCount > plannedEntryCount) {
+                throw new IllegalStateException(
+                        "Source spawn queue contains more remaining entries "
+                                + "for mob ID "
+                                + remainingEntry.mobId()
+                                + " representing "
+                                + remainingEntry.representedThreat()
+                                + " threat than were planned."
+                );
+            }
+
             calculatedRemainingCounts.put(
-                    mobId,
-                    calculatedRemainingCounts.get(
-                            mobId
-                    ) + 1
+                    remainingEntry.mobId(),
+                    Math.addExact(
+                            calculatedRemainingCounts.get(
+                                    remainingEntry.mobId()
+                            ),
+                            1
+                    )
             );
+
+            calculatedRemainingThreat =
+                    Math.addExact(
+                            calculatedRemainingThreat,
+                            remainingEntry.representedThreat()
+                    );
         }
 
         if (!calculatedRemainingCounts.equals(
@@ -709,6 +972,30 @@ public final class SourceSpawnQueue {
             throw new IllegalStateException(
                     "Source spawn queue remaining counts do not match its "
                             + "individual delivery sequence."
+            );
+        }
+
+        if (remainingThreat < 0) {
+            throw new IllegalStateException(
+                    "Source spawn queue remaining threat cannot be negative."
+            );
+        }
+
+        if (calculatedRemainingThreat
+                != remainingThreat) {
+            throw new IllegalStateException(
+                    "Source spawn queue delivery sequence represents "
+                            + calculatedRemainingThreat
+                            + " remaining threat, but the queue records "
+                            + remainingThreat
+                            + "."
+            );
+        }
+
+        if (remainingThreat > plannedThreat) {
+            throw new IllegalStateException(
+                    "Source spawn queue cannot retain more threat than its "
+                            + "immutable source composition planned."
             );
         }
     }
@@ -740,6 +1027,15 @@ public final class SourceSpawnQueue {
         LinkedHashMap<String, Integer> copiedCounts =
                 new LinkedHashMap<>();
 
+        List<DeliveryEntry> plannedDeliveryEntries =
+                new ArrayList<>();
+
+        int copiedMobCount =
+                0;
+
+        int copiedThreat =
+                0;
+
         for (SourceGroupComposition.MobEntry mobEntry
                 : sourceComposition.getMobEntries()) {
 
@@ -757,6 +1053,9 @@ public final class SourceSpawnQueue {
             int mobCount =
                     mobEntry.getCount();
 
+            int representedThreatPerMob =
+                    mobEntry.getRepresentedThreatPerMob();
+
             requireMobId(
                     mobId
             );
@@ -771,11 +1070,49 @@ public final class SourceSpawnQueue {
                 );
             }
 
+            if (representedThreatPerMob <= 0) {
+                throw new IllegalArgumentException(
+                        "Source composition "
+                                + sourceCompositionId
+                                + " contains non-positive represented threat "
+                                + "for mob ID "
+                                + mobId
+                                + "."
+                );
+            }
+
             copiedCounts.merge(
                     mobId,
                     mobCount,
-                    Integer::sum
+                    Math::addExact
             );
+
+            for (int mobNumber = 0;
+                 mobNumber < mobCount;
+                 mobNumber++) {
+
+                plannedDeliveryEntries.add(
+                        new DeliveryEntry(
+                                mobId,
+                                representedThreatPerMob
+                        )
+                );
+            }
+
+            copiedMobCount =
+                    Math.addExact(
+                            copiedMobCount,
+                            mobCount
+                    );
+
+            copiedThreat =
+                    Math.addExact(
+                            copiedThreat,
+                            Math.multiplyExact(
+                                    mobCount,
+                                    representedThreatPerMob
+                            )
+                    );
         }
 
         if (copiedCounts.isEmpty()) {
@@ -784,20 +1121,34 @@ public final class SourceSpawnQueue {
             );
         }
 
-        int copiedMobCount =
-                copiedCounts.values()
-                        .stream()
-                        .mapToInt(
-                                Integer::intValue
-                        )
-                        .sum();
-
         if (copiedMobCount
                 != sourceComposition.getTotalMobCount()) {
 
             throw new IllegalArgumentException(
                     "Source composition total mob count does not match the "
                             + "total contained in its mob entries."
+            );
+        }
+
+        if (copiedThreat
+                != sourceComposition.getCalculatedThreatSpent()) {
+            throw new IllegalArgumentException(
+                    "Source composition mob entries represent "
+                            + copiedThreat
+                            + " threat, but its calculated threat is "
+                            + sourceComposition.getCalculatedThreatSpent()
+                            + "."
+            );
+        }
+
+        if (copiedThreat
+                != sourceComposition.getThreatSpent()) {
+            throw new IllegalArgumentException(
+                    "Source composition mob entries represent "
+                            + copiedThreat
+                            + " threat, but the admitted plan records "
+                            + sourceComposition.getThreatSpent()
+                            + "."
             );
         }
 
@@ -810,47 +1161,29 @@ public final class SourceSpawnQueue {
                         new LinkedHashMap<>(
                                 copiedCounts
                         )
-                )
+                ),
+                plannedDeliveryEntries,
+                copiedThreat
         );
-    }
-
-    private static List<String> expandPlannedMobOrder(
-            QueuePlan queuePlan
-    ) {
-        List<String> expandedMobOrder =
-                new ArrayList<>();
-
-        for (String mobId
-                : queuePlan.mobOrder()) {
-
-            int plannedCount =
-                    queuePlan.plannedCounts()
-                            .get(
-                                    mobId
-                            );
-
-            for (int mobNumber = 0;
-                 mobNumber < plannedCount;
-                 mobNumber++) {
-
-                expandedMobOrder.add(
-                        mobId
-                );
-            }
-        }
-
-        return expandedMobOrder;
     }
 
     private static LinkedHashMap<String, Integer>
     createEmptyRemainingCounts(
             QueuePlan queuePlan
     ) {
+        return createEmptyCountMap(
+                queuePlan.mobOrder()
+        );
+    }
+
+    private static LinkedHashMap<String, Integer> createEmptyCountMap(
+            List<String> canonicalMobOrder
+    ) {
         LinkedHashMap<String, Integer> emptyCounts =
                 new LinkedHashMap<>();
 
         for (String mobId
-                : queuePlan.mobOrder()) {
+                : canonicalMobOrder) {
 
             emptyCounts.put(
                     mobId,
@@ -859,6 +1192,52 @@ public final class SourceSpawnQueue {
         }
 
         return emptyCounts;
+    }
+
+    private static Map<DeliveryEntry, Integer> countDeliveryEntries(
+            List<DeliveryEntry> deliveryEntries
+    ) {
+        LinkedHashMap<DeliveryEntry, Integer> entryCounts =
+                new LinkedHashMap<>();
+
+        for (DeliveryEntry deliveryEntry
+                : deliveryEntries) {
+
+            if (deliveryEntry == null) {
+                throw new IllegalArgumentException(
+                        "Delivery-entry collection cannot contain null."
+                );
+            }
+
+            entryCounts.merge(
+                    deliveryEntry,
+                    1,
+                    Math::addExact
+            );
+        }
+
+        return entryCounts;
+    }
+
+    private static List<String> extractMobOrder(
+            List<DeliveryEntry> deliveryEntries
+    ) {
+        List<String> mobIds =
+                new ArrayList<>(
+                        deliveryEntries.size()
+                );
+
+        for (DeliveryEntry deliveryEntry
+                : deliveryEntries) {
+
+            mobIds.add(
+                    deliveryEntry.mobId()
+            );
+        }
+
+        return List.copyOf(
+                mobIds
+        );
     }
 
     private static void requireMobId(
@@ -874,11 +1253,36 @@ public final class SourceSpawnQueue {
     }
 
     /**
+     * One exact individual delivery purchased by the immutable composition.
+     *
+     * representedThreat is the value assigned by the admitted plan. Runtime
+     * must not recalculate it from the live mob catalogue.
+     */
+    public record DeliveryEntry(
+            String mobId,
+            int representedThreat
+    ) {
+
+        public DeliveryEntry {
+            requireMobId(
+                    mobId
+            );
+
+            if (representedThreat <= 0) {
+                throw new IllegalArgumentException(
+                        "Delivery-entry represented threat must be greater "
+                                + "than zero."
+                );
+            }
+        }
+    }
+
+    /**
      * Exact immutable persistence snapshot of mutable queue progress.
      */
     public record Snapshot(
             UUID sourceCompositionId,
-            List<String> remainingMobOrder
+            List<DeliveryEntry> remainingDeliveryEntries
     ) {
 
         public Snapshot {
@@ -889,43 +1293,107 @@ public final class SourceSpawnQueue {
                 );
             }
 
-            if (remainingMobOrder == null) {
+            if (remainingDeliveryEntries == null) {
                 throw new IllegalArgumentException(
-                        "Source spawn-queue snapshot order cannot be null."
+                        "Source spawn-queue snapshot delivery entries cannot "
+                                + "be null."
                 );
             }
 
-            List<String> copiedMobOrder =
-                    new ArrayList<>();
+            List<DeliveryEntry> copiedDeliveryEntries =
+                    new ArrayList<>(
+                            remainingDeliveryEntries.size()
+                    );
 
-            for (String mobId
-                    : remainingMobOrder) {
+            for (DeliveryEntry deliveryEntry
+                    : remainingDeliveryEntries) {
 
-                requireMobId(
-                        mobId
-                );
+                if (deliveryEntry == null) {
+                    throw new IllegalArgumentException(
+                            "Source spawn-queue snapshot cannot contain a "
+                                    + "null delivery entry."
+                    );
+                }
 
-                copiedMobOrder.add(
-                        mobId
+                copiedDeliveryEntries.add(
+                        deliveryEntry
                 );
             }
 
-            remainingMobOrder =
+            remainingDeliveryEntries =
                     List.copyOf(
-                            copiedMobOrder
+                            copiedDeliveryEntries
                     );
         }
 
+        /**
+         * Compatibility view used by existing inspection output.
+         */
+        public List<String> remainingMobOrder() {
+            return extractMobOrder(
+                    remainingDeliveryEntries
+            );
+        }
+
         public int remainingMobCount() {
-            return remainingMobOrder.size();
+            return remainingDeliveryEntries.size();
+        }
+
+        public int remainingThreat() {
+            int totalThreat =
+                    0;
+
+            for (DeliveryEntry deliveryEntry
+                    : remainingDeliveryEntries) {
+
+                totalThreat =
+                        Math.addExact(
+                                totalThreat,
+                                deliveryEntry.representedThreat()
+                        );
+            }
+
+            return totalThreat;
         }
 
         public boolean hasRemainingMobs() {
-            return !remainingMobOrder.isEmpty();
+            return !remainingDeliveryEntries.isEmpty();
         }
 
         public boolean isEmpty() {
-            return remainingMobOrder.isEmpty();
+            return remainingDeliveryEntries.isEmpty();
+        }
+    }
+
+    /**
+     * Result of terminally cancelling every pending queue entry.
+     */
+    public record CancellationResult(
+            int cancelledMobCount,
+            int cancelledThreat
+    ) {
+
+        public CancellationResult {
+            if (cancelledMobCount < 0) {
+                throw new IllegalArgumentException(
+                        "Cancelled mob count cannot be negative."
+                );
+            }
+
+            if (cancelledThreat < 0) {
+                throw new IllegalArgumentException(
+                        "Cancelled threat cannot be negative."
+                );
+            }
+
+            if ((cancelledMobCount == 0)
+                    != (cancelledThreat == 0)) {
+
+                throw new IllegalArgumentException(
+                        "Cancelled mob count and threat must either both be "
+                                + "zero or both be positive."
+                );
+            }
         }
     }
 
@@ -935,7 +1403,9 @@ public final class SourceSpawnQueue {
     private record QueuePlan(
             UUID sourceCompositionId,
             List<String> mobOrder,
-            Map<String, Integer> plannedCounts
+            Map<String, Integer> plannedCounts,
+            List<DeliveryEntry> plannedDeliveryEntries,
+            int plannedThreat
     ) {
 
         private QueuePlan {
@@ -961,6 +1431,21 @@ public final class SourceSpawnQueue {
                 );
             }
 
+            if (plannedDeliveryEntries == null
+                    || plannedDeliveryEntries.isEmpty()) {
+
+                throw new IllegalArgumentException(
+                        "Source queue plan requires individual delivery "
+                                + "entries."
+                );
+            }
+
+            if (plannedThreat <= 0) {
+                throw new IllegalArgumentException(
+                        "Source queue plan threat must be greater than zero."
+                );
+            }
+
             mobOrder =
                     List.copyOf(
                             mobOrder
@@ -971,6 +1456,11 @@ public final class SourceSpawnQueue {
                             new LinkedHashMap<>(
                                     plannedCounts
                             )
+                    );
+
+            plannedDeliveryEntries =
+                    List.copyOf(
+                            plannedDeliveryEntries
                     );
 
             if (!new ArrayList<>(

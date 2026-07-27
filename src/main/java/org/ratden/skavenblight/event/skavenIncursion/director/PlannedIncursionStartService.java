@@ -4,14 +4,20 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanner;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanningContext;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanningResult;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlanCalculator;
+import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionChunkLoadPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.ActiveIncursionSourceReservationRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.chunk.IncursionChunkTicketService;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.IncursionTargetSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.LivePersistentIncursion;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PersistableSkavenScenario;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PlannedScenarioRuntimeSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioRegistry;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -28,12 +34,14 @@ import java.util.Objects;
  * This service owns:
  *
  * 1. complete incursion planning;
- * 2. planned Scenario construction;
- * 3. immutable plan and target snapshot capture;
- * 4. LivePersistentIncursion construction;
- * 5. authoritative source-reservation registration;
- * 6. transactional persistent-runtime admission;
- * 7. reservation rollback when admission fails.
+ * 2. deterministic chunk-load plan calculation;
+ * 3. planned Scenario construction;
+ * 4. immutable plan, chunk-plan and target snapshot capture;
+ * 5. LivePersistentIncursion construction;
+ * 6. authoritative source-reservation registration;
+ * 7. initial authoritative chunk-ticket acquisition;
+ * 8. transactional persistent-runtime admission;
+ * 9. rollback of tickets and reservations when admission fails.
  *
  * It does not own:
  *
@@ -49,20 +57,38 @@ import java.util.Objects;
 public class PlannedIncursionStartService {
 
     private final IncursionPlanner incursionPlanner;
+    private final IncursionChunkLoadPlanCalculator chunkLoadPlanCalculator;
 
     public PlannedIncursionStartService() {
         this(
-                new IncursionPlanner()
+                new IncursionPlanner(),
+                new IncursionChunkLoadPlanCalculator()
         );
     }
 
     public PlannedIncursionStartService(
             IncursionPlanner incursionPlanner
     ) {
+        this(
+                incursionPlanner,
+                new IncursionChunkLoadPlanCalculator()
+        );
+    }
+
+    public PlannedIncursionStartService(
+            IncursionPlanner incursionPlanner,
+            IncursionChunkLoadPlanCalculator chunkLoadPlanCalculator
+    ) {
         this.incursionPlanner =
                 Objects.requireNonNull(
                         incursionPlanner,
                         "Incursion planner cannot be null."
+                );
+
+        this.chunkLoadPlanCalculator =
+                Objects.requireNonNull(
+                        chunkLoadPlanCalculator,
+                        "Incursion chunk-load plan calculator cannot be null."
                 );
     }
 
@@ -96,6 +122,31 @@ public class PlannedIncursionStartService {
 
         IncursionPlan incursionPlan =
                 planningResult.getIncursionPlan();
+
+        IncursionChunkLoadPlan chunkLoadPlan;
+
+        try {
+            chunkLoadPlan =
+                    chunkLoadPlanCalculator.calculate(
+                            incursionPlan,
+                            planningContext
+                    );
+        } catch (IllegalArgumentException
+                 | IllegalStateException exception) {
+
+            return StartResult.failed(
+                    StartFailure.runtimeFailure(
+                            FailureStage.CHUNK_LOAD_PLANNING,
+                            "Could not calculate authoritative chunk-load "
+                                    + "requirements for planned incursion "
+                                    + incursionPlan.getIncursionId()
+                                    + ": "
+                                    + describeException(
+                                    exception
+                            )
+                    )
+            );
+        }
 
         String scenarioId =
                 planningContext
@@ -136,6 +187,11 @@ public class PlannedIncursionStartService {
                             incursionPlan
                     );
 
+            IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot =
+                    IncursionChunkLoadPlanSnapshot.capture(
+                            chunkLoadPlan
+                    );
+
             IncursionTargetSnapshot targetSnapshot =
                     IncursionTargetSnapshot.capture(
                             planningContext
@@ -149,6 +205,8 @@ public class PlannedIncursionStartService {
                             targetSnapshot,
                             incursionPlan,
                             incursionPlanSnapshot,
+                            chunkLoadPlan,
+                            chunkLoadPlanSnapshot,
                             scenario
                     );
         } catch (IllegalArgumentException
@@ -175,8 +233,9 @@ public class PlannedIncursionStartService {
             /*
              * Reservations are authoritative physical-planning state.
              *
-             * They must exist before runtime admission so another incursion
-             * cannot plan through this incursion's future source positions.
+             * They must exist before ticket acquisition and runtime admission
+             * so another incursion cannot plan through this incursion's
+             * future source positions.
              */
             reservationSnapshot =
                     ActiveIncursionSourceReservationRegistry.register(
@@ -200,6 +259,90 @@ public class PlannedIncursionStartService {
             );
         }
 
+        /*
+         * Fresh planning-aware Scenarios determine their current wave through
+         * the same immutable runtime snapshot used by persistence.
+         *
+         * This avoids assuming that every future Scenario must begin at wave
+         * index zero, while keeping admission independent of Scenario-specific
+         * classes.
+         */
+        int initialWaveIndex;
+
+        try {
+            initialWaveIndex =
+                    scenario.createSnapshot()
+                            .getCurrentWaveIndex();
+        } catch (RuntimeException exception) {
+            String rollbackWarning =
+                    rollbackReservationsOnly(
+                            planningContext,
+                            incursionPlan
+                    );
+
+            return StartResult.failed(
+                    StartFailure.runtimeFailure(
+                            FailureStage.CHUNK_TICKET_ACQUISITION,
+                            "Could not determine the initial wave for "
+                                    + "authoritative chunk-ticket acquisition "
+                                    + "for Scenario "
+                                    + scenarioId
+                                    + ": "
+                                    + describeException(
+                                    exception
+                            )
+                                    + rollbackWarning
+                    )
+            );
+        }
+
+        IncursionChunkTicketService.TicketOperationResult
+                ticketOperationResult;
+
+        try {
+            /*
+             * The complete retained footprint is installed before the
+             * incursion enters SavedData and live runtime.
+             *
+             * The protected base and current-wave source-group activation
+             * footprint receive ticking tickets. Remaining planned chunks
+             * receive retained non-ticking tickets.
+             */
+            ticketOperationResult =
+                    IncursionChunkTicketService.acquireFreshTickets(
+                            planningContext.level(),
+                            chunkLoadPlan,
+                            initialWaveIndex
+                    );
+        } catch (RuntimeException exception) {
+            /*
+             * acquireFreshTickets(...) owns rollback of every ticket it
+             * successfully added before failing.
+             *
+             * This service still owns rollback of the separately registered
+             * source reservations.
+             */
+            String rollbackWarning =
+                    rollbackReservationsOnly(
+                            planningContext,
+                            incursionPlan
+                    );
+
+            return StartResult.failed(
+                    StartFailure.runtimeFailure(
+                            FailureStage.CHUNK_TICKET_ACQUISITION,
+                            "Could not acquire authoritative chunk tickets "
+                                    + "for Scenario "
+                                    + scenarioId
+                                    + ": "
+                                    + describeException(
+                                    exception
+                            )
+                                    + rollbackWarning
+                    )
+            );
+        }
+
         try {
             /*
              * ActiveIncursionManager writes the initial SavedData record
@@ -213,14 +356,18 @@ public class PlannedIncursionStartService {
             );
         } catch (RuntimeException exception) {
             /*
-             * The reservation registry is outside
-             * ActiveIncursionManager's transaction, so this service owns its
-             * rollback when runtime admission fails.
+             * Chunk tickets and the reservation registry exist outside
+             * ActiveIncursionManager's transaction.
+             *
+             * This service therefore releases both after manager admission
+             * fails.
              */
-            ActiveIncursionSourceReservationRegistry.remove(
-                    planningContext.level(),
-                    incursionPlan.getIncursionId()
-            );
+            String rollbackWarning =
+                    rollbackTicketedAdmissionResources(
+                            planningContext,
+                            incursionPlan,
+                            chunkLoadPlan
+                    );
 
             return StartResult.failed(
                     StartFailure.runtimeFailure(
@@ -232,6 +379,7 @@ public class PlannedIncursionStartService {
                                     + describeException(
                                     exception
                             )
+                                    + rollbackWarning
                     )
             );
         }
@@ -239,9 +387,91 @@ public class PlannedIncursionStartService {
         return StartResult.completed(
                 new StartSuccess(
                         livePersistentIncursion,
-                        reservationSnapshot
+                        reservationSnapshot,
+                        ticketOperationResult
                 )
         );
+    }
+
+    /**
+     * Removes the reservation snapshot after failure before ticket
+     * acquisition completed.
+     *
+     * The returned text is empty when rollback succeeded and provides a
+     * diagnostic suffix when it did not.
+     */
+    private static String rollbackReservationsOnly(
+            IncursionPlanningContext planningContext,
+            IncursionPlan incursionPlan
+    ) {
+        try {
+            ActiveIncursionSourceReservationRegistry.remove(
+                    planningContext.level(),
+                    incursionPlan.getIncursionId()
+            );
+
+            return "";
+        } catch (RuntimeException rollbackException) {
+            return " Reservation rollback also failed: "
+                    + describeException(
+                    rollbackException
+            );
+        }
+    }
+
+    /**
+     * Releases tickets and reservations after persistent-runtime admission
+     * failed.
+     *
+     * Both rollback actions are attempted independently so one failure does
+     * not prevent the other cleanup action.
+     */
+    private static String rollbackTicketedAdmissionResources(
+            IncursionPlanningContext planningContext,
+            IncursionPlan incursionPlan,
+            IncursionChunkLoadPlan chunkLoadPlan
+    ) {
+        List<String> rollbackFailures =
+                new ArrayList<>();
+
+        try {
+            IncursionChunkTicketService.releaseAllTickets(
+                    planningContext.level(),
+                    chunkLoadPlan
+            );
+        } catch (RuntimeException rollbackException) {
+            rollbackFailures.add(
+                    "chunk-ticket rollback failed: "
+                            + describeException(
+                            rollbackException
+                    )
+            );
+        }
+
+        try {
+            ActiveIncursionSourceReservationRegistry.remove(
+                    planningContext.level(),
+                    incursionPlan.getIncursionId()
+            );
+        } catch (RuntimeException rollbackException) {
+            rollbackFailures.add(
+                    "reservation rollback failed: "
+                            + describeException(
+                            rollbackException
+                    )
+            );
+        }
+
+        if (rollbackFailures.isEmpty()) {
+            return "";
+        }
+
+        return " Rollback warning: "
+                + String.join(
+                "; ",
+                rollbackFailures
+        )
+                + ".";
     }
 
     private static String describeException(
@@ -274,14 +504,20 @@ public class PlannedIncursionStartService {
         PLANNING,
 
         /**
+         * The completed tactical plan could not produce a valid immutable
+         * chunk-load plan.
+         */
+        CHUNK_LOAD_PLANNING,
+
+        /**
          * The Scenario registry could not construct live runtime from the
          * completed IncursionPlan.
          */
         SCENARIO_CREATION,
 
         /**
-         * The immutable plan, target or initial runtime could not form a
-         * valid persistent-incursion record.
+         * The immutable plan, chunk plan, target or initial runtime could not
+         * form a valid persistent-incursion record.
          */
         PERSISTENT_STATE_CREATION,
 
@@ -289,6 +525,11 @@ public class PlannedIncursionStartService {
          * Authoritative physical source reservations could not be registered.
          */
         RESERVATION_REGISTRATION,
+
+        /**
+         * The retained and current-wave chunk tickets could not be acquired.
+         */
+        CHUNK_TICKET_ACQUISITION,
 
         /**
          * The complete persistent incursion could not enter SavedData and
@@ -303,7 +544,9 @@ public class PlannedIncursionStartService {
     public record StartSuccess(
             LivePersistentIncursion livePersistentIncursion,
             ActiveIncursionSourceReservationRegistry
-                    .IncursionReservationSnapshot reservationSnapshot
+                    .IncursionReservationSnapshot reservationSnapshot,
+            IncursionChunkTicketService
+                    .TicketOperationResult ticketOperationResult
     ) {
 
         public StartSuccess {
@@ -317,6 +560,12 @@ public class PlannedIncursionStartService {
                     reservationSnapshot,
                     "Successful planned start requires a reservation "
                             + "snapshot."
+            );
+
+            Objects.requireNonNull(
+                    ticketOperationResult,
+                    "Successful planned start requires a chunk-ticket "
+                            + "operation result."
             );
 
             if (!livePersistentIncursion
@@ -333,11 +582,31 @@ public class PlannedIncursionStartService {
                                 + "."
                 );
             }
+
+            if (!livePersistentIncursion
+                    .getIncursionId()
+                    .equals(
+                            ticketOperationResult.incursionId()
+                    )) {
+
+                throw new IllegalArgumentException(
+                        "Successful planned start has live incursion ID "
+                                + livePersistentIncursion.getIncursionId()
+                                + " but chunk-ticket operation ID "
+                                + ticketOperationResult.incursionId()
+                                + "."
+                );
+            }
         }
 
         public IncursionPlan incursionPlan() {
             return livePersistentIncursion
                     .getIncursionPlan();
+        }
+
+        public IncursionChunkLoadPlan chunkLoadPlan() {
+            return livePersistentIncursion
+                    .getChunkLoadPlan();
         }
     }
 

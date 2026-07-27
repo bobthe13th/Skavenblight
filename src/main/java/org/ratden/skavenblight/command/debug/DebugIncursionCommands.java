@@ -9,6 +9,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import org.ratden.skavenblight.event.skavenIncursion.debug.IncursionRuntimeDebugFormatter;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -49,18 +50,115 @@ public class DebugIncursionCommands {
                                 )
                 )
                 .then(
-                        Commands.literal("inspect")
-                                .executes(context ->
-                                        DebugIncursionInspectionService
-                                                .inspectLookedAtSource(
-                                                        context.getSource()
-                                                )
-                                )
+                        createInspectionCommand()
                 );
     }
 
     /**
-     * Creates the shared argument structure used by both:
+     * Creates:
+     *
+     * /skavendebug incursion inspect
+     * /skavendebug incursion inspect overview
+     * /skavendebug incursion inspect placement
+     * /skavendebug incursion inspect composition
+     * /skavendebug incursion inspect queue
+     * /skavendebug incursion inspect tracking
+     * /skavendebug incursion inspect all
+     *
+     * Bare inspect is intentionally equivalent to overview.
+     */
+    private static LiteralArgumentBuilder<CommandSourceStack>
+    createInspectionCommand() {
+        LiteralArgumentBuilder<CommandSourceStack> inspectionCommand =
+                Commands.literal("inspect")
+                        .executes(context ->
+                                inspect(
+                                        context,
+                                        IncursionRuntimeDebugFormatter
+                                                .InspectionView
+                                                .OVERVIEW
+                                )
+                        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .OVERVIEW
+                )
+        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .PLACEMENT
+                )
+        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .COMPOSITION
+                )
+        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .QUEUE
+                )
+        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .TRACKING
+                )
+        );
+
+        inspectionCommand.then(
+                createInspectionViewCommand(
+                        IncursionRuntimeDebugFormatter
+                                .InspectionView
+                                .ALL
+                )
+        );
+
+        return inspectionCommand;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack>
+    createInspectionViewCommand(
+            IncursionRuntimeDebugFormatter.InspectionView inspectionView
+    ) {
+        return Commands.literal(
+                        inspectionView.commandName()
+                )
+                .executes(context ->
+                        inspect(
+                                context,
+                                inspectionView
+                        )
+                );
+    }
+
+    private static int inspect(
+            CommandContext<CommandSourceStack> context,
+            IncursionRuntimeDebugFormatter.InspectionView inspectionView
+    ) throws CommandSyntaxException {
+        return DebugIncursionInspectionService
+                .inspectLookedAtSource(
+                        context.getSource(),
+                        inspectionView
+                );
+    }
+
+    /**
+     * Creates the shared argument structure used by:
      *
      * /skavendebug incursion start <scenario> [stratagem]
      * /skavendebug incursion plan <scenario> [stratagem]

@@ -690,6 +690,71 @@ public class SourceWaveExecutionState {
     }
 
     /**
+     * Temporary compatibility route for callers that do not own authoritative
+     * persistent mob-tracking state.
+     *
+     * Normal admitted runtime reaches the tracking-aware overload through
+     * LivePersistentIncursion.
+     */
+    @Deprecated
+    public SourceExecutionState.SpawnAttemptResult
+    attemptNextSpawn(
+            ServerLevel level,
+            LeadershipContext leadershipContext
+    ) {
+        return attemptNextSpawnInternal(
+                level,
+                leadershipContext,
+                null
+        );
+    }
+
+    /**
+     * Attempts one streamed spawn using the authoritative persistent
+     * mob-tracking state belonging to the same incursion.
+     */
+    public SourceExecutionState.SpawnAttemptResult
+    attemptNextSpawn(
+            ServerLevel level,
+            LeadershipContext leadershipContext,
+            org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                    .IncursionMobTrackingState mobTrackingState
+    ) {
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "Source-wave mob-tracking state cannot be null."
+            );
+        }
+
+        if (leadershipContext == null) {
+            throw new IllegalArgumentException(
+                    "Source-wave leadership context cannot be null."
+            );
+        }
+
+        if (!mobTrackingState
+                .getIncursionId()
+                .equals(
+                        leadershipContext.scenarioId()
+                )) {
+
+            throw new IllegalArgumentException(
+                    "Source-wave leadership Scenario ID "
+                            + leadershipContext.scenarioId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        return attemptNextSpawnInternal(
+                level,
+                leadershipContext,
+                mobTrackingState
+        );
+    }
+
+    /**
      * Attempts one streamed spawn from this wave's queue.
      *
      * Attached assignments promote mobs already contained in the immutable
@@ -701,13 +766,24 @@ public class SourceWaveExecutionState {
      * - ordinary mobs spawn without consuming reserved attached units;
      * - AFTER_ORDINARY attachments spawn last.
      *
-     * Queue progress is committed only after the actual entity has received
-     * its attached modifier and persistence binding successfully.
+     * A successful persistent delivery performs this ordered transition:
+     *
+     * - select one exact threat-bearing DeliveryEntry;
+     * - create and validate the entity;
+     * - apply and bind any attached assignment;
+     * - preflight persistent mob registration;
+     * - consume the exact pending DeliveryEntry;
+     * - register the entity and represented threat;
+     * - increment source-wave successful-delivery accounting.
+     *
+     * Every expected validation failure occurs before queue consumption.
      */
-    public SourceExecutionState.SpawnAttemptResult
-    attemptNextSpawn(
+    private SourceExecutionState.SpawnAttemptResult
+    attemptNextSpawnInternal(
             ServerLevel level,
-            LeadershipContext leadershipContext
+            LeadershipContext leadershipContext,
+            org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                    .IncursionMobTrackingState mobTrackingState
     ) {
         if (level == null) {
             throw new IllegalArgumentException(
@@ -721,6 +797,22 @@ public class SourceWaveExecutionState {
             );
         }
 
+        if (mobTrackingState != null
+                && !mobTrackingState
+                .getIncursionId()
+                .equals(
+                        leadershipContext.scenarioId()
+                )) {
+
+            throw new IllegalArgumentException(
+                    "Source-wave leadership Scenario ID "
+                            + leadershipContext.scenarioId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
         if (!sourceExecutionState.isAvailable()) {
             return SourceExecutionState
                     .SpawnAttemptResult
@@ -731,6 +823,17 @@ public class SourceWaveExecutionState {
             return SourceExecutionState
                     .SpawnAttemptResult
                     .QUEUE_EMPTY;
+        }
+
+        UUID runtimeSourceId =
+                sourceExecutionState.getRuntimeSourceId();
+
+        if (runtimeSourceId == null) {
+            throw new IllegalStateException(
+                    "Available source placement "
+                            + getSourcePlacementId()
+                            + " has no current runtime-source ID."
+            );
         }
 
         SpawnSelection spawnSelection =
@@ -755,30 +858,92 @@ public class SourceWaveExecutionState {
         Entity spawnedEntity =
                 spawnAttempt.spawnedEntity();
 
+        PreparedAttachedSpawn preparedAttachedSpawn =
+                null;
+
+        int updatedSuccessfulSpawnCount;
+
+        org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                .IncursionMobTrackingState.SpawnRegistration
+                spawnRegistration =
+                null;
+
         try {
-            if (spawnSelection.isAttachedAssignment()) {
-                completeAttachedSpawn(
-                        spawnSelection,
-                        spawnedEntity
-                );
-            } else {
-                completeOrdinarySpawn(
-                        spawnSelection,
-                        spawnedEntity
-                );
+            validateSpawnedEntityOwnership(
+                    spawnedEntity,
+                    sourceLeadershipContext,
+                    runtimeSourceId
+            );
+
+            preparedAttachedSpawn =
+                    prepareAttachedSpawn(
+                            spawnSelection,
+                            spawnedEntity
+                    );
+
+            updatedSuccessfulSpawnCount =
+                    Math.addExact(
+                            successfulSpawnCount,
+                            1
+                    );
+
+            validateSelectedDeliveryStillPending(
+                    spawnSelection
+            );
+
+            if (mobTrackingState != null) {
+                spawnRegistration =
+                        createSpawnRegistration(
+                                spawnSelection,
+                                spawnedEntity,
+                                runtimeSourceId
+                        );
+
+                mobTrackingState
+                        .validateSuccessfulSpawnRegistration(
+                                spawnRegistration
+                        );
             }
         } catch (RuntimeException exception) {
-            /*
-             * The queue is committed only at the end of each completion
-             * method. Discarding the newly created entity prevents a failed
-             * modifier or binding from introducing an unplanned extra mob.
-             */
-            if (!spawnedEntity.isRemoved()) {
-                spawnedEntity.discard();
-            }
+            rollbackPreparedAttachedSpawn(
+                    preparedAttachedSpawn,
+                    exception
+            );
+
+            discardSpawnedEntity(
+                    spawnedEntity
+            );
 
             throw exception;
         }
+
+        SourceSpawnQueue.DeliveryEntry consumedDeliveryEntry =
+                spawnQueue.confirmMobSpawned(
+                        spawnSelection.mobId()
+                );
+
+        if (!consumedDeliveryEntry.equals(
+                spawnSelection.deliveryEntry()
+        )) {
+            throw new IllegalStateException(
+                    "Source composition "
+                            + sourceCompositionId
+                            + " selected delivery "
+                            + spawnSelection.deliveryEntry()
+                            + " but consumed "
+                            + consumedDeliveryEntry
+                            + "."
+            );
+        }
+
+        if (mobTrackingState != null) {
+            mobTrackingState.registerSuccessfulSpawn(
+                    spawnRegistration
+            );
+        }
+
+        successfulSpawnCount =
+                updatedSuccessfulSpawnCount;
 
         validateInternalState();
 
@@ -788,20 +953,343 @@ public class SourceWaveExecutionState {
     }
 
     /**
+     * Confirms that the entity created by the spawn action carries the exact
+     * ownership identities supplied for this source composition.
+     */
+    private static void validateSpawnedEntityOwnership(
+            Entity spawnedEntity,
+            LeadershipContext leadershipContext,
+            UUID runtimeSourceId
+    ) {
+        if (spawnedEntity == null
+                || spawnedEntity.isRemoved()) {
+
+            throw new IllegalArgumentException(
+                    "Successful source-wave delivery requires a live entity."
+            );
+        }
+
+        if (leadershipContext == null) {
+            throw new IllegalArgumentException(
+                    "Spawned-entity ownership validation requires leadership "
+                            + "context."
+            );
+        }
+
+        if (runtimeSourceId == null) {
+            throw new IllegalArgumentException(
+                    "Spawned-entity ownership validation requires a runtime "
+                            + "source ID."
+            );
+        }
+
+        if (!(spawnedEntity
+                instanceof IncursionOwnedMob incursionOwnedMob)) {
+
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " does not implement IncursionOwnedMob."
+            );
+        }
+
+        if (!Objects.equals(
+                leadershipContext.scenarioId(),
+                incursionOwnedMob.getScenarioId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " has Scenario ID "
+                            + incursionOwnedMob.getScenarioId()
+                            + " rather than "
+                            + leadershipContext.scenarioId()
+                            + "."
+            );
+        }
+
+        if (!runtimeSourceId.equals(
+                incursionOwnedMob.getSourceId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " has source ID "
+                            + incursionOwnedMob.getSourceId()
+                            + " rather than runtime source ID "
+                            + runtimeSourceId
+                            + "."
+            );
+        }
+
+        if (!Objects.equals(
+                leadershipContext.vermintideId(),
+                incursionOwnedMob.getVermintideId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " does not carry the planned Vermintide ID."
+            );
+        }
+
+        if (!Objects.equals(
+                leadershipContext.fangId(),
+                incursionOwnedMob.getFangId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " does not carry the planned Fang ID."
+            );
+        }
+
+        if (!Objects.equals(
+                leadershipContext.clawId(),
+                incursionOwnedMob.getClawId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " does not carry the planned Claw ID."
+            );
+        }
+
+        if (!Objects.equals(
+                leadershipContext.packId(),
+                incursionOwnedMob.getPackId()
+        )) {
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " does not carry the planned Pack ID."
+            );
+        }
+    }
+
+    /**
+     * Applies and binds an attached assignment without consuming queue state.
+     *
+     * Ordinary deliveries return null because they require no rollback token.
+     */
+    private PreparedAttachedSpawn prepareAttachedSpawn(
+            SpawnSelection spawnSelection,
+            Entity spawnedEntity
+    ) {
+        if (!spawnSelection.isAttachedAssignment()) {
+            return null;
+        }
+
+        SourceGroupComposition.AttachedMobAssignment assignment =
+                spawnSelection.attachedMobAssignment();
+
+        if (assignment == null) {
+            throw new IllegalArgumentException(
+                    "Attached spawn preparation requires an assignment."
+            );
+        }
+
+        if (!(spawnedEntity
+                instanceof AttachedMobAssignmentEntity
+                attachedAssignmentEntity)) {
+
+            throw new IllegalArgumentException(
+                    "Entity type "
+                            + spawnedEntity.getType()
+                            + " cannot fulfil attached assignment "
+                            + assignment.attachedMobAssignmentId()
+                            + " because it does not implement "
+                            + "AttachedMobAssignmentEntity."
+            );
+        }
+
+        AttachedMobRuntimeModifierExecutor.apply(
+                sourceGroupComposition,
+                sourceComposition,
+                assignment,
+                spawnSelection.mobId(),
+                spawnedEntity
+        );
+
+        UUID attachedMobAssignmentId =
+                assignment.attachedMobAssignmentId();
+
+        UUID existingEntityAssignmentId =
+                attachedAssignmentEntity
+                        .getAttachedMobAssignmentId();
+
+        if (existingEntityAssignmentId != null
+                && !existingEntityAssignmentId.equals(
+                attachedMobAssignmentId
+        )) {
+
+            throw new IllegalStateException(
+                    "Spawned entity "
+                            + spawnedEntity.getUUID()
+                            + " already identifies attached assignment "
+                            + existingEntityAssignmentId
+                            + " rather than planned assignment "
+                            + attachedMobAssignmentId
+                            + "."
+            );
+        }
+
+        boolean entityIdentityAdded =
+                existingEntityAssignmentId == null;
+
+        if (entityIdentityAdded) {
+            attachedAssignmentEntity
+                    .setAttachedMobAssignmentId(
+                            attachedMobAssignmentId
+                    );
+        }
+
+        boolean bindingAdded =
+                false;
+
+        try {
+            bindingAdded =
+                    attachedMobEntityBindingState.bind(
+                            attachedMobAssignmentId,
+                            spawnedEntity
+                    );
+
+            if (!bindingAdded) {
+                throw new IllegalStateException(
+                        "Attached assignment "
+                                + attachedMobAssignmentId
+                                + " was selected despite already having an "
+                                + "entity binding."
+                );
+            }
+
+            return new PreparedAttachedSpawn(
+                    attachedMobAssignmentId,
+                    attachedAssignmentEntity,
+                    entityIdentityAdded,
+                    true
+            );
+        } catch (RuntimeException exception) {
+            if (bindingAdded) {
+                attachedMobEntityBindingState.removeBinding(
+                        attachedMobAssignmentId
+                );
+            }
+
+            if (entityIdentityAdded) {
+                attachedAssignmentEntity
+                        .setAttachedMobAssignmentId(
+                                null
+                        );
+            }
+
+            throw exception;
+        }
+    }
+
+    private void rollbackPreparedAttachedSpawn(
+            PreparedAttachedSpawn preparedAttachedSpawn,
+            RuntimeException originalException
+    ) {
+        if (preparedAttachedSpawn == null) {
+            return;
+        }
+
+        try {
+            if (preparedAttachedSpawn.bindingAdded()) {
+                attachedMobEntityBindingState.removeBinding(
+                        preparedAttachedSpawn.attachedMobAssignmentId()
+                );
+            }
+
+            if (preparedAttachedSpawn.entityIdentityAdded()) {
+                preparedAttachedSpawn
+                        .attachedAssignmentEntity()
+                        .setAttachedMobAssignmentId(
+                                null
+                        );
+            }
+        } catch (RuntimeException rollbackException) {
+            originalException.addSuppressed(
+                    rollbackException
+            );
+        }
+    }
+
+    private static void discardSpawnedEntity(
+            Entity spawnedEntity
+    ) {
+        if (spawnedEntity != null
+                && !spawnedEntity.isRemoved()) {
+
+            spawnedEntity.discard();
+        }
+    }
+
+    private org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+            .IncursionMobTrackingState.SpawnRegistration
+    createSpawnRegistration(
+            SpawnSelection spawnSelection,
+            Entity spawnedEntity,
+            UUID runtimeSourceId
+    ) {
+        return new org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                .IncursionMobTrackingState.SpawnRegistration(
+                spawnedEntity.getUUID(),
+                spawnSelection.mobId(),
+                spawnSelection
+                        .deliveryEntry()
+                        .representedThreat(),
+                waveIndex,
+                getSourceGroupCompositionId(),
+                sourceCompositionId,
+                getSourcePlacementId(),
+                runtimeSourceId,
+                spawnSelection.attachedMobAssignmentId()
+        );
+    }
+
+    /**
+     * Ensures that the exact selected delivery is still the first remaining
+     * entry for its selected mob ID immediately before commit.
+     */
+    private void validateSelectedDeliveryStillPending(
+            SpawnSelection spawnSelection
+    ) {
+        SourceSpawnQueue.DeliveryEntry pendingEntry =
+                spawnQueue.peekNextDeliveryEntry(
+                        Set.of(
+                                spawnSelection.mobId()
+                        )
+                );
+
+        if (!spawnSelection
+                .deliveryEntry()
+                .equals(
+                        pendingEntry
+                )) {
+
+            throw new IllegalStateException(
+                    "Source composition "
+                            + sourceCompositionId
+                            + " selected delivery "
+                            + spawnSelection.deliveryEntry()
+                            + " but its first pending "
+                            + spawnSelection.mobId()
+                            + " entry is "
+                            + pendingEntry
+                            + "."
+            );
+        }
+    }
+
+    /**
      * Produces the exact leadership context belonging to this immutable
      * source composition.
      *
      * Pack ownership is planned by the parent SourceGroupComposition, but a
      * Pack represents the mobs delivered by the particular child source
      * composition identified by its PackAssignment.
-     *
-     * This ensures:
-     *
-     * - every mob from the Pack's source receives the Pack ID;
-     * - the promoted Pack leader receives the same Pack ID before its modifier
-     *   is applied;
-     * - unrelated source compositions do not receive an unused Pack ID;
-     * - a broader caller cannot accidentally impose a conflicting Pack.
      */
     private LeadershipContext createSourceLeadershipContext(
             LeadershipContext leadershipContext
@@ -881,7 +1369,8 @@ public class SourceWaveExecutionState {
     }
 
     /**
-     * Chooses the next ordinary or attached mob without mutating runtime.
+     * Chooses one exact ordinary or attached delivery without mutating the
+     * queue.
      */
     private SpawnSelection selectNextSpawn() {
         List<SourceGroupComposition.AttachedMobAssignment>
@@ -909,6 +1398,9 @@ public class SourceWaveExecutionState {
 
         if (beforeOrdinaryAssignment != null) {
             return SpawnSelection.attached(
+                    requirePendingDeliveryForMob(
+                            beforeOrdinaryAssignment.mobId()
+                    ),
                     beforeOrdinaryAssignment
             );
         }
@@ -945,9 +1437,8 @@ public class SourceWaveExecutionState {
         }
 
         /*
-         * WITH_ORDINARY assignments are eligible whenever their mob ID is
-         * reached in the shuffled delivery sequence, even when no ordinary
-         * unit of that same type remains.
+         * WITH_ORDINARY assignments become eligible when their mob ID is
+         * reached in the exact shuffled delivery sequence.
          */
         for (SourceGroupComposition.AttachedMobAssignment assignment
                 : unboundAssignments) {
@@ -963,12 +1454,12 @@ public class SourceWaveExecutionState {
             }
         }
 
-        String middlePhaseMobId =
-                spawnQueue.peekNextMobId(
+        SourceSpawnQueue.DeliveryEntry middlePhaseDeliveryEntry =
+                spawnQueue.peekNextDeliveryEntry(
                         middlePhaseMobIds
                 );
 
-        if (middlePhaseMobId != null) {
+        if (middlePhaseDeliveryEntry != null) {
             SourceGroupComposition.AttachedMobAssignment
                     withOrdinaryAssignment =
                     findFirstAssignment(
@@ -976,17 +1467,18 @@ public class SourceWaveExecutionState {
                             SourceGroupComposition
                                     .AttachedMobSpawnPriority
                                     .WITH_ORDINARY,
-                            middlePhaseMobId
+                            middlePhaseDeliveryEntry.mobId()
                     );
 
             if (withOrdinaryAssignment != null) {
                 return SpawnSelection.attached(
+                        middlePhaseDeliveryEntry,
                         withOrdinaryAssignment
                 );
             }
 
             return SpawnSelection.ordinary(
-                    middlePhaseMobId
+                    middlePhaseDeliveryEntry
             );
         }
 
@@ -1002,6 +1494,9 @@ public class SourceWaveExecutionState {
 
         if (afterOrdinaryAssignment != null) {
             return SpawnSelection.attached(
+                    requirePendingDeliveryForMob(
+                            afterOrdinaryAssignment.mobId()
+                    ),
                     afterOrdinaryAssignment
             );
         }
@@ -1016,153 +1511,27 @@ public class SourceWaveExecutionState {
         );
     }
 
-    /**
-     * Commits one ordinary spawn after the entity has entered the world.
-     */
-    private void completeOrdinarySpawn(
-            SpawnSelection spawnSelection,
-            Entity spawnedEntity
+    private SourceSpawnQueue.DeliveryEntry requirePendingDeliveryForMob(
+            String mobId
     ) {
-        if (spawnSelection.isAttachedAssignment()) {
-            throw new IllegalArgumentException(
-                    "Attached spawn selection cannot use ordinary completion."
-            );
-        }
+        SourceSpawnQueue.DeliveryEntry deliveryEntry =
+                spawnQueue.peekNextDeliveryEntry(
+                        Set.of(
+                                mobId
+                        )
+                );
 
-        if (spawnedEntity == null
-                || spawnedEntity.isRemoved()) {
-
-            throw new IllegalArgumentException(
-                    "Ordinary spawn completion requires a live entity."
-            );
-        }
-
-        spawnQueue.markMobSpawned(
-                spawnSelection.mobId()
-        );
-
-        successfulSpawnCount++;
-    }
-
-    /**
-     * Applies, identifies, binds and commits one attached promoted mob.
-     *
-     * The stable assignment ID is stored on both:
-     *
-     * - the central source-wave binding state;
-     * - the actual entity's ordinary Minecraft NBT.
-     *
-     * This allows later entity-load events to reconnect the two sides without
-     * continuously polling the entity's position.
-     */
-    private void completeAttachedSpawn(
-            SpawnSelection spawnSelection,
-            Entity spawnedEntity
-    ) {
-        SourceGroupComposition.AttachedMobAssignment assignment =
-                spawnSelection.attachedMobAssignment();
-
-        if (assignment == null) {
-            throw new IllegalArgumentException(
-                    "Attached spawn completion requires an assignment."
-            );
-        }
-
-        if (!(spawnedEntity
-                instanceof AttachedMobAssignmentEntity
-                attachedAssignmentEntity)) {
-
-            throw new IllegalArgumentException(
-                    "Entity type "
-                            + spawnedEntity.getType()
-                            + " cannot fulfil attached assignment "
-                            + assignment.attachedMobAssignmentId()
-                            + " because it does not implement "
-                            + "AttachedMobAssignmentEntity."
-            );
-        }
-
-        AttachedMobRuntimeModifierExecutor.apply(
-                sourceGroupComposition,
-                sourceComposition,
-                assignment,
-                spawnSelection.mobId(),
-                spawnedEntity
-        );
-
-        UUID attachedMobAssignmentId =
-                assignment.attachedMobAssignmentId();
-
-        UUID existingEntityAssignmentId =
-                attachedAssignmentEntity
-                        .getAttachedMobAssignmentId();
-
-        if (existingEntityAssignmentId != null
-                && !existingEntityAssignmentId.equals(
-                attachedMobAssignmentId
-        )) {
-
+        if (deliveryEntry == null) {
             throw new IllegalStateException(
-                    "Spawned entity "
-                            + spawnedEntity.getUUID()
-                            + " already identifies attached assignment "
-                            + existingEntityAssignmentId
-                            + " rather than planned assignment "
-                            + attachedMobAssignmentId
-                            + "."
+                    "Source composition "
+                            + sourceCompositionId
+                            + " reserved a pending attached assignment for "
+                            + mobId
+                            + " but its queue contains no matching delivery."
             );
         }
 
-        boolean entityIdentityAdded =
-                existingEntityAssignmentId == null;
-
-        if (entityIdentityAdded) {
-            attachedAssignmentEntity
-                    .setAttachedMobAssignmentId(
-                            attachedMobAssignmentId
-                    );
-        }
-
-        boolean newlyBound =
-                false;
-
-        try {
-            newlyBound =
-                    attachedMobEntityBindingState.bind(
-                            attachedMobAssignmentId,
-                            spawnedEntity
-                    );
-
-            if (!newlyBound) {
-                throw new IllegalStateException(
-                        "Attached assignment "
-                                + attachedMobAssignmentId
-                                + " was selected despite already having an "
-                                + "entity binding."
-                );
-            }
-
-            spawnQueue.markMobSpawned(
-                    spawnSelection.mobId()
-            );
-
-            successfulSpawnCount++;
-        } catch (RuntimeException exception) {
-            if (newlyBound) {
-                attachedMobEntityBindingState.removeBinding(
-                        attachedMobAssignmentId
-                );
-            }
-
-            if (entityIdentityAdded) {
-                attachedAssignmentEntity
-                        .setAttachedMobAssignmentId(
-                                null
-                        );
-            }
-
-            throw exception;
-        }
+        return deliveryEntry;
     }
 
     private List<SourceGroupComposition.AttachedMobAssignment>
@@ -1211,10 +1580,6 @@ public class SourceWaveExecutionState {
     /**
      * Ensures ordinary delivery has not consumed a queue unit reserved by an
      * unbound attached assignment.
-     *
-     * A cancelled assignment may remain unbound after the whole queue is
-     * cancelled, so this invariant applies only while the wave assignment is
-     * still delivering mobs.
      */
     private void validateRemainingAttachedReservations(
             Map<String, Integer> unboundAssignmentCountsByMobId
@@ -1284,42 +1649,43 @@ public class SourceWaveExecutionState {
     }
 
     private record SpawnSelection(
-            String mobId,
+            SourceSpawnQueue.DeliveryEntry deliveryEntry,
             SourceGroupComposition.AttachedMobAssignment
             attachedMobAssignment
     ) {
 
         private SpawnSelection {
-            if (mobId == null
-                    || mobId.isBlank()) {
-
+            if (deliveryEntry == null) {
                 throw new IllegalArgumentException(
-                        "Spawn-selection mob ID cannot be blank."
+                        "Spawn selection requires an exact delivery entry."
                 );
             }
 
             if (attachedMobAssignment != null
-                    && !mobId.equals(
-                    attachedMobAssignment.mobId()
-            )) {
+                    && !deliveryEntry
+                    .mobId()
+                    .equals(
+                            attachedMobAssignment.mobId()
+                    )) {
 
                 throw new IllegalArgumentException(
                         "Attached spawn-selection mob ID does not match its "
-                                + "assignment."
+                                + "delivery entry."
                 );
             }
         }
 
         private static SpawnSelection ordinary(
-                String mobId
+                SourceSpawnQueue.DeliveryEntry deliveryEntry
         ) {
             return new SpawnSelection(
-                    mobId,
+                    deliveryEntry,
                     null
             );
         }
 
         private static SpawnSelection attached(
+                SourceSpawnQueue.DeliveryEntry deliveryEntry,
                 SourceGroupComposition.AttachedMobAssignment assignment
         ) {
             if (assignment == null) {
@@ -1329,13 +1695,54 @@ public class SourceWaveExecutionState {
             }
 
             return new SpawnSelection(
-                    assignment.mobId(),
+                    deliveryEntry,
                     assignment
             );
         }
 
+        private String mobId() {
+            return deliveryEntry.mobId();
+        }
+
         private boolean isAttachedAssignment() {
             return attachedMobAssignment != null;
+        }
+
+        private UUID attachedMobAssignmentId() {
+            return attachedMobAssignment == null
+                    ? null
+                    : attachedMobAssignment
+                    .attachedMobAssignmentId();
+        }
+    }
+
+    private record PreparedAttachedSpawn(
+            UUID attachedMobAssignmentId,
+            AttachedMobAssignmentEntity attachedAssignmentEntity,
+            boolean entityIdentityAdded,
+            boolean bindingAdded
+    ) {
+
+        private PreparedAttachedSpawn {
+            if (attachedMobAssignmentId == null) {
+                throw new IllegalArgumentException(
+                        "Prepared attached spawn requires an assignment ID."
+                );
+            }
+
+            if (attachedAssignmentEntity == null) {
+                throw new IllegalArgumentException(
+                        "Prepared attached spawn requires its entity-side "
+                                + "assignment owner."
+                );
+            }
+
+            if (!bindingAdded) {
+                throw new IllegalArgumentException(
+                        "Prepared attached spawn requires an added central "
+                                + "binding."
+                );
+            }
         }
     }
 

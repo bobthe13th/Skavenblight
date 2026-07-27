@@ -1,6 +1,9 @@
 package org.ratden.skavenblight.event.skavenIncursion.runtime.persistence;
 
+import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionChunkLoadPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionPlanSnapshot;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.validation.PersistentIncursionMobTrackingValidator;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -8,23 +11,32 @@ import java.util.UUID;
 /**
  * Complete immutable persistent representation of one admitted incursion.
  *
- * This is the unit that will later be stored by SkavenIncursionSavedData.
- * It joins:
+ * This is the canonical record stored by SkavenIncursionSavedData. It joins:
  *
  * - root Scenario identity;
  * - selected Stratagem identity;
  * - the positional target snapshot used during planning;
  * - the complete immutable IncursionPlan snapshot;
+ * - the exact calculated chunk-load plan admitted with that IncursionPlan;
  * - the complete common planned-Scenario runtime snapshot;
+ * - persistent tracking for every successfully delivered incursion mob;
  * - the persistence-layer lifecycle phase.
  *
  * Some identity values deliberately appear in more than one nested snapshot.
  * That redundancy allows each persistence layer to validate its own data and
- * prevents unrelated plans, runtime graphs or Scenario records from being
- * silently combined.
+ * prevents unrelated plans, chunk footprints, runtime graphs, mob-tracking
+ * records or Scenario records from being silently combined.
  *
- * The containing SavedData will eventually use incursionId as its canonical
- * map key.
+ * Pending mobs remain authoritative in the Scenario runtime's
+ * SourceSpawnQueue snapshots.
+ *
+ * Successfully delivered mobs are authoritative in mobTrackingSnapshot.
+ *
+ * Cancelled mobs appear in neither remaining queues nor successful-spawn
+ * tracking. Their threat can therefore be derived later from the immutable
+ * planned threat, pending queue threat and successfully delivered threat.
+ *
+ * The containing SavedData uses incursionId as its canonical map key.
  */
 public record PersistentIncursionSnapshot(
         UUID incursionId,
@@ -32,7 +44,9 @@ public record PersistentIncursionSnapshot(
         String stratagemId,
         IncursionTargetSnapshot targetSnapshot,
         IncursionPlanSnapshot incursionPlanSnapshot,
+        IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot,
         PlannedScenarioRuntimeSnapshot scenarioRuntimeSnapshot,
+        IncursionMobTrackingState.Snapshot mobTrackingSnapshot,
         PersistentIncursionPhase phase
 ) {
 
@@ -63,8 +77,19 @@ public record PersistentIncursionSnapshot(
         );
 
         Objects.requireNonNull(
+                chunkLoadPlanSnapshot,
+                "Persistent incursion chunk-load plan snapshot cannot be "
+                        + "null."
+        );
+
+        Objects.requireNonNull(
                 scenarioRuntimeSnapshot,
                 "Persistent incursion runtime snapshot cannot be null."
+        );
+
+        Objects.requireNonNull(
+                mobTrackingSnapshot,
+                "Persistent incursion mob-tracking snapshot cannot be null."
         );
 
         Objects.requireNonNull(
@@ -76,21 +101,26 @@ public record PersistentIncursionSnapshot(
                 incursionId,
                 scenarioId,
                 incursionPlanSnapshot,
-                scenarioRuntimeSnapshot
+                chunkLoadPlanSnapshot,
+                scenarioRuntimeSnapshot,
+                mobTrackingSnapshot
         );
 
         validateLifecycle(
                 phase,
                 scenarioRuntimeSnapshot
         );
+
+        PersistentIncursionMobTrackingValidator.validate(
+                incursionId,
+                scenarioRuntimeSnapshot,
+                mobTrackingSnapshot
+        );
     }
 
     /**
-     * Returns a new snapshot with the same plan and runtime state but a
-     * different persistence-layer lifecycle phase.
-     *
-     * The constructor validates that the requested transition produces a
-     * structurally valid snapshot.
+     * Returns a new snapshot with the same planning, Scenario runtime and mob
+     * tracking state but a different persistence-layer lifecycle phase.
      */
     public PersistentIncursionSnapshot withPhase(
             PersistentIncursionPhase newPhase
@@ -101,7 +131,9 @@ public record PersistentIncursionSnapshot(
                 stratagemId,
                 targetSnapshot,
                 incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
                 scenarioRuntimeSnapshot,
+                mobTrackingSnapshot,
                 newPhase
         );
     }
@@ -109,8 +141,11 @@ public record PersistentIncursionSnapshot(
     /**
      * Returns a new snapshot containing updated Scenario runtime state.
      *
-     * This is useful when SavedData replaces one immutable persistent record
-     * after the live Scenario has ticked.
+     * The immutable tactical plan, chunk-load plan and mob-tracking state
+     * remain unchanged.
+     *
+     * This method is suitable for timer and controller progress that does not
+     * also change successful mob-delivery state.
      */
     public PersistentIncursionSnapshot withScenarioRuntimeSnapshot(
             PlannedScenarioRuntimeSnapshot newRuntimeSnapshot
@@ -121,14 +156,70 @@ public record PersistentIncursionSnapshot(
                 stratagemId,
                 targetSnapshot,
                 incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
                 newRuntimeSnapshot,
+                mobTrackingSnapshot,
                 phase
         );
     }
 
     /**
-     * Returns a new snapshot containing both updated runtime state and its
+     * Returns a new snapshot containing updated persistent mob-tracking state.
+     *
+     * This is suitable for lifecycle changes such as a tracked mob becoming
+     * defeated while Scenario queue state remains unchanged.
+     */
+    public PersistentIncursionSnapshot withMobTrackingSnapshot(
+            IncursionMobTrackingState.Snapshot newMobTrackingSnapshot
+    ) {
+        return new PersistentIncursionSnapshot(
+                incursionId,
+                scenarioId,
+                stratagemId,
+                targetSnapshot,
+                incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
+                scenarioRuntimeSnapshot,
+                newMobTrackingSnapshot,
+                phase
+        );
+    }
+
+    /**
+     * Returns a new snapshot containing updated Scenario runtime and mob
+     * tracking state.
+     *
+     * Successful delivery changes both sides of the accounting boundary:
+     *
+     * - the consumed queue entry is removed from pending runtime state;
+     * - the successfully spawned entity is added to persistent mob tracking.
+     *
+     * Capturing both in one replacement avoids persisting an intermediate
+     * state in which represented threat exists in both places or neither.
+     */
+    public PersistentIncursionSnapshot
+    withRuntimeAndMobTrackingSnapshots(
+            PlannedScenarioRuntimeSnapshot newRuntimeSnapshot,
+            IncursionMobTrackingState.Snapshot newMobTrackingSnapshot
+    ) {
+        return new PersistentIncursionSnapshot(
+                incursionId,
+                scenarioId,
+                stratagemId,
+                targetSnapshot,
+                incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
+                newRuntimeSnapshot,
+                newMobTrackingSnapshot,
+                phase
+        );
+    }
+
+    /**
+     * Returns a new snapshot containing updated Scenario runtime state and its
      * corresponding persistence phase.
+     *
+     * Mob-tracking state remains unchanged.
      *
      * This avoids constructing an invalid intermediate snapshot when a
      * Scenario finishes and moves directly from ACTIVE to CLEANUP_PENDING.
@@ -143,7 +234,35 @@ public record PersistentIncursionSnapshot(
                 stratagemId,
                 targetSnapshot,
                 incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
                 newRuntimeSnapshot,
+                mobTrackingSnapshot,
+                newPhase
+        );
+    }
+
+    /**
+     * Returns a new snapshot containing updated Scenario runtime state,
+     * persistent mob tracking and lifecycle phase.
+     *
+     * This is the atomic replacement method for a transition that changes all
+     * three mutable branches at once.
+     */
+    public PersistentIncursionSnapshot
+    withRuntimeMobTrackingAndPhase(
+            PlannedScenarioRuntimeSnapshot newRuntimeSnapshot,
+            IncursionMobTrackingState.Snapshot newMobTrackingSnapshot,
+            PersistentIncursionPhase newPhase
+    ) {
+        return new PersistentIncursionSnapshot(
+                incursionId,
+                scenarioId,
+                stratagemId,
+                targetSnapshot,
+                incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
+                newRuntimeSnapshot,
+                newMobTrackingSnapshot,
                 newPhase
         );
     }
@@ -172,7 +291,9 @@ public record PersistentIncursionSnapshot(
             UUID incursionId,
             String scenarioId,
             IncursionPlanSnapshot incursionPlanSnapshot,
-            PlannedScenarioRuntimeSnapshot scenarioRuntimeSnapshot
+            IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot,
+            PlannedScenarioRuntimeSnapshot scenarioRuntimeSnapshot,
+            IncursionMobTrackingState.Snapshot mobTrackingSnapshot
     ) {
         if (!incursionId.equals(
                 incursionPlanSnapshot.incursionId()
@@ -187,6 +308,18 @@ public record PersistentIncursionSnapshot(
         }
 
         if (!incursionId.equals(
+                chunkLoadPlanSnapshot.incursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "Persistent incursion ID "
+                            + incursionId
+                            + " does not match immutable chunk-load plan ID "
+                            + chunkLoadPlanSnapshot.incursionId()
+                            + "."
+            );
+        }
+
+        if (!incursionId.equals(
                 scenarioRuntimeSnapshot.instanceId()
         )) {
             throw new IllegalArgumentException(
@@ -194,6 +327,18 @@ public record PersistentIncursionSnapshot(
                             + incursionId
                             + " does not match Scenario runtime instance ID "
                             + scenarioRuntimeSnapshot.instanceId()
+                            + "."
+            );
+        }
+
+        if (!incursionId.equals(
+                mobTrackingSnapshot.incursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "Persistent incursion ID "
+                            + incursionId
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingSnapshot.incursionId()
                             + "."
             );
         }

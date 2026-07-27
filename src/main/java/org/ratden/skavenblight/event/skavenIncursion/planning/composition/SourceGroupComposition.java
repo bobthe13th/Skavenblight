@@ -144,6 +144,20 @@ public class SourceGroupComposition {
             );
         }
 
+        if (sourceComposition.getCalculatedThreatSpent()
+                != sourceComposition.getThreatSpent()) {
+
+            throw new IllegalArgumentException(
+                    "Source composition "
+                            + sourceComposition.getSourceCompositionId()
+                            + " records "
+                            + sourceComposition.getThreatSpent()
+                            + " threat spent, but its mob entries represent "
+                            + sourceComposition.getCalculatedThreatSpent()
+                            + " threat."
+            );
+        }
+
         if (sourceComposition.getSourceGroupLoadCost()
                 > getMaximumSourceGroupLoad()) {
             throw new IllegalArgumentException(
@@ -523,13 +537,63 @@ public class SourceGroupComposition {
                     .sourceGroupLoadCost();
         }
 
+        /**
+         * Compatibility bridge for immutable plan snapshots created before
+         * represented threat was stored per mob entry.
+         *
+         * New planning code must use the five-argument overload and provide
+         * the exact represented threat directly. This overload exists only
+         * until the composition snapshot schema is upgraded in the next step.
+         */
+        @Deprecated
         public void addMob(
                 String mobId,
                 int count,
                 int capacityCostPerMob,
                 SourceSize minimumSourceSize
         ) {
-            if (mobId == null || mobId.isBlank()) {
+            IncursionMobDefinition mobDefinition =
+                    IncursionMobCatalogue.getById(
+                            mobId
+                    );
+
+            if (mobDefinition == null) {
+                throw new IllegalArgumentException(
+                        "Cannot restore legacy mob entry '"
+                                + mobId
+                                + "' because no current incursion mob "
+                                + "definition exists for that ID."
+                );
+            }
+
+            addMob(
+                    mobId,
+                    count,
+                    mobDefinition.getThreatCost(),
+                    capacityCostPerMob,
+                    minimumSourceSize
+            );
+        }
+
+        /**
+         * Adds one already-purchased mob entry with its exact represented
+         * threat.
+         *
+         * Represented threat is copied from the admitted plan rather than
+         * recalculated later by runtime. Future compression or authored
+         * substitution may therefore assign a value that differs from the
+         * mob catalogue's ordinary cost.
+         */
+        public void addMob(
+                String mobId,
+                int count,
+                int representedThreatPerMob,
+                int capacityCostPerMob,
+                SourceSize minimumSourceSize
+        ) {
+            if (mobId == null
+                    || mobId.isBlank()) {
+
                 throw new IllegalArgumentException(
                         "Mob ID cannot be blank."
                 );
@@ -538,6 +602,12 @@ public class SourceGroupComposition {
             if (count <= 0) {
                 throw new IllegalArgumentException(
                         "Mob count must be greater than zero."
+                );
+            }
+
+            if (representedThreatPerMob <= 0) {
+                throw new IllegalArgumentException(
+                        "Represented threat per mob must be greater than zero."
                 );
             }
 
@@ -553,7 +623,9 @@ public class SourceGroupComposition {
                 );
             }
 
-            if (!requiredSourceSize.canFit(minimumSourceSize)) {
+            if (!requiredSourceSize.canFit(
+                    minimumSourceSize
+            )) {
                 throw new IllegalArgumentException(
                         "Required source size "
                                 + requiredSourceSize
@@ -563,10 +635,40 @@ public class SourceGroupComposition {
                 );
             }
 
-            int addedCapacity = count * capacityCostPerMob;
+            int addedThreat =
+                    Math.multiplyExact(
+                            count,
+                            representedThreatPerMob
+                    );
 
-            if (getUsedCapacityUnits() + addedCapacity
+            int resultingThreat =
+                    Math.addExact(
+                            getCalculatedThreatSpent(),
+                            addedThreat
+                    );
+
+            if (resultingThreat > threatSpent) {
+                throw new IllegalArgumentException(
+                        "Mob entry would exceed the source composition's "
+                                + "planned threat expenditure."
+                );
+            }
+
+            int addedCapacity =
+                    Math.multiplyExact(
+                            count,
+                            capacityCostPerMob
+                    );
+
+            int resultingCapacity =
+                    Math.addExact(
+                            getUsedCapacityUnits(),
+                            addedCapacity
+                    );
+
+            if (resultingCapacity
                     > requiredSourceSize.getCapacityUnits()) {
+
                 throw new IllegalArgumentException(
                         "Mob entry would exceed the planned source capacity."
                 );
@@ -576,6 +678,7 @@ public class SourceGroupComposition {
                     new MobEntry(
                             mobId,
                             count,
+                            representedThreatPerMob,
                             capacityCostPerMob,
                             minimumSourceSize
                     )
@@ -609,6 +712,27 @@ public class SourceGroupComposition {
 
             for (MobEntry mobEntry : mobEntries) {
                 total += mobEntry.getCount();
+            }
+
+            return total;
+        }
+
+        /**
+         * Calculates the exact represented threat contained in the immutable
+         * mob entries.
+         */
+        public int getCalculatedThreatSpent() {
+            int total =
+                    0;
+
+            for (MobEntry mobEntry
+                    : mobEntries) {
+
+                total =
+                        Math.addExact(
+                                total,
+                                mobEntry.getTotalRepresentedThreat()
+                        );
             }
 
             return total;
@@ -661,13 +785,6 @@ public class SourceGroupComposition {
             return Collections.unmodifiableSet(orders);
         }
 
-        /**
-         * Promotes one already-budgeted mob into a distinct attached planned
-         * assignment.
-         *
-         * The assignment reserves one unit from the existing mob count. It
-         * does not alter threat spent, total mob count or source capacity.
-         */
         /**
          * Promotes one already-budgeted mob into a distinct attached planned
          * assignment using a fresh attachment ID.
@@ -849,25 +966,74 @@ public class SourceGroupComposition {
     }
 
     /**
-     * One mob type and count within a source-sized composition package.
+     * One purchased mob type and count within a source-sized composition.
+     *
+     * representedThreatPerMob records how much of the admitted plan each
+     * individual mob represents. It is not recalculated from the live mob
+     * catalogue during runtime.
      */
     public static class MobEntry {
 
         private final String mobId;
         private final int count;
+        private final int representedThreatPerMob;
         private final int capacityCostPerMob;
         private final SourceSize minimumSourceSize;
 
         public MobEntry(
                 String mobId,
                 int count,
+                int representedThreatPerMob,
                 int capacityCostPerMob,
                 SourceSize minimumSourceSize
         ) {
-            this.mobId = mobId;
-            this.count = count;
-            this.capacityCostPerMob = capacityCostPerMob;
-            this.minimumSourceSize = minimumSourceSize;
+            if (mobId == null
+                    || mobId.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Mob entry ID cannot be blank."
+                );
+            }
+
+            if (count <= 0) {
+                throw new IllegalArgumentException(
+                        "Mob entry count must be greater than zero."
+                );
+            }
+
+            if (representedThreatPerMob <= 0) {
+                throw new IllegalArgumentException(
+                        "Mob entry represented threat must be greater than "
+                                + "zero."
+                );
+            }
+
+            if (capacityCostPerMob <= 0) {
+                throw new IllegalArgumentException(
+                        "Mob entry capacity cost must be greater than zero."
+                );
+            }
+
+            if (minimumSourceSize == null) {
+                throw new IllegalArgumentException(
+                        "Mob entry minimum source size cannot be null."
+                );
+            }
+
+            this.mobId =
+                    mobId;
+
+            this.count =
+                    count;
+
+            this.representedThreatPerMob =
+                    representedThreatPerMob;
+
+            this.capacityCostPerMob =
+                    capacityCostPerMob;
+
+            this.minimumSourceSize =
+                    minimumSourceSize;
         }
 
         public String getMobId() {
@@ -878,12 +1044,26 @@ public class SourceGroupComposition {
             return count;
         }
 
+        public int getRepresentedThreatPerMob() {
+            return representedThreatPerMob;
+        }
+
+        public int getTotalRepresentedThreat() {
+            return Math.multiplyExact(
+                    count,
+                    representedThreatPerMob
+            );
+        }
+
         public int getCapacityCostPerMob() {
             return capacityCostPerMob;
         }
 
         public int getTotalCapacityCost() {
-            return count * capacityCostPerMob;
+            return Math.multiplyExact(
+                    count,
+                    capacityCostPerMob
+            );
         }
 
         public SourceSize getMinimumSourceSize() {

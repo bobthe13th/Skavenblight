@@ -12,54 +12,80 @@ import net.minecraft.world.phys.HitResult;
 import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
 import org.ratden.skavenblight.block.entity.SkavenTunnelSourceEntity;
 import org.ratden.skavenblight.block.entity.state.SourceState;
+import org.ratden.skavenblight.event.skavenIncursion.debug.IncursionRuntimeDebugFormatter;
+import org.ratden.skavenblight.event.skavenIncursion.debug.IncursionSourceInspectionContext;
 import org.ratden.skavenblight.event.skavenIncursion.director.ActiveIncursionManager;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.composition.SourceGroupComposition;
 import org.ratden.skavenblight.event.skavenIncursion.planning.front.FrontPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceGroupPlacementPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourcePlacementPlan;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.IncursionExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.IncursionWaveController;
-import org.ratden.skavenblight.event.skavenIncursion.runtime.WaveExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.LivePersistentIncursion;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PlannedScenarioRuntimeSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceExecutionState;
-import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceSpawnQueue;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceWaveExecutionState;
-import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceGroupPlacementPlan;
-import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourcePlacementPlan;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 
 /**
- * Focused target-based inspection for live planning-aware incursions.
+ * Resolves target-based inspection context for live planning-aware
+ * incursions.
  *
- * The selected world object supplies the relevant identity. This avoids
- * requiring developers to enter or choose from lists of incursion, source,
- * composition and leadership UUIDs.
+ * The selected world object supplies the relevant identity. Developers do not
+ * need to enter incursion, source, composition or leadership UUIDs manually.
  *
- * The first implementation supports looked-at physical source blocks.
- * It reports only that source's branch of the owning incursion:
+ * This service owns:
  *
- * - owning Scenario and Stratagem;
- * - current controller state;
- * - physical and logical source state;
- * - the source's most relevant wave assignment;
- * - planned composition;
- * - successful, cancelled and remaining delivery counts;
- * - the exact remaining shuffled queue.
+ * - identifying the looked-at physical source;
+ * - resolving its owning live persistent incursion;
+ * - capturing one coherent runtime checkpoint;
+ * - finding the physical source placement;
+ * - selecting the most relevant wave assignment;
+ * - resolving the matching immutable composition;
+ * - constructing IncursionSourceInspectionContext;
+ * - sending the selected formatted report.
  *
- * It does not produce a complete report for every front, wave, group or
- * source in the incursion.
+ * It does not format individual report sections. That responsibility belongs
+ * to IncursionRuntimeDebugFormatter.
  */
 final class DebugIncursionInspectionService {
 
     private static final double SOURCE_PICK_RANGE =
             20.0D;
 
+    /**
+     * Compatibility route for the original bare inspection command.
+     *
+     * Bare inspection now produces the concise overview.
+     */
     static int inspectLookedAtSource(
             CommandSourceStack source
     ) throws CommandSyntaxException {
+        return inspectLookedAtSource(
+                source,
+                IncursionRuntimeDebugFormatter
+                        .InspectionView
+                        .OVERVIEW
+        );
+    }
+
+    /**
+     * Resolves the looked-at source once and formats the requested focused
+     * inspection view.
+     */
+    static int inspectLookedAtSource(
+            CommandSourceStack source,
+            IncursionRuntimeDebugFormatter.InspectionView inspectionView
+    ) throws CommandSyntaxException {
+        if (inspectionView == null) {
+            throw new IllegalArgumentException(
+                    "Incursion inspection view cannot be null."
+            );
+        }
+
         ServerPlayer player =
                 source.getPlayerOrException();
 
@@ -171,6 +197,12 @@ final class DebugIncursionInspectionService {
             return 0;
         }
 
+        /*
+         * Command execution occurs on the server thread. Capturing the
+         * Scenario and mob-tracking snapshots here therefore forms one
+         * coherent inspection checkpoint without a concurrent incursion tick
+         * mutating either branch between reads.
+         */
         PlannedScenarioRuntimeSnapshot runtimeSnapshot =
                 liveIncursion
                         .getScenario()
@@ -250,9 +282,12 @@ final class DebugIncursionInspectionService {
             return 0;
         }
 
+        IncursionPlan incursionPlan =
+                liveIncursion.getIncursionPlan();
+
         PlannedCompositionContext plannedCompositionContext =
                 findPlannedComposition(
-                        liveIncursion.getIncursionPlan(),
+                        incursionPlan,
                         assignmentContext.waveIndex(),
                         assignmentContext
                                 .sourceWaveSnapshot()
@@ -275,14 +310,14 @@ final class DebugIncursionInspectionService {
             return 0;
         }
 
-        UUID sourceGroupPlacementId =
-                findSourceGroupPlacementId(
-                        liveIncursion.getIncursionPlan(),
+        SourcePlacementPlan sourcePlacementPlan =
+                findSourcePlacementPlan(
+                        incursionPlan,
                         sourceExecutionSnapshot
                                 .sourcePlacementId()
                 );
 
-        if (sourceGroupPlacementId == null) {
+        if (sourcePlacementPlan == null) {
             source.sendFailure(
                     Component.literal(
                             "Could not resolve source placement "
@@ -302,17 +337,35 @@ final class DebugIncursionInspectionService {
                         SkavenTunnelSourceBlock.SOURCE_STATE
                 );
 
-        String report =
-                formatSourceInspection(
-                        liveIncursion,
-                        runtimeSnapshot,
+        IncursionSourceInspectionContext inspectionContext =
+                new IncursionSourceInspectionContext(
+                        liveIncursion.getScenarioId(),
+                        liveIncursion.getStratagemId(),
+                        liveIncursion.getIncursionId(),
+                        liveIncursion.getPhase(),
+                        controllerSnapshot,
                         sourcePos,
                         physicalSourceState,
                         runtimeSourceId,
-                        sourceGroupPlacementId,
+                        sourcePlacementPlan,
                         sourceExecutionSnapshot,
-                        assignmentContext,
+                        assignmentContext.waveIndex(),
+                        assignmentContext.relation(),
+                        plannedCompositionContext.frontIndex(),
                         plannedCompositionContext
+                                .sourceGroupComposition(),
+                        plannedCompositionContext
+                                .sourceComposition(),
+                        assignmentContext.sourceWaveSnapshot(),
+                        liveIncursion
+                                .getMobTrackingState()
+                                .createSnapshot()
+                );
+
+        String report =
+                IncursionRuntimeDebugFormatter.format(
+                        inspectionView,
+                        inspectionContext
                 );
 
         source.sendSuccess(
@@ -399,7 +452,7 @@ final class DebugIncursionInspectionService {
     /**
      * Resolves the selected physical source's most useful wave assignment.
      *
-     * Priority is:
+     * Priority:
      *
      * 1. assignment in the currently executing wave;
      * 2. nearest upcoming assignment with undelivered mobs;
@@ -425,7 +478,9 @@ final class DebugIncursionInspectionService {
             if (currentAssignment != null) {
                 return new SourceAssignmentContext(
                         currentWaveIndex,
-                        AssignmentRelation.CURRENT,
+                        IncursionSourceInspectionContext
+                                .AssignmentRelation
+                                .CURRENT,
                         currentAssignment
                 );
             }
@@ -456,7 +511,9 @@ final class DebugIncursionInspectionService {
 
             return new SourceAssignmentContext(
                     waveSnapshot.waveIndex(),
-                    AssignmentRelation.UPCOMING,
+                    IncursionSourceInspectionContext
+                            .AssignmentRelation
+                            .UPCOMING,
                     upcomingAssignment
             );
         }
@@ -492,7 +549,9 @@ final class DebugIncursionInspectionService {
             if (previousAssignment != null) {
                 return new SourceAssignmentContext(
                         waveSnapshot.waveIndex(),
-                        AssignmentRelation.PREVIOUS,
+                        IncursionSourceInspectionContext
+                                .AssignmentRelation
+                                .PREVIOUS,
                         previousAssignment
                 );
             }
@@ -542,15 +601,9 @@ final class DebugIncursionInspectionService {
     }
 
     /**
-     * Resolves the stable physical source-group placement that owns one
-     * source-placement slot.
-     *
-     * SourceGroupPlacementPlan and SourcePlacementPlan persist across waves.
-     * Their identities must therefore not be confused with the wave-specific
-     * SourceGroupComposition and SourceComposition identities shown elsewhere
-     * in the inspection report.
+     * Resolves the exact immutable physical source-placement object.
      */
-    private static UUID findSourceGroupPlacementId(
+    private static SourcePlacementPlan findSourcePlacementPlan(
             IncursionPlan incursionPlan,
             UUID sourcePlacementId
     ) {
@@ -566,7 +619,7 @@ final class DebugIncursionInspectionService {
             );
         }
 
-        UUID matchedSourceGroupPlacementId =
+        SourcePlacementPlan matchedSourcePlacementPlan =
                 null;
 
         for (FrontPlan frontPlan
@@ -575,67 +628,86 @@ final class DebugIncursionInspectionService {
             for (SourceGroupPlacementPlan sourceGroupPlacementPlan
                     : frontPlan.getSourceGroupPlacementPlans()) {
 
-                UUID sourceGroupPlacementId =
+                UUID containingGroupPlacementId =
                         sourceGroupPlacementPlan
                                 .getSourceGroupPlacementId();
 
-                for (SourcePlacementPlan sourcePlacementPlan
+                for (SourcePlacementPlan candidateSourcePlacementPlan
                         : sourceGroupPlacementPlan
                         .getSourcePlacementPlans()) {
 
                     if (!sourcePlacementId.equals(
-                            sourcePlacementPlan
+                            candidateSourcePlacementPlan
                                     .getSourcePlacementId()
                     )) {
                         continue;
                     }
 
-                    if (!sourceGroupPlacementId.equals(
-                            sourcePlacementPlan
+                    if (!containingGroupPlacementId.equals(
+                            candidateSourcePlacementPlan
                                     .getSourceGroupPlacementId()
                     )) {
                         throw new IllegalStateException(
                                 "Source placement "
                                         + sourcePlacementId
                                         + " identifies source group "
-                                        + sourcePlacementPlan
+                                        + candidateSourcePlacementPlan
                                         .getSourceGroupPlacementId()
                                         + ", but its containing placement "
                                         + "group is "
-                                        + sourceGroupPlacementId
+                                        + containingGroupPlacementId
                                         + "."
                         );
                     }
 
-                    if (matchedSourceGroupPlacementId != null
-                            && !matchedSourceGroupPlacementId.equals(
-                            sourceGroupPlacementId
-                    )) {
+                    if (matchedSourcePlacementPlan != null) {
                         throw new IllegalStateException(
                                 "Source placement "
                                         + sourcePlacementId
-                                        + " appears in multiple physical "
-                                        + "source groups."
+                                        + " appears more than once in the "
+                                        + "immutable incursion plan."
                         );
                     }
 
-                    matchedSourceGroupPlacementId =
-                            sourceGroupPlacementId;
+                    matchedSourcePlacementPlan =
+                            candidateSourcePlacementPlan;
                 }
             }
         }
 
-        return matchedSourceGroupPlacementId;
+        return matchedSourcePlacementPlan;
     }
 
     /**
-     * Finds the immutable composition represented by one runtime assignment.
+     * Resolves the immutable composition represented by one runtime
+     * assignment.
      */
     private static PlannedCompositionContext findPlannedComposition(
             IncursionPlan incursionPlan,
             int waveIndex,
             UUID sourceCompositionId
     ) {
+        if (incursionPlan == null) {
+            throw new IllegalArgumentException(
+                    "Incursion plan cannot be null."
+            );
+        }
+
+        if (waveIndex < 0) {
+            throw new IllegalArgumentException(
+                    "Wave index cannot be negative."
+            );
+        }
+
+        if (sourceCompositionId == null) {
+            throw new IllegalArgumentException(
+                    "Source composition ID cannot be null."
+            );
+        }
+
+        PlannedCompositionContext matchedComposition =
+                null;
+
         for (FrontPlan frontPlan
                 : incursionPlan.getFrontPlans()) {
 
@@ -660,334 +732,66 @@ final class DebugIncursionInspectionService {
                     continue;
                 }
 
-                return new PlannedCompositionContext(
-                        frontPlan.getFrontIndex(),
-                        sourceGroupComposition,
-                        sourceComposition
-                );
+                if (matchedComposition != null) {
+                    throw new IllegalStateException(
+                            "Source composition "
+                                    + sourceCompositionId
+                                    + " appears more than once in wave "
+                                    + waveIndex
+                                    + " of the immutable incursion plan."
+                    );
+                }
+
+                matchedComposition =
+                        new PlannedCompositionContext(
+                                frontPlan.getFrontIndex(),
+                                sourceGroupComposition,
+                                sourceComposition
+                        );
             }
         }
 
-        return null;
-    }
-
-    private static String formatSourceInspection(
-            LivePersistentIncursion liveIncursion,
-            PlannedScenarioRuntimeSnapshot runtimeSnapshot,
-            BlockPos sourcePos,
-            SourceState physicalSourceState,
-            UUID runtimeSourceId,
-            UUID sourceGroupPlacementId,
-            SourceExecutionState.Snapshot sourceExecutionSnapshot,
-            SourceAssignmentContext assignmentContext,
-            PlannedCompositionContext plannedCompositionContext
-    ) {
-        IncursionWaveController.Snapshot controllerSnapshot =
-                runtimeSnapshot.waveControllerSnapshot();
-
-        SourceWaveExecutionState.Snapshot sourceWaveSnapshot =
-                assignmentContext.sourceWaveSnapshot();
-
-        SourceSpawnQueue.Snapshot queueSnapshot =
-                sourceWaveSnapshot.spawnQueueSnapshot();
-
-        StringBuilder report =
-                new StringBuilder();
-
-        report.append("Incursion Source Inspection")
-                .append("\nScenario: ")
-                .append(liveIncursion.getScenarioId())
-                .append("\nStratagem: ")
-                .append(liveIncursion.getStratagemId())
-                .append("\nIncursion ID: ")
-                .append(liveIncursion.getIncursionId())
-                .append("\nPersistent Phase: ")
-                .append(liveIncursion.getPhase())
-                .append("\nController State: ")
-                .append(controllerSnapshot.completionReason())
-                .append("\nCurrent Wave: ")
-                .append(
-                        formatCurrentWave(
-                                controllerSnapshot
-                        )
-                );
-
-        report.append("\n\nSelected Physical Source")
-                .append("\nPosition: ")
-                .append(formatBlockPos(
-                        sourcePos
-                ))
-                .append("\nSource Group Placement ID: ")
-                .append(sourceGroupPlacementId)
-                .append("\nSource Placement ID: ")
-                .append(sourceExecutionSnapshot.sourcePlacementId())
-                .append("\nRuntime Source ID: ")
-                .append(runtimeSourceId)
-                .append("\nPhysical State: ")
-                .append(
-                        physicalSourceState.getSerializedName()
-                )
-                .append("\nLogical State: ")
-                .append(
-                        formatSourceState(
-                                sourceExecutionSnapshot.currentSourceState()
-                        )
-                )
-                .append("\nCurrently Destroyed: ")
-                .append(sourceExecutionSnapshot.currentlyDestroyed())
-                .append("\nDestruction Count: ")
-                .append(sourceExecutionSnapshot.destructionCount())
-                .append("\nPhysical Incarnations: ")
-                .append(
-                        sourceExecutionSnapshot
-                                .runtimeSourceIdHistory()
-                                .size()
-                );
-
-        report.append("\n\nRelevant Assignment")
-                .append("\nRelation: ")
-                .append(
-                        assignmentContext
-                                .relation()
-                                .displayName()
-                )
-                .append("\nWave: ")
-                .append(assignmentContext.waveIndex() + 1)
-                .append("\nFront: ")
-                .append(
-                        plannedCompositionContext.frontIndex()
-                                + 1
-                )
-                .append("\nSource Group Composition ID: ")
-                .append(
-                        plannedCompositionContext
-                                .sourceGroupComposition()
-                                .getSourceGroupCompositionId()
-                )
-                .append("\nSource Composition ID: ")
-                .append(
-                        sourceWaveSnapshot.sourceCompositionId()
-                );
-
-        appendPlannedComposition(
-                report,
-                plannedCompositionContext.sourceComposition()
-        );
-
-        report.append("\nProgress: ")
-                .append(sourceWaveSnapshot.successfulSpawnCount())
-                .append(" spawned, ")
-                .append(sourceWaveSnapshot.cancelledMobCount())
-                .append(" cancelled, ")
-                .append(sourceWaveSnapshot.getRemainingMobCount())
-                .append(" remaining, ")
-                .append(sourceWaveSnapshot.plannedMobCount())
-                .append(" planned");
-
-        appendWaveTiming(
-                report,
-                controllerSnapshot,
-                assignmentContext
-        );
-
-        appendRemainingQueue(
-                report,
-                queueSnapshot
-        );
-
-        return report.toString();
-    }
-
-    private static void appendPlannedComposition(
-            StringBuilder report,
-            SourceGroupComposition.SourceComposition sourceComposition
-    ) {
-        report.append("\nPlanned Mobs:");
-
-        for (SourceGroupComposition.MobEntry mobEntry
-                : sourceComposition.getMobEntries()) {
-
-            report.append("\n  ")
-                    .append(mobEntry.getMobId())
-                    .append(" x")
-                    .append(mobEntry.getCount());
-        }
-    }
-
-    private static void appendWaveTiming(
-            StringBuilder report,
-            IncursionWaveController.Snapshot controllerSnapshot,
-            SourceAssignmentContext assignmentContext
-    ) {
-        if (assignmentContext.relation()
-                != AssignmentRelation.CURRENT) {
-
-            report.append("\nWave Timing: ")
-                    .append(
-                            switch (assignmentContext.relation()) {
-                                case UPCOMING ->
-                                        "wave has not started";
-                                case PREVIOUS ->
-                                        "wave assignment has completed";
-                                case CURRENT ->
-                                        throw new IllegalStateException(
-                                                "Current assignment should "
-                                                        + "have timing data."
-                                        );
-                            }
-                    );
-
-            return;
-        }
-
-        WaveExecutionState.Snapshot currentWaveSnapshot =
-                controllerSnapshot.currentWaveExecutionSnapshot();
-
-        if (currentWaveSnapshot == null
-                || currentWaveSnapshot.waveIndex()
-                != assignmentContext.waveIndex()) {
-
-            report.append(
-                    "\nWave Timing: current wave timing unavailable"
-            );
-
-            return;
-        }
-
-        report.append("\nWave Elapsed: ")
-                .append(
-                        formatTicks(
-                                currentWaveSnapshot.elapsedTicks()
-                        )
-                );
-
-        if (currentWaveSnapshot.spawnScheduleComplete()) {
-            report.append("\nSpawn Schedule: complete");
-
-            return;
-        }
-
-        int ticksUntilNextSpawn =
-                Math.max(
-                        0,
-                        currentWaveSnapshot.nextSpawnTick()
-                                - currentWaveSnapshot.elapsedTicks()
-                );
-
-        report.append("\nNext Spawn Eligible In: ")
-                .append(
-                        formatTicks(
-                                ticksUntilNextSpawn
-                        )
-                );
-    }
-
-    private static void appendRemainingQueue(
-            StringBuilder report,
-            SourceSpawnQueue.Snapshot queueSnapshot
-    ) {
-        report.append("\nRemaining Queue:");
-
-        List<String> remainingMobOrder =
-                queueSnapshot.remainingMobOrder();
-
-        if (remainingMobOrder.isEmpty()) {
-            report.append("\n  none");
-
-            return;
-        }
-
-        for (int queueIndex = 0;
-             queueIndex < remainingMobOrder.size();
-             queueIndex++) {
-
-            report.append("\n  ")
-                    .append(queueIndex + 1)
-                    .append(". ")
-                    .append(
-                            remainingMobOrder.get(
-                                    queueIndex
-                            )
-                    );
-        }
-    }
-
-    private static String formatCurrentWave(
-            IncursionWaveController.Snapshot controllerSnapshot
-    ) {
-        int currentWaveIndex =
-                controllerSnapshot.getCurrentWaveIndex();
-
-        if (currentWaveIndex < 0) {
-            return "none";
-        }
-
-        return (controllerSnapshot.currentWavePosition() + 1)
-                + " of "
-                + controllerSnapshot.waveIndexes().size()
-                + " (authored index "
-                + currentWaveIndex
-                + ")";
-    }
-
-    private static String formatSourceState(
-            SourceState sourceState
-    ) {
-        return sourceState == null
-                ? "none"
-                : sourceState.getSerializedName();
-    }
-
-    private static String formatBlockPos(
-            BlockPos blockPos
-    ) {
-        return blockPos.getX()
-                + ", "
-                + blockPos.getY()
-                + ", "
-                + blockPos.getZ();
-    }
-
-    private static String formatTicks(
-            int ticks
-    ) {
-        double seconds =
-                ticks / 20.0D;
-
-        return ticks
-                + " ticks ("
-                + String.format(
-                Locale.ROOT,
-                "%.1f",
-                seconds
-        )
-                + " seconds)";
-    }
-
-    private enum AssignmentRelation {
-        CURRENT("current wave"),
-        UPCOMING("upcoming wave"),
-        PREVIOUS("previous wave");
-
-        private final String displayName;
-
-        AssignmentRelation(
-                String displayName
-        ) {
-            this.displayName =
-                    displayName;
-        }
-
-        private String displayName() {
-            return displayName;
-        }
+        return matchedComposition;
     }
 
     private record SourceAssignmentContext(
             int waveIndex,
-            AssignmentRelation relation,
+            IncursionSourceInspectionContext.AssignmentRelation relation,
             SourceWaveExecutionState.Snapshot sourceWaveSnapshot
     ) {
+
+        private SourceAssignmentContext {
+            if (waveIndex < 0) {
+                throw new IllegalArgumentException(
+                        "Source-assignment context wave index cannot be "
+                                + "negative."
+                );
+            }
+
+            if (relation == null) {
+                throw new IllegalArgumentException(
+                        "Source-assignment context relation cannot be null."
+                );
+            }
+
+            if (sourceWaveSnapshot == null) {
+                throw new IllegalArgumentException(
+                        "Source-assignment context snapshot cannot be null."
+                );
+            }
+
+            if (sourceWaveSnapshot.waveIndex()
+                    != waveIndex) {
+
+                throw new IllegalArgumentException(
+                        "Source-assignment context wave index "
+                                + waveIndex
+                                + " does not match source-wave snapshot "
+                                + sourceWaveSnapshot.waveIndex()
+                                + "."
+                );
+            }
+        }
     }
 
     private record PlannedCompositionContext(
@@ -995,6 +799,39 @@ final class DebugIncursionInspectionService {
             SourceGroupComposition sourceGroupComposition,
             SourceGroupComposition.SourceComposition sourceComposition
     ) {
+
+        private PlannedCompositionContext {
+            if (frontIndex < 0) {
+                throw new IllegalArgumentException(
+                        "Planned-composition context front index cannot be "
+                                + "negative."
+                );
+            }
+
+            if (sourceGroupComposition == null) {
+                throw new IllegalArgumentException(
+                        "Planned-composition context requires a source-group "
+                                + "composition."
+                );
+            }
+
+            if (sourceComposition == null) {
+                throw new IllegalArgumentException(
+                        "Planned-composition context requires a source "
+                                + "composition."
+                );
+            }
+
+            if (sourceGroupComposition.getSourceComposition(
+                    sourceComposition.getSourceCompositionId()
+            ) != sourceComposition) {
+                throw new IllegalArgumentException(
+                        "Planned-composition context source composition is not "
+                                + "the exact immutable child of its source "
+                                + "group."
+                );
+            }
+        }
     }
 
     private DebugIncursionInspectionService() {

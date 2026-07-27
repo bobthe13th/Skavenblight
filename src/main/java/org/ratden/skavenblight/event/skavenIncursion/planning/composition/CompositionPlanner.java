@@ -214,6 +214,7 @@ public class CompositionPlanner {
                 sourceComposition.addMob(
                         mobDefinition.getMobId(),
                         entry.getValue(),
+                        mobDefinition.getThreatCost(),
                         mobDefinition.getCapacityCost(),
                         mobDefinition.getMinimumSourceSize()
                 );

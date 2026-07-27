@@ -1,41 +1,49 @@
 package org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.nbt;
 
 import net.minecraft.nbt.CompoundTag;
+import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionChunkLoadPlanSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.IncursionPlanSnapshot;
+import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.nbt.IncursionChunkLoadPlanSnapshotNbtCodec;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.nbt.IncursionPlanSnapshotNbtCodec;
 import org.ratden.skavenblight.event.skavenIncursion.planning.persistence.nbt.IncursionSnapshotNbtSupport;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.IncursionTargetSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PersistentIncursionPhase;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PersistentIncursionSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PlannedScenarioRuntimeSnapshot;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.nbt.mob.IncursionMobTrackingStateSnapshotNbtCodec;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.nbt.scenario.PlannedScenarioRuntimeSnapshotNbtCodec;
 
 /**
- * Versioned CompoundTag codec for one complete
- * PersistentIncursionSnapshot.
+ * Strict versioned root codec for one complete persistent incursion record.
  *
- * This is the root codec for one admitted incursion. It joins:
+ * Version 1 predates persisted chunk-load plans.
  *
- * - root incursion identity;
- * - Scenario identity;
- * - selected Stratagem identity;
- * - positional target information;
- * - the complete immutable IncursionPlan;
- * - the complete mutable planned-Scenario runtime;
- * - the persistence-layer lifecycle phase.
+ * Version 2 adds the exact immutable IncursionChunkLoadPlanSnapshot admitted
+ * with the tactical plan.
  *
- * Nested snapshot codecs remain responsible for validating their own
- * structures. Construction of PersistentIncursionSnapshot then validates
- * identity and lifecycle consistency across those structures.
+ * Version 3 adds persistent tracking for every successfully delivered
+ * incursion mob, including the exact represented threat assigned by the
+ * admitted plan.
  *
- * The format version belongs here because this compound represents the
- * complete independently stored incursion record. Nested codecs currently
- * read the exact structures selected by this root format.
+ * Version-1 records cannot be migrated faithfully because they did not
+ * preserve the protected Warp Flux network geometry or the calculated
+ * source-group and route footprints.
+ *
+ * Version-2 records cannot be migrated faithfully because they did not
+ * preserve which individual mobs had successfully entered the world or the
+ * represented threat assigned to those entities. Creating an empty tracking
+ * snapshot would incorrectly classify already-delivered threat as neither
+ * pending nor spawned.
+ *
+ * The surrounding SkavenIncursionSavedData codec may independently support
+ * empty old containers so cleaned development worlds can be rewritten. This
+ * root codec does not approximately migrate non-empty old incursion records.
  */
 public final class PersistentIncursionSnapshotNbtCodec {
 
     private static final int CURRENT_FORMAT_VERSION =
-            1;
+            3;
 
     private static final String FORMAT_VERSION =
             "format_version";
@@ -55,8 +63,14 @@ public final class PersistentIncursionSnapshotNbtCodec {
     private static final String INCURSION_PLAN =
             "incursion_plan";
 
+    private static final String CHUNK_LOAD_PLAN =
+            "chunk_load_plan";
+
     private static final String SCENARIO_RUNTIME =
             "scenario_runtime";
+
+    private static final String MOB_TRACKING =
+            "mob_tracking";
 
     private static final String PHASE =
             "phase";
@@ -78,7 +92,7 @@ public final class PersistentIncursionSnapshotNbtCodec {
         }
 
         CompoundTag tag =
-                writeVersionOne(
+                writeVersionThree(
                         snapshot
                 );
 
@@ -108,9 +122,9 @@ public final class PersistentIncursionSnapshotNbtCodec {
     /**
      * Reads one complete persistent-incursion record.
      *
-     * Unsupported versions are rejected explicitly. Migration support can be
-     * added here later without weakening the strict readers used by the
-     * current schema.
+     * Unsupported and incomplete historical formats are rejected explicitly.
+     * Approximate migration is not allowed at this authoritative persistence
+     * boundary.
      */
     public static PersistentIncursionSnapshot read(
             CompoundTag tag
@@ -128,8 +142,23 @@ public final class PersistentIncursionSnapshotNbtCodec {
                 );
 
         return switch (formatVersion) {
-            case 1 -> readVersionOne(
+            case 3 -> readVersionThree(
                     tag
+            );
+
+            case 2 -> throw new IllegalArgumentException(
+                    "Persistent incursion format version 2 cannot be "
+                            + "restored because it predates authoritative "
+                            + "tracking of successfully delivered mobs and "
+                            + "their represented threat. Clean up old test "
+                            + "incursions before loading this version."
+            );
+
+            case 1 -> throw new IllegalArgumentException(
+                    "Persistent incursion format version 1 cannot be "
+                            + "restored because it predates persisted "
+                            + "chunk-load plans. Clean up old test incursions "
+                            + "before loading this version."
             );
 
             default -> throw new IllegalArgumentException(
@@ -146,7 +175,7 @@ public final class PersistentIncursionSnapshotNbtCodec {
         return CURRENT_FORMAT_VERSION;
     }
 
-    private static CompoundTag writeVersionOne(
+    private static CompoundTag writeVersionThree(
             PersistentIncursionSnapshot snapshot
     ) {
         CompoundTag tag =
@@ -187,9 +216,23 @@ public final class PersistentIncursionSnapshotNbtCodec {
         );
 
         tag.put(
+                CHUNK_LOAD_PLAN,
+                IncursionChunkLoadPlanSnapshotNbtCodec.write(
+                        snapshot.chunkLoadPlanSnapshot()
+                )
+        );
+
+        tag.put(
                 SCENARIO_RUNTIME,
                 PlannedScenarioRuntimeSnapshotNbtCodec.write(
                         snapshot.scenarioRuntimeSnapshot()
+                )
+        );
+
+        tag.put(
+                MOB_TRACKING,
+                IncursionMobTrackingStateSnapshotNbtCodec.write(
+                        snapshot.mobTrackingSnapshot()
                 )
         );
 
@@ -201,7 +244,7 @@ public final class PersistentIncursionSnapshotNbtCodec {
         return tag;
     }
 
-    private static PersistentIncursionSnapshot readVersionOne(
+    private static PersistentIncursionSnapshot readVersionThree(
             CompoundTag tag
     ) {
         IncursionTargetSnapshot targetSnapshot =
@@ -214,8 +257,18 @@ public final class PersistentIncursionSnapshotNbtCodec {
                         tag
                 );
 
+        IncursionChunkLoadPlanSnapshot chunkLoadPlanSnapshot =
+                readChunkLoadPlanSnapshot(
+                        tag
+                );
+
         PlannedScenarioRuntimeSnapshot scenarioRuntimeSnapshot =
                 readScenarioRuntimeSnapshot(
+                        tag
+                );
+
+        IncursionMobTrackingState.Snapshot mobTrackingSnapshot =
+                readMobTrackingSnapshot(
                         tag
                 );
 
@@ -234,7 +287,9 @@ public final class PersistentIncursionSnapshotNbtCodec {
                 ),
                 targetSnapshot,
                 incursionPlanSnapshot,
+                chunkLoadPlanSnapshot,
                 scenarioRuntimeSnapshot,
+                mobTrackingSnapshot,
                 IncursionSnapshotNbtSupport.requireEnum(
                         tag,
                         PHASE,
@@ -286,6 +341,29 @@ public final class PersistentIncursionSnapshotNbtCodec {
         }
     }
 
+    private static IncursionChunkLoadPlanSnapshot
+    readChunkLoadPlanSnapshot(
+            CompoundTag tag
+    ) {
+        CompoundTag chunkLoadPlanTag =
+                IncursionSnapshotNbtSupport.requireCompound(
+                        tag,
+                        CHUNK_LOAD_PLAN
+                );
+
+        try {
+            return IncursionChunkLoadPlanSnapshotNbtCodec.read(
+                    chunkLoadPlanTag
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "Failed to read persistent immutable chunk-load plan "
+                            + "snapshot.",
+                    exception
+            );
+        }
+    }
+
     private static PlannedScenarioRuntimeSnapshot
     readScenarioRuntimeSnapshot(
             CompoundTag tag
@@ -303,6 +381,29 @@ public final class PersistentIncursionSnapshotNbtCodec {
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException(
                     "Failed to read persistent planned-Scenario runtime "
+                            + "snapshot.",
+                    exception
+            );
+        }
+    }
+
+    private static IncursionMobTrackingState.Snapshot
+    readMobTrackingSnapshot(
+            CompoundTag tag
+    ) {
+        CompoundTag mobTrackingTag =
+                IncursionSnapshotNbtSupport.requireCompound(
+                        tag,
+                        MOB_TRACKING
+                );
+
+        try {
+            return IncursionMobTrackingStateSnapshotNbtCodec.read(
+                    mobTrackingTag
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "Failed to read persistent incursion mob-tracking "
                             + "snapshot.",
                     exception
             );

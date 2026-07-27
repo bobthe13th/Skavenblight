@@ -5,12 +5,16 @@ import org.ratden.skavenblight.event.skavenIncursion.debug.DebugIncursionAnchorP
 import org.ratden.skavenblight.event.skavenIncursion.debug.DebugIncursionAnchorTracker;
 import org.ratden.skavenblight.event.skavenIncursion.director.ActiveIncursionManager;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.ActiveIncursionSourceReservationRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.chunk.IncursionChunkReadinessService;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.chunk.IncursionChunkTicketService;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.reconciliation.PersistentIncursionWorldReconciliationService;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -21,12 +25,15 @@ import java.util.UUID;
  * 1. read the already-loaded PersistentIncursionSnapshot;
  * 2. reconstruct the immutable IncursionPlan;
  * 3. rebuild the authoritative physical-reservation snapshot;
- * 4. restore the live Scenario through ScenarioRegistry;
- * 5. rebuild the LivePersistentIncursion owner;
- * 6. reconcile persisted physical-source state with the world;
- * 7. save any logical changes produced by reconciliation;
- * 8. attach the live owner to ActiveIncursionManager;
- * 9. restore non-authoritative debug-anchor tracking.
+ * 4. restore the persisted chunk-load plan for ACTIVE records;
+ * 5. ensure the exact current-wave ticket classification;
+ * 6. defer without world inspection until every authoritative chunk is ready;
+ * 7. restore the live Scenario through ScenarioRegistry;
+ * 8. rebuild the LivePersistentIncursion owner;
+ * 9. reconcile persisted physical-source state with the ready world;
+ * 10. save any logical changes produced by reconciliation;
+ * 11. attach the live owner to ActiveIncursionManager;
+ * 12. restore non-authoritative debug-anchor tracking.
  *
  * Debug-anchor restoration is deliberately last. A failure in that optional
  * visualisation layer produces a warning but does not suspend or reject an
@@ -83,6 +90,80 @@ public final class PersistentIncursionRestorationService {
                         savedData.getSnapshots()
                 );
 
+        return restoreSnapshots(
+                level,
+                savedData,
+                storedSnapshots
+        );
+    }
+
+    /**
+     * Retries only the records that a previous restoration pass deferred
+     * while waiting for authoritative chunk readiness.
+     *
+     * Missing records are simply absent from the retry input. Records already
+     * attached to ActiveIncursionManager are counted as skipped by the shared
+     * restoration loop.
+     */
+    public static RestorationReport retryDeferred(
+            ServerLevel level,
+            Set<UUID> deferredIncursionIds
+    ) {
+        if (level == null) {
+            throw new IllegalArgumentException(
+                    "Deferred restoration level cannot be null."
+            );
+        }
+
+        if (deferredIncursionIds == null) {
+            throw new IllegalArgumentException(
+                    "Deferred incursion ID set cannot be null."
+            );
+        }
+
+        if (deferredIncursionIds.isEmpty()) {
+            return new RestorationReport(
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    List.of(),
+                    List.of()
+            );
+        }
+
+        SkavenIncursionSavedData savedData =
+                SkavenIncursionSavedData.get(
+                        level
+                );
+
+        List<PersistentIncursionSnapshot> deferredSnapshots =
+                savedData.getSnapshots()
+                        .stream()
+                        .filter(
+                                snapshot ->
+                                        deferredIncursionIds.contains(
+                                                snapshot.incursionId()
+                                        )
+                        )
+                        .toList();
+
+        return restoreSnapshots(
+                level,
+                savedData,
+                deferredSnapshots
+        );
+    }
+
+    /**
+     * Shared restoration loop for an explicit immutable snapshot collection.
+     */
+    private static RestorationReport restoreSnapshots(
+            ServerLevel level,
+            SkavenIncursionSavedData savedData,
+            List<PersistentIncursionSnapshot> storedSnapshots
+    ) {
         int restoredCount =
                 0;
 
@@ -93,6 +174,9 @@ public final class PersistentIncursionRestorationService {
                 0;
 
         List<RestorationWarning> warnings =
+                new ArrayList<>();
+
+        List<RestorationDeferred> deferred =
                 new ArrayList<>();
 
         List<RestorationFailure> failures =
@@ -136,6 +220,19 @@ public final class PersistentIncursionRestorationService {
                 continue;
             }
 
+            if (attempt.deferred()) {
+                deferred.add(
+                        new RestorationDeferred(
+                                snapshot.incursionId(),
+                                snapshot.scenarioId(),
+                                attempt.reservationsRestored(),
+                                attempt.deferredMessage()
+                        )
+                );
+
+                continue;
+            }
+
             if (attempt.markedSuspended()) {
                 newlySuspendedCount++;
             }
@@ -158,6 +255,7 @@ public final class PersistentIncursionRestorationService {
                 skippedCount,
                 newlySuspendedCount,
                 warnings,
+                deferred,
                 failures
         );
     }
@@ -180,6 +278,12 @@ public final class PersistentIncursionRestorationService {
 
         LivePersistentIncursion restoredIncursion =
                 null;
+
+        IncursionChunkLoadPlan restoredChunkLoadPlan =
+                null;
+
+        boolean chunkTicketStateTouched =
+                false;
 
         /*
          * This tracks the most recent snapshot known to represent the live
@@ -204,6 +308,60 @@ public final class PersistentIncursionRestorationService {
 
             reservationsRestored =
                     true;
+
+            /*
+             * ACTIVE records own authoritative chunk tickets. Re-establish
+             * the exact persisted classification before any physical source
+             * position is inspected.
+             *
+             * SUSPENDED records deliberately remain inert, while
+             * CLEANUP_PENDING records need only be reattached so normal
+             * manager cleanup can remove their remaining ownership state.
+             */
+            if (persistentSnapshot.phase()
+                    == PersistentIncursionPhase.ACTIVE) {
+
+                restoredChunkLoadPlan =
+                        persistentSnapshot
+                                .chunkLoadPlanSnapshot()
+                                .restore();
+
+                int currentWaveIndex =
+                        persistentSnapshot
+                                .scenarioRuntimeSnapshot()
+                                .getCurrentWaveIndex();
+
+                /*
+                 * Mark ticket ownership as touched before the operation.
+                 * ensureTicketState(...) is deliberately idempotent rather
+                 * than transactional; if it throws after partially changing
+                 * ticket classifications, the failure path must release the
+                 * complete retained footprint before suspending the record.
+                 */
+                chunkTicketStateTouched =
+                        true;
+
+                IncursionChunkTicketService.ensureTicketState(
+                        level,
+                        restoredChunkLoadPlan,
+                        currentWaveIndex
+                );
+
+                IncursionChunkReadinessService.ReadinessReport
+                        readinessReport =
+                        IncursionChunkReadinessService.inspect(
+                                level,
+                                restoredChunkLoadPlan,
+                                currentWaveIndex
+                        );
+
+                if (!readinessReport.ready()) {
+                    return RestorationAttempt.deferred(
+                            reservationsRestored,
+                            readinessReport.describeUnavailableState()
+                    );
+                }
+            }
 
             PersistableSkavenScenario<
                     PlannedScenarioRuntimeSnapshot
@@ -233,35 +391,40 @@ public final class PersistentIncursionRestorationService {
                             persistentSnapshot
                     );
 
-            PersistentIncursionWorldReconciliationService
-                    .ReconciliationReport reconciliationReport =
-                    PersistentIncursionWorldReconciliationService.reconcile(
-                            level,
-                            restoredIncursion
+            if (persistentSnapshot.phase()
+                    == PersistentIncursionPhase.ACTIVE) {
+
+                PersistentIncursionWorldReconciliationService
+                        .ReconciliationReport reconciliationReport =
+                        PersistentIncursionWorldReconciliationService.reconcile(
+                                level,
+                                restoredIncursion
+                        );
+
+                if (!reconciliationReport.successful()) {
+                    throw new IllegalStateException(
+                            formatReconciliationConflicts(
+                                    reconciliationReport
+                            )
                     );
+                }
 
-            if (!reconciliationReport.successful()) {
-                throw new IllegalStateException(
-                        formatReconciliationConflicts(
-                                reconciliationReport
-                        )
-                );
-            }
+                /*
+                 * Missing-source reconciliation may cancel pending mobs or
+                 * change physical source execution state. Those changes must
+                 * become persistent before the restored incursion enters live
+                 * runtime.
+                 */
+                latestPersistentSnapshot =
+                        restoredIncursion.createPersistentSnapshot();
 
-            /*
-             * Missing-source reconciliation may cancel pending mobs or change
-             * physical source execution state. Those changes must become
-             * persistent before the restored incursion enters live runtime.
-             */
-            latestPersistentSnapshot =
-                    restoredIncursion.createPersistentSnapshot();
-
-            if (!persistentSnapshot.equals(
-                    latestPersistentSnapshot
-            )) {
-                savedData.replaceSnapshot(
+                if (!persistentSnapshot.equals(
                         latestPersistentSnapshot
-                );
+                )) {
+                    savedData.replaceSnapshot(
+                            latestPersistentSnapshot
+                    );
+                }
             }
 
             /*
@@ -279,16 +442,26 @@ public final class PersistentIncursionRestorationService {
              * restored incursion.
              */
             String debugAnchorWarning =
-                    restoreDebugAnchors(
+                    persistentSnapshot.phase()
+                            == PersistentIncursionPhase.ACTIVE
+                            ? restoreDebugAnchors(
                             level,
                             restoredIncursion
-                    );
+                    )
+                            : null;
 
             return RestorationAttempt.success(
                     reservationsRestored,
                     debugAnchorWarning
             );
         } catch (RuntimeException exception) {
+            String ticketReleaseFailureMessage =
+                    releaseTicketsAfterRestorationFailure(
+                            level,
+                            restoredChunkLoadPlan,
+                            chunkTicketStateTouched
+                    );
+
             /*
              * Reconciliation applies only after a complete ownership-conflict
              * inspection, but an unexpected application error could still
@@ -317,7 +490,8 @@ public final class PersistentIncursionRestorationService {
                     createFailureMessage(
                             exception,
                             snapshotRefreshAttempt,
-                            suspensionAttempt
+                            suspensionAttempt,
+                            ticketReleaseFailureMessage
                     );
 
             return RestorationAttempt.failure(
@@ -585,10 +759,41 @@ public final class PersistentIncursionRestorationService {
         return builder.toString();
     }
 
+    /**
+     * Releases ACTIVE-incursion tickets when restoration fails after ticket
+     * state was established. A failed or suspended record must not continue
+     * consuming ticking chunks in the current server session.
+     */
+    private static String releaseTicketsAfterRestorationFailure(
+            ServerLevel level,
+            IncursionChunkLoadPlan chunkLoadPlan,
+            boolean chunkTicketStateTouched
+    ) {
+        if (!chunkTicketStateTouched
+                || chunkLoadPlan == null) {
+
+            return null;
+        }
+
+        try {
+            IncursionChunkTicketService.releaseAllTickets(
+                    level,
+                    chunkLoadPlan
+            );
+
+            return null;
+        } catch (RuntimeException exception) {
+            return describeException(
+                    exception
+            );
+        }
+    }
+
     private static String createFailureMessage(
             RuntimeException restorationException,
             SnapshotRefreshAttempt snapshotRefreshAttempt,
-            SuspensionAttempt suspensionAttempt
+            SuspensionAttempt suspensionAttempt,
+            String ticketReleaseFailureMessage
     ) {
         StringBuilder builder =
                 new StringBuilder(
@@ -620,6 +825,21 @@ public final class PersistentIncursionRestorationService {
 
             builder.append(
                     suspensionAttempt.failureMessage()
+            );
+
+            builder.append(
+                    "."
+            );
+        }
+
+        if (ticketReleaseFailureMessage != null) {
+            builder.append(
+                    " Chunk-ticket release after restoration failure also "
+                            + "failed: "
+            );
+
+            builder.append(
+                    ticketReleaseFailureMessage
             );
 
             builder.append(
@@ -664,6 +884,7 @@ public final class PersistentIncursionRestorationService {
             int skippedCount,
             int newlySuspendedCount,
             List<RestorationWarning> warnings,
+            List<RestorationDeferred> deferred,
             List<RestorationFailure> failures
     ) {
 
@@ -698,6 +919,12 @@ public final class PersistentIncursionRestorationService {
                 );
             }
 
+            if (deferred == null) {
+                throw new IllegalArgumentException(
+                        "Deferred restoration list cannot be null."
+                );
+            }
+
             if (failures == null) {
                 throw new IllegalArgumentException(
                         "Restoration failure list cannot be null."
@@ -709,6 +936,11 @@ public final class PersistentIncursionRestorationService {
                             warnings
                     );
 
+            deferred =
+                    List.copyOf(
+                            deferred
+                    );
+
             failures =
                     List.copyOf(
                             failures
@@ -716,6 +948,7 @@ public final class PersistentIncursionRestorationService {
 
             if (restoredCount
                     + skippedCount
+                    + deferred.size()
                     + failures.size()
                     != storedRecordCount) {
 
@@ -748,12 +981,17 @@ public final class PersistentIncursionRestorationService {
             return warnings.size();
         }
 
+        public int getDeferredCount() {
+            return deferred.size();
+        }
+
         public int getFailureCount() {
             return failures.size();
         }
 
         public boolean restoredEverything() {
-            return failures.isEmpty();
+            return deferred.isEmpty()
+                    && failures.isEmpty();
         }
 
         public boolean hadStoredRecords() {
@@ -764,8 +1002,22 @@ public final class PersistentIncursionRestorationService {
             return !warnings.isEmpty();
         }
 
+        public boolean hadDeferred() {
+            return !deferred.isEmpty();
+        }
+
         public boolean hadFailures() {
             return !failures.isEmpty();
+        }
+
+        public Set<UUID> getDeferredIncursionIds() {
+            return deferred.stream()
+                    .map(
+                            RestorationDeferred::incursionId
+                    )
+                    .collect(
+                            java.util.stream.Collectors.toUnmodifiableSet()
+                    );
         }
     }
 
@@ -799,6 +1051,45 @@ public final class PersistentIncursionRestorationService {
 
                 throw new IllegalArgumentException(
                         "Restoration warning message cannot be blank."
+                );
+            }
+        }
+    }
+
+    /**
+     * Diagnostic information for one ACTIVE record whose authoritative
+     * tickets are present but whose required chunks are not ready yet.
+     *
+     * Deferred records remain ACTIVE in SavedData and are retried later. They
+     * are not suspended and no physical-source absence conclusion is made.
+     */
+    public record RestorationDeferred(
+            UUID incursionId,
+            String scenarioId,
+            boolean reservationsRestored,
+            String message
+    ) {
+
+        public RestorationDeferred {
+            if (incursionId == null) {
+                throw new IllegalArgumentException(
+                        "Deferred restoration incursion ID cannot be null."
+                );
+            }
+
+            if (scenarioId == null
+                    || scenarioId.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Deferred restoration Scenario ID cannot be blank."
+                );
+            }
+
+            if (message == null
+                    || message.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Deferred restoration message cannot be blank."
                 );
             }
         }
@@ -863,20 +1154,35 @@ public final class PersistentIncursionRestorationService {
      */
     private record RestorationAttempt(
             boolean successful,
+            boolean deferred,
             boolean markedSuspended,
             boolean reservationsRestored,
             String warningMessage,
+            String deferredMessage,
             String failureMessage
     ) {
 
         private RestorationAttempt {
+            int outcomeCount =
+                    (successful ? 1 : 0)
+                            + (deferred ? 1 : 0)
+                            + (failureMessage != null ? 1 : 0);
+
+            if (outcomeCount != 1) {
+                throw new IllegalArgumentException(
+                        "A restoration attempt must be exactly successful, "
+                                + "deferred or failed."
+                );
+            }
+
             if (successful) {
                 if (markedSuspended
+                        || deferredMessage != null
                         || failureMessage != null) {
 
                     throw new IllegalArgumentException(
                             "A successful restoration attempt cannot contain "
-                                    + "failure state."
+                                    + "deferred or failure state."
                     );
                 }
 
@@ -887,11 +1193,32 @@ public final class PersistentIncursionRestorationService {
                             "A restoration warning cannot be blank."
                     );
                 }
-            } else {
-                if (warningMessage != null) {
+            } else if (deferred) {
+                if (markedSuspended
+                        || warningMessage != null
+                        || failureMessage != null) {
+
                     throw new IllegalArgumentException(
-                            "A failed restoration attempt cannot also contain "
-                                    + "a success warning."
+                            "A deferred restoration attempt cannot contain "
+                                    + "success or failure state."
+                    );
+                }
+
+                if (deferredMessage == null
+                        || deferredMessage.isBlank()) {
+
+                    throw new IllegalArgumentException(
+                            "A deferred restoration attempt requires a "
+                                    + "message."
+                    );
+                }
+            } else {
+                if (warningMessage != null
+                        || deferredMessage != null) {
+
+                    throw new IllegalArgumentException(
+                            "A failed restoration attempt cannot contain a "
+                                    + "warning or deferred message."
                     );
                 }
 
@@ -913,8 +1240,25 @@ public final class PersistentIncursionRestorationService {
             return new RestorationAttempt(
                     true,
                     false,
+                    false,
                     reservationsRestored,
                     warningMessage,
+                    null,
+                    null
+            );
+        }
+
+        private static RestorationAttempt deferred(
+                boolean reservationsRestored,
+                String deferredMessage
+        ) {
+            return new RestorationAttempt(
+                    false,
+                    true,
+                    false,
+                    reservationsRestored,
+                    null,
+                    deferredMessage,
                     null
             );
         }
@@ -926,8 +1270,10 @@ public final class PersistentIncursionRestorationService {
         ) {
             return new RestorationAttempt(
                     false,
+                    false,
                     markedSuspended,
                     reservationsRestored,
+                    null,
                     null,
                     failureMessage
             );

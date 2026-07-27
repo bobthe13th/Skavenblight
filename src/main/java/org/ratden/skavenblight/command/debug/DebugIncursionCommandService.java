@@ -25,6 +25,7 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioRegistry;
 import org.ratden.skavenblight.world.NexusTracker;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
 import org.ratden.skavenblight.event.skavenIncursion.director.PlannedIncursionStartService;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.chunk.IncursionChunkTicketService;
 
 import java.util.List;
 
@@ -287,6 +288,9 @@ final class DebugIncursionCommandService {
                 .IncursionReservationSnapshot
                 reservationSnapshot =
                 startSuccess.reservationSnapshot();
+        IncursionChunkTicketService.TicketOperationResult
+                ticketOperationResult =
+                startSuccess.ticketOperationResult();
 
         /*
          * Debug anchors remain deliberately outside the authoritative
@@ -315,6 +319,9 @@ final class DebugIncursionCommandService {
                                 + planSummary
                                 + formatReservationRegistration(
                                 reservationSnapshot
+                        )
+                                + formatChunkTicketAcquisition(
+                                ticketOperationResult
                         )
                                 + "\nPersistent record: admitted."
                                 + formatDebugAnchorPlacement(
@@ -724,6 +731,30 @@ final class DebugIncursionCommandService {
                 + (sourceCount == 1
                 ? ""
                 : "s")
+                + ".";
+    }
+
+    /**
+     * Reports the authoritative ticket state installed for a freshly
+     * admitted planning-aware incursion.
+     */
+    private static String formatChunkTicketAcquisition(
+            IncursionChunkTicketService.TicketOperationResult result
+    ) {
+        if (result == null) {
+            return "\nChunk tickets: unavailable.";
+        }
+
+        return "\nChunk tickets: "
+                + result.desiredTickingTicketCount()
+                + " ticking, "
+                + result.desiredNonTickingTicketCount()
+                + " retained non-ticking."
+                + "\nChunk tickets newly acquired: "
+                + result.getAddedTicketCount()
+                + "."
+                + "\nInitial ticket wave: "
+                + (result.activeWaveIndex() + 1)
                 + ".";
     }
 

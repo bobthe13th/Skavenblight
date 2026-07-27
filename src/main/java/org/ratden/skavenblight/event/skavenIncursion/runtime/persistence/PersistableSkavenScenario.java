@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.event.skavenIncursion.runtime.persistence;
 
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 
 import java.util.UUID;
@@ -12,13 +13,53 @@ import java.util.UUID;
  * PlannedScenarioRuntimeSnapshot while a future specialised Scenario may use
  * a richer snapshot containing additional authored state.
  *
+ * Persistence-aware Scenarios are owned and ticked by
+ * LivePersistentIncursion. That owner supplies the authoritative
+ * IncursionMobTrackingState belonging to the same incursion.
+ *
  * This interface does not save NBT or interact with SavedData. It exposes only
- * Scenario-owned persistence and reconciliation operations.
+ * Scenario-owned persistence, ticking and reconciliation operations.
  *
  * @param <S> immutable persistence snapshot produced by the Scenario
  */
 public interface PersistableSkavenScenario<S>
         extends SkavenScenario {
+
+    /**
+     * Advances the Scenario using the authoritative persistent mob-tracking
+     * state belonging to its live incursion owner.
+     *
+     * The default implementation temporarily delegates to the original
+     * no-argument Scenario tick so the tracking dependency can be propagated
+     * through the runtime hierarchy incrementally.
+     *
+     * Planning-aware Scenarios that deliver mobs must override this method.
+     * The compatibility delegation will be removed after the existing
+     * Scenario runtime has been converted.
+     */
+    default void tickPersistent(
+            IncursionMobTrackingState mobTrackingState
+    ) {
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "Persistent Scenario tick requires mob-tracking state."
+            );
+        }
+
+        if (!getInstanceId().equals(
+                mobTrackingState.getIncursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "Scenario instance ID "
+                            + getInstanceId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        tick();
+    }
 
     /**
      * Captures the Scenario's complete current logical runtime state.

@@ -23,7 +23,8 @@ import java.util.UUID;
  *
  * Each persistent record contains:
  *
- * - immutable planning state;
+ * - immutable tactical planning state;
+ * - the exact admitted chunk-load plan;
  * - selected Scenario and Stratagem identities;
  * - the original target snapshot;
  * - complete mutable Scenario runtime state;
@@ -43,7 +44,7 @@ public final class SkavenIncursionSavedData extends SavedData {
             "skavenblight_incursions";
 
     private static final int CURRENT_FORMAT_VERSION =
-            1;
+            2;
 
     private static final String FORMAT_VERSION =
             "format_version";
@@ -112,8 +113,9 @@ public final class SkavenIncursionSavedData extends SavedData {
     /**
      * Loads the complete collection of persistent incursion records.
      *
-     * Unsupported container versions and malformed records are rejected
-     * explicitly rather than guessed or partially repaired.
+     * An empty version-1 container may be migrated because it contains no
+     * records whose missing chunk-load footprint would need to be guessed.
+     * Non-empty version-1 containers are rejected.
      */
     public static SkavenIncursionSavedData load(
             CompoundTag tag,
@@ -132,7 +134,11 @@ public final class SkavenIncursionSavedData extends SavedData {
                 );
 
         return switch (formatVersion) {
-            case 1 -> loadVersionOne(
+            case 1 -> loadVersionOneEmptyContainer(
+                    tag
+            );
+
+            case 2 -> loadVersionTwo(
                     tag
             );
 
@@ -365,7 +371,48 @@ public final class SkavenIncursionSavedData extends SavedData {
         return CURRENT_FORMAT_VERSION;
     }
 
-    private static SkavenIncursionSavedData loadVersionOne(
+    /**
+     * Permits a cleaned development world with an empty version-1 container
+     * to migrate to version 2.
+     *
+     * Non-empty version-1 data cannot be reconstructed faithfully because its
+     * records predate persisted chunk-load plans.
+     */
+    private static SkavenIncursionSavedData
+    loadVersionOneEmptyContainer(
+            CompoundTag tag
+    ) {
+        ListTag incursionTags =
+                IncursionSnapshotNbtSupport.requireCompoundList(
+                        tag,
+                        INCURSIONS
+                );
+
+        if (!incursionTags.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Skaven incursion SavedData format version 1 contains "
+                            + incursionTags.size()
+                            + " persistent incursion record(s). Version-1 "
+                            + "records predate persisted chunk-load plans and "
+                            + "cannot be migrated safely. Restore the previous "
+                            + "code, clean up those test incursions, save the "
+                            + "world, and then retry."
+            );
+        }
+
+        SkavenIncursionSavedData migratedData =
+                new SkavenIncursionSavedData();
+
+        /*
+         * Ensure the empty legacy container is rewritten using format version
+         * 2 on the next normal world save.
+         */
+        migratedData.setDirty();
+
+        return migratedData;
+    }
+
+    private static SkavenIncursionSavedData loadVersionTwo(
             CompoundTag tag
     ) {
         ListTag incursionTags =

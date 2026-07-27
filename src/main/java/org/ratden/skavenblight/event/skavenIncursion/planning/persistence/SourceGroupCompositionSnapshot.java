@@ -26,7 +26,7 @@ import java.util.UUID;
  * - the source-group composition ID;
  * - source-group load rules;
  * - child source-composition IDs;
- * - mob entries and their capacity information;
+ * - mob entries, represented threat and capacity information;
  * - modifiers and orders;
  * - attached promoted-mob assignments;
  * - complexity-option definitions;
@@ -35,9 +35,14 @@ import java.util.UUID;
  * Every UUID is retained during restoration. No new planning identity is
  * generated.
  *
- * This class contains immutable planning data only.
- * SourceGroupCompositionSnapshotNbtCodec serialises it as part of the
- * complete persisted IncursionPlan snapshot tree.
+ * Represented mob threat is copied from the admitted immutable plan rather
+ * than recalculated from the live mob catalogue. This allows an active
+ * incursion to retain its original threat accounting after balance changes
+ * and supports future compressed or substituted mobs whose represented
+ * threat differs from their ordinary catalogue cost.
+ *
+ * This object does not write NBT. SourceGroupCompositionSnapshotNbtCodec
+ * serialises it alongside the rest of the immutable IncursionPlan.
  */
 public record SourceGroupCompositionSnapshot(
         UUID sourceGroupCompositionId,
@@ -204,8 +209,11 @@ public record SourceGroupCompositionSnapshot(
         for (SourceCompositionSnapshot sourceSnapshot
                 : sourceCompositionSnapshots) {
 
-            totalThreatSpent +=
-                    sourceSnapshot.threatSpent();
+            totalThreatSpent =
+                    Math.addExact(
+                            totalThreatSpent,
+                            sourceSnapshot.threatSpent()
+                    );
         }
 
         return totalThreatSpent;
@@ -218,8 +226,11 @@ public record SourceGroupCompositionSnapshot(
         for (SourceCompositionSnapshot sourceSnapshot
                 : sourceCompositionSnapshots) {
 
-            totalComplexitySpent +=
-                    sourceSnapshot.getComplexitySpent();
+            totalComplexitySpent =
+                    Math.addExact(
+                            totalComplexitySpent,
+                            sourceSnapshot.getComplexitySpent()
+                    );
         }
 
         return totalComplexitySpent;
@@ -232,8 +243,11 @@ public record SourceGroupCompositionSnapshot(
         for (SourceCompositionSnapshot sourceSnapshot
                 : sourceCompositionSnapshots) {
 
-            totalLoad +=
-                    sourceSnapshot.sourceGroupLoadCost();
+            totalLoad =
+                    Math.addExact(
+                            totalLoad,
+                            sourceSnapshot.sourceGroupLoadCost()
+                    );
         }
 
         return totalLoad;
@@ -305,8 +319,11 @@ public record SourceGroupCompositionSnapshot(
                 );
             }
 
-            totalLoad +=
-                    sourceSnapshot.sourceGroupLoadCost();
+            totalLoad =
+                    Math.addExact(
+                            totalLoad,
+                            sourceSnapshot.sourceGroupLoadCost()
+                    );
         }
 
         if (totalLoad > maximumLoad) {
@@ -368,6 +385,10 @@ public record SourceGroupCompositionSnapshot(
 
     /**
      * Immutable snapshot of one source-sized composition.
+     *
+     * threatSpent remains the fixed original planned threat for this source
+     * composition. It must exactly equal the represented threat carried by
+     * the mob-entry snapshots.
      */
     public record SourceCompositionSnapshot(
             UUID sourceCompositionId,
@@ -469,6 +490,7 @@ public record SourceGroupCompositionSnapshot(
                     );
 
             validateContents(
+                    threatSpent,
                     requiredSourceSize,
                     mobEntrySnapshots,
                     modifiers,
@@ -494,26 +516,28 @@ public record SourceGroupCompositionSnapshot(
                 );
             }
 
-            List<MobEntrySnapshot> capturedMobs =
+            List<MobEntrySnapshot> capturedMobEntries =
                     new ArrayList<>();
 
             for (SourceGroupComposition.MobEntry mobEntry
                     : sourceComposition.getMobEntries()) {
 
-                capturedMobs.add(
+                capturedMobEntries.add(
                         MobEntrySnapshot.capture(
                                 mobEntry
                         )
                 );
             }
 
-            List<AttachedMobAssignmentSnapshot> capturedAttachments =
+            List<AttachedMobAssignmentSnapshot>
+                    capturedAttachedAssignments =
                     new ArrayList<>();
 
             for (SourceGroupComposition.AttachedMobAssignment assignment
-                    : sourceComposition.getAttachedMobAssignments()) {
+                    : sourceComposition
+                    .getAttachedMobAssignments()) {
 
-                capturedAttachments.add(
+                capturedAttachedAssignments.add(
                         AttachedMobAssignmentSnapshot.capture(
                                 assignment
                         )
@@ -527,14 +551,14 @@ public record SourceGroupCompositionSnapshot(
                     sourceComposition.getSourceRole(),
                     sourceComposition.getThreatSpent(),
                     sourceComposition.getSourceGroupLoadCost(),
-                    capturedMobs,
-                    List.copyOf(
+                    capturedMobEntries,
+                    new ArrayList<>(
                             sourceComposition.getModifiers()
                     ),
-                    List.copyOf(
+                    new ArrayList<>(
                             sourceComposition.getOrders()
                     ),
-                    capturedAttachments
+                    capturedAttachedAssignments
             );
         }
 
@@ -554,6 +578,7 @@ public record SourceGroupCompositionSnapshot(
                 restoredSource.addMob(
                         mobEntrySnapshot.mobId(),
                         mobEntrySnapshot.count(),
+                        mobEntrySnapshot.representedThreatPerMob(),
                         mobEntrySnapshot.capacityCostPerMob(),
                         mobEntrySnapshot.minimumSourceSize()
                 );
@@ -605,6 +630,22 @@ public record SourceGroupCompositionSnapshot(
                 );
             }
 
+            SourceCompositionSnapshot reconstructedSnapshot =
+                    capture(
+                            restoredSource
+                    );
+
+            if (!equals(
+                    reconstructedSnapshot
+            )) {
+                throw new IllegalArgumentException(
+                        "Restored source composition "
+                                + sourceCompositionId
+                                + " does not exactly match its saved "
+                                + "snapshot."
+                );
+            }
+
             return restoredSource;
         }
 
@@ -615,13 +656,38 @@ public record SourceGroupCompositionSnapshot(
             for (AttachedMobAssignmentSnapshot assignmentSnapshot
                     : attachedMobAssignmentSnapshots) {
 
-                totalComplexitySpent +=
-                        assignmentSnapshot
-                                .complexityOptionSnapshot()
-                                .complexityCost();
+                totalComplexitySpent =
+                        Math.addExact(
+                                totalComplexitySpent,
+                                assignmentSnapshot
+                                        .complexityOptionSnapshot()
+                                        .complexityCost()
+                        );
             }
 
             return totalComplexitySpent;
+        }
+
+        /**
+         * Calculates the exact represented threat contained in the immutable
+         * mob-entry snapshots.
+         */
+        public int getCalculatedThreatSpent() {
+            int calculatedThreatSpent =
+                    0;
+
+            for (MobEntrySnapshot mobEntrySnapshot
+                    : mobEntrySnapshots) {
+
+                calculatedThreatSpent =
+                        Math.addExact(
+                                calculatedThreatSpent,
+                                mobEntrySnapshot
+                                        .getTotalRepresentedThreat()
+                        );
+            }
+
+            return calculatedThreatSpent;
         }
 
         public int getTotalMobCount() {
@@ -631,8 +697,11 @@ public record SourceGroupCompositionSnapshot(
             for (MobEntrySnapshot mobEntrySnapshot
                     : mobEntrySnapshots) {
 
-                totalMobCount +=
-                        mobEntrySnapshot.count();
+                totalMobCount =
+                        Math.addExact(
+                                totalMobCount,
+                                mobEntrySnapshot.count()
+                        );
             }
 
             return totalMobCount;
@@ -645,8 +714,12 @@ public record SourceGroupCompositionSnapshot(
             for (MobEntrySnapshot mobEntrySnapshot
                     : mobEntrySnapshots) {
 
-                usedCapacityUnits +=
-                        mobEntrySnapshot.getTotalCapacityCost();
+                usedCapacityUnits =
+                        Math.addExact(
+                                usedCapacityUnits,
+                                mobEntrySnapshot
+                                        .getTotalCapacityCost()
+                        );
             }
 
             return usedCapacityUnits;
@@ -664,7 +737,8 @@ public record SourceGroupCompositionSnapshot(
                     : attachedMobAssignmentSnapshots) {
 
                 if (attachedMobAssignmentId.equals(
-                        assignmentSnapshot.attachedMobAssignmentId()
+                        assignmentSnapshot
+                                .attachedMobAssignmentId()
                 )) {
                     return assignmentSnapshot;
                 }
@@ -674,6 +748,7 @@ public record SourceGroupCompositionSnapshot(
         }
 
         private static void validateContents(
+                int threatSpent,
                 SourceSize requiredSourceSize,
                 List<MobEntrySnapshot> mobEntrySnapshots,
                 List<MobModifier> modifiers,
@@ -681,6 +756,9 @@ public record SourceGroupCompositionSnapshot(
                 List<AttachedMobAssignmentSnapshot>
                         attachedMobAssignmentSnapshots
         ) {
+            int calculatedThreatSpent =
+                    0;
+
             int usedCapacity =
                     0;
 
@@ -711,13 +789,36 @@ public record SourceGroupCompositionSnapshot(
                     );
                 }
 
-                usedCapacity +=
-                        mobEntrySnapshot.getTotalCapacityCost();
+                calculatedThreatSpent =
+                        Math.addExact(
+                                calculatedThreatSpent,
+                                mobEntrySnapshot
+                                        .getTotalRepresentedThreat()
+                        );
+
+                usedCapacity =
+                        Math.addExact(
+                                usedCapacity,
+                                mobEntrySnapshot.getTotalCapacityCost()
+                        );
 
                 plannedMobCounts.merge(
                         mobEntrySnapshot.mobId(),
                         mobEntrySnapshot.count(),
-                        Integer::sum
+                        Math::addExact
+                );
+            }
+
+            if (calculatedThreatSpent
+                    != threatSpent) {
+
+                throw new IllegalArgumentException(
+                        "Source-composition snapshot records "
+                                + threatSpent
+                                + " threat spent, but its mob entries "
+                                + "represent "
+                                + calculatedThreatSpent
+                                + " threat."
                 );
             }
 
@@ -775,7 +876,7 @@ public record SourceGroupCompositionSnapshot(
                         attachedMobCounts.merge(
                                 assignmentSnapshot.mobId(),
                                 1,
-                                Integer::sum
+                                Math::addExact
                         );
 
                 int plannedCount =
@@ -796,11 +897,15 @@ public record SourceGroupCompositionSnapshot(
     }
 
     /**
-     * Immutable snapshot of one mob entry.
+     * Immutable snapshot of one purchased mob entry.
+     *
+     * representedThreatPerMob is copied from the admitted immutable plan. It
+     * is not recalculated from the live mob catalogue during restoration.
      */
     public record MobEntrySnapshot(
             String mobId,
             int count,
+            int representedThreatPerMob,
             int capacityCostPerMob,
             SourceSize minimumSourceSize
     ) {
@@ -817,6 +922,13 @@ public record SourceGroupCompositionSnapshot(
             if (count <= 0) {
                 throw new IllegalArgumentException(
                         "Mob-entry snapshot count must be greater than zero."
+                );
+            }
+
+            if (representedThreatPerMob <= 0) {
+                throw new IllegalArgumentException(
+                        "Mob-entry represented threat must be greater than "
+                                + "zero."
                 );
             }
 
@@ -845,13 +957,24 @@ public record SourceGroupCompositionSnapshot(
             return new MobEntrySnapshot(
                     mobEntry.getMobId(),
                     mobEntry.getCount(),
+                    mobEntry.getRepresentedThreatPerMob(),
                     mobEntry.getCapacityCostPerMob(),
                     mobEntry.getMinimumSourceSize()
             );
         }
 
+        public int getTotalRepresentedThreat() {
+            return Math.multiplyExact(
+                    count,
+                    representedThreatPerMob
+            );
+        }
+
         public int getTotalCapacityCost() {
-            return count * capacityCostPerMob;
+            return Math.multiplyExact(
+                    count,
+                    capacityCostPerMob
+            );
         }
     }
 

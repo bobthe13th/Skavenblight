@@ -338,15 +338,84 @@ public class WaveExecutionState {
     }
 
     /**
+     * Temporary compatibility route for callers that have not propagated
+     * persistent mob-tracking ownership into wave execution.
+     *
+     * Persistence-aware runtime should use the four-argument overload.
+     */
+    @Deprecated
+    public TickResult tick(
+            ServerLevel level,
+            SourceState sourceState,
+            LeadershipContext leadershipContext
+    ) {
+        return tickInternal(
+                level,
+                sourceState,
+                leadershipContext,
+                null
+        );
+    }
+
+    /**
+     * Advances source creation and streamed spawning by one server tick using
+     * the authoritative persistent mob-tracking state owned by the same
+     * incursion.
+     */
+    public TickResult tick(
+            ServerLevel level,
+            SourceState sourceState,
+            LeadershipContext leadershipContext,
+            org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                    .IncursionMobTrackingState mobTrackingState
+    ) {
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "Wave execution mob-tracking state cannot be null."
+            );
+        }
+
+        if (leadershipContext == null) {
+            throw new IllegalArgumentException(
+                    "Wave leadership context cannot be null."
+            );
+        }
+
+        if (!mobTrackingState
+                .getIncursionId()
+                .equals(
+                        leadershipContext.scenarioId()
+                )) {
+
+            throw new IllegalArgumentException(
+                    "Wave leadership Scenario ID "
+                            + leadershipContext.scenarioId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        return tickInternal(
+                level,
+                sourceState,
+                leadershipContext,
+                mobTrackingState
+        );
+    }
+
+    /**
      * Advances source creation and streamed spawning by one server tick.
      *
      * Each source assignment with remaining mobs may attempt at most one
      * spawn whenever the configured spawn interval is reached.
      */
-    public TickResult tick(
+    private TickResult tickInternal(
             ServerLevel level,
             SourceState sourceState,
-            LeadershipContext leadershipContext
+            LeadershipContext leadershipContext,
+            org.ratden.skavenblight.event.skavenIncursion.runtime.mob
+                    .IncursionMobTrackingState mobTrackingState
     ) {
         if (level == null) {
             throw new IllegalArgumentException(
@@ -363,6 +432,22 @@ public class WaveExecutionState {
         if (leadershipContext == null) {
             throw new IllegalArgumentException(
                     "Wave leadership context cannot be null."
+            );
+        }
+
+        if (mobTrackingState != null
+                && !mobTrackingState
+                .getIncursionId()
+                .equals(
+                        leadershipContext.scenarioId()
+                )) {
+
+            throw new IllegalArgumentException(
+                    "Wave leadership Scenario ID "
+                            + leadershipContext.scenarioId()
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
             );
         }
 
@@ -437,11 +522,22 @@ public class WaveExecutionState {
                     continue;
                 }
 
-                SourceExecutionState.SpawnAttemptResult result =
-                        sourceWaveState.attemptNextSpawn(
-                                level,
-                                leadershipContext
-                        );
+                SourceExecutionState.SpawnAttemptResult result;
+
+                if (mobTrackingState == null) {
+                    result =
+                            sourceWaveState.attemptNextSpawn(
+                                    level,
+                                    leadershipContext
+                            );
+                } else {
+                    result =
+                            sourceWaveState.attemptNextSpawn(
+                                    level,
+                                    leadershipContext,
+                                    mobTrackingState
+                            );
+                }
 
                 switch (result) {
                     case SPAWNED -> {

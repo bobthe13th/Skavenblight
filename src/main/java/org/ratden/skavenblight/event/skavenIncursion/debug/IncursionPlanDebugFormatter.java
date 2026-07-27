@@ -2,14 +2,17 @@ package org.ratden.skavenblight.event.skavenIncursion.debug;
 
 import net.minecraft.core.BlockPos;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
+import org.ratden.skavenblight.event.skavenIncursion.planning.FrontPlacementGeometry;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.IncursionPlanningContext;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.IncursionChunkLoadPlanCalculator;
+import org.ratden.skavenblight.event.skavenIncursion.planning.chunk.SourceGroupChunkLoadPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.composition.SourceGroupComposition;
 import org.ratden.skavenblight.event.skavenIncursion.planning.front.FrontPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceGroupPlacementPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourcePlacementPlan;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceReservationArea;
-import org.ratden.skavenblight.event.skavenIncursion.planning.FrontPlacementGeometry;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,6 +41,13 @@ public final class IncursionPlanDebugFormatter {
                     "Incursion planning context cannot be null."
             );
         }
+
+        IncursionChunkLoadPlan chunkLoadPlan =
+                new IncursionChunkLoadPlanCalculator()
+                        .calculate(
+                                incursionPlan,
+                                planningContext
+                        );
 
         int totalWaves = 0;
         int totalSourceGroups = 0;
@@ -156,8 +166,14 @@ public final class IncursionPlanDebugFormatter {
                 .append("\nPhysical sources: ")
                 .append(totalSources)
                 .append("\nPlanned mobs: ")
-                .append(totalMobs)
-                .append("\nMob composition:");
+                .append(totalMobs);
+
+        appendChunkLoadSummary(
+                message,
+                chunkLoadPlan
+        );
+
+        message.append("\nMob composition:");
 
         if (mobCounts.isEmpty()) {
             message.append(" none");
@@ -173,7 +189,8 @@ public final class IncursionPlanDebugFormatter {
 
         appendFrontReports(
                 message,
-                incursionPlan
+                incursionPlan,
+                chunkLoadPlan
         );
 
         return message.toString();
@@ -249,9 +266,73 @@ public final class IncursionPlanDebugFormatter {
         }
     }
 
+    private static void appendChunkLoadSummary(
+            StringBuilder message,
+            IncursionChunkLoadPlan chunkLoadPlan
+    ) {
+        message.append("\n\nChunk footprint")
+                .append("\nProtected base chunks: ")
+                .append(
+                        chunkLoadPlan
+                                .getProtectedBaseChunkCount()
+                )
+                .append("\nRetained loaded chunks: ")
+                .append(
+                        chunkLoadPlan
+                                .getRetainedLoadedChunkCount()
+                )
+                .append("\nBaseline ticking chunks: ")
+                .append(
+                        chunkLoadPlan
+                                .getProtectedBaseChunkCount()
+                )
+                .append("\nMaximum wave source activation chunks: ")
+                .append(
+                        chunkLoadPlan
+                                .getMaximumWaveSourceActivationChunkCount()
+                )
+                .append("\nMaximum total ticking chunks: ")
+                .append(
+                        chunkLoadPlan
+                                .getMaximumWaveTotalTickingChunkCount()
+                );
+
+        for (int waveIndex
+                : chunkLoadPlan.getWaveIndexes()) {
+
+            message.append("\n  Wave ")
+                    .append(waveIndex + 1)
+                    .append(": groups ")
+                    .append(
+                            chunkLoadPlan
+                                    .getRequiredSourceGroupPlacementIdsForWave(
+                                            waveIndex
+                                    )
+                                    .size()
+                    )
+                    .append(" | source activation ")
+                    .append(
+                            chunkLoadPlan
+                                    .getSourceActivationChunksForWave(
+                                            waveIndex
+                                    )
+                                    .size()
+                    )
+                    .append(" | total ticking ")
+                    .append(
+                            chunkLoadPlan
+                                    .getTotalTickingChunksForWave(
+                                            waveIndex
+                                    )
+                                    .size()
+                    );
+        }
+    }
+
     private static void appendFrontReports(
             StringBuilder message,
-            IncursionPlan incursionPlan
+            IncursionPlan incursionPlan,
+            IncursionChunkLoadPlan chunkLoadPlan
     ) {
         for (FrontPlan frontPlan
                 : incursionPlan.getFrontPlans()) {
@@ -282,6 +363,22 @@ public final class IncursionPlanDebugFormatter {
 
                 groupNumber++;
 
+                SourceGroupChunkLoadPlan groupChunkLoadPlan =
+                        chunkLoadPlan.getSourceGroupPlan(
+                                groupPlacement
+                                        .getSourceGroupPlacementId()
+                        );
+
+                if (groupChunkLoadPlan == null) {
+                    throw new IllegalStateException(
+                            "Chunk-load plan does not contain physical "
+                                    + "source group "
+                                    + groupPlacement
+                                    .getSourceGroupPlacementId()
+                                    + "."
+                    );
+                }
+
                 message.append("\nGroup ")
                         .append(groupNumber)
                         .append(" anchor: ")
@@ -291,7 +388,22 @@ public final class IncursionPlanDebugFormatter {
                                 )
                         )
                         .append(" | Role: ")
-                        .append(groupPlacement.getSourceRole());
+                        .append(groupPlacement.getSourceRole())
+                        .append(" | Group chunks: ")
+                        .append(
+                                groupChunkLoadPlan
+                                        .getGroupFootprintChunkCount()
+                        )
+                        .append(" | Route chunks: ")
+                        .append(
+                                groupChunkLoadPlan
+                                        .getRouteCorridorChunkCount()
+                        )
+                        .append(" | Activation union: ")
+                        .append(
+                                groupChunkLoadPlan
+                                        .getActivationChunkCount()
+                        );
 
                 int sourceNumber = 0;
 

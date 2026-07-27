@@ -1,6 +1,7 @@
 package org.ratden.skavenblight.event.skavenIncursion.scenario.generic;
 
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
 import org.ratden.skavenblight.block.entity.state.SourceState;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.director.OverlapType;
@@ -14,17 +15,16 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.stratagem.Stratage
 import org.ratden.skavenblight.event.skavenIncursion.runtime.IncursionExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.IncursionWaveController;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.WaveExecutionState;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.entity.AttachedMobEntityReconnectionOwner;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.entity.AttachedMobEntityReconnectionResult;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.event.SourceDestroyedEvent;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.mob.IncursionMobTrackingState;
+import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PersistableSkavenScenario;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PlannedScenarioRuntimeSnapshot;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
-import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
-import org.ratden.skavenblight.event.skavenIncursion.runtime.persistence.PersistableSkavenScenario;
-import net.minecraft.world.entity.Entity;
-import org.ratden.skavenblight.event.skavenIncursion.runtime.entity.AttachedMobEntityReconnectionOwner;
-import org.ratden.skavenblight.event.skavenIncursion.runtime.entity.AttachedMobEntityReconnectionResult;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -112,10 +112,10 @@ public class CatDogRaid
             120;
 
     private static final int FIRST_SPAWN_DELAY_TICKS =
-            240;
+            900;
 
     private static final int SPAWN_INTERVAL_TICKS =
-            120;
+            900;
 
     /**
      * Temporary fixed transition timing used until hybrid pacing is added.
@@ -128,7 +128,7 @@ public class CatDogRaid
      * while the controller is explicitly between active waves.
      */
     private static final int WAVE_TRANSITION_GRACE_TICKS =
-            200;
+            300;
 
     /**
      * Prevents an uncreatable source or permanently failed spawn from leaving
@@ -493,18 +493,77 @@ public class CatDogRaid
         );
     }
 
+    /**
+     * Compatibility route for direct Scenario ticking outside the persistent
+     * owner.
+     *
+     * Normal admitted runtime is ticked through tickPersistent(...) by
+     * LivePersistentIncursion so successful mob delivery can reach the
+     * authoritative persistent mob-tracking state.
+     */
     @Override
     public void tick() {
+        tickInternal(
+                null
+        );
+    }
+
+    /**
+     * Advances this Scenario using the authoritative persistent mob-tracking
+     * state owned by the same incursion.
+     *
+     * This method validates ownership and passes the state into the reusable
+     * wave controller. WaveExecutionState and SourceWaveExecutionState will
+     * consume it in the following implementation steps.
+     */
+    @Override
+    public void tickPersistent(
+            IncursionMobTrackingState mobTrackingState
+    ) {
+        if (mobTrackingState == null) {
+            throw new IllegalArgumentException(
+                    "CatDogRaid persistent tick requires mob-tracking state."
+            );
+        }
+
+        if (!instanceId.equals(
+                mobTrackingState.getIncursionId()
+        )) {
+            throw new IllegalArgumentException(
+                    "CatDogRaid instance ID "
+                            + instanceId
+                            + " does not match mob-tracking incursion ID "
+                            + mobTrackingState.getIncursionId()
+                            + "."
+            );
+        }
+
+        tickInternal(
+                mobTrackingState
+        );
+    }
+
+    private void tickInternal(
+            IncursionMobTrackingState mobTrackingState
+    ) {
         if (finished) {
             return;
         }
 
         elapsedTicks++;
 
-        waveController.tick(
-                level,
-                leadershipContext
-        );
+        if (mobTrackingState == null) {
+            waveController.tick(
+                    level,
+                    leadershipContext
+            );
+        } else {
+            waveController.tick(
+                    level,
+                    leadershipContext,
+                    mobTrackingState
+            );
+        }
 
         if (elapsedTicks
                 >= maximumRuntimeTicks) {

@@ -383,6 +383,20 @@ public class IncursionPlanValidator {
             );
         }
 
+        if (sourceComposition.getCalculatedThreatSpent()
+                != sourceComposition.getThreatSpent()) {
+
+            return failure(
+                    "Source composition "
+                            + sourceCompositionId
+                            + " records "
+                            + sourceComposition.getThreatSpent()
+                            + " threat spent, but its mob entries represent "
+                            + sourceComposition.getCalculatedThreatSpent()
+                            + " threat."
+            );
+        }
+
         if (sourceComposition.getUsedCapacityUnits()
                 > sourceComposition
                 .getRequiredSourceSize()
