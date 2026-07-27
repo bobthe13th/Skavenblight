@@ -36,6 +36,9 @@ public class SourcePlacementPlan {
     private final BlockPos anchorPos;
     private BlockPos placedPos;
 
+    /**
+     * Creates a new physical source placement with a fresh structural ID.
+     */
     public SourcePlacementPlan(
             UUID sourceGroupPlacementId,
             UUID initialSourceCompositionId,
@@ -46,6 +49,43 @@ public class SourcePlacementPlan {
             Direction facing,
             BlockPos anchorPos
     ) {
+        this(
+                UUID.randomUUID(),
+                sourceGroupPlacementId,
+                initialSourceCompositionId,
+                sourceType,
+                sourceSize,
+                sourceRole,
+                placementProfile,
+                facing,
+                anchorPos
+        );
+    }
+
+    /**
+     * Creates a physical source placement using an existing structural ID.
+     *
+     * This constructor is intended for immutable plan restoration. Additional
+     * composition bindings and the final placed position must still be
+     * restored through the ordinary validated methods.
+     */
+    public SourcePlacementPlan(
+            UUID sourcePlacementId,
+            UUID sourceGroupPlacementId,
+            UUID initialSourceCompositionId,
+            SourceType sourceType,
+            SourceSize sourceSize,
+            SourceRole sourceRole,
+            SourcePlacementProfile placementProfile,
+            Direction facing,
+            BlockPos anchorPos
+    ) {
+        if (sourcePlacementId == null) {
+            throw new IllegalArgumentException(
+                    "Source placement ID cannot be null."
+            );
+        }
+
         if (sourceGroupPlacementId == null) {
             throw new IllegalArgumentException(
                     "Source-group placement ID cannot be null."
@@ -82,7 +122,9 @@ public class SourcePlacementPlan {
             );
         }
 
-        validateHorizontalFacing(facing);
+        validateHorizontalFacing(
+                facing
+        );
 
         if (anchorPos == null) {
             throw new IllegalArgumentException(
@@ -90,21 +132,39 @@ public class SourcePlacementPlan {
             );
         }
 
-        this.sourcePlacementId = UUID.randomUUID();
-        this.sourceGroupPlacementId = sourceGroupPlacementId;
-        this.sourceCompositionIds = new ArrayList<>();
+        this.sourcePlacementId =
+                sourcePlacementId;
 
-        this.sourceType = sourceType;
-        this.sourceSize = sourceSize;
-        this.sourceRole = sourceRole;
+        this.sourceGroupPlacementId =
+                sourceGroupPlacementId;
 
-        this.placementProfile = placementProfile;
-        this.facing = facing;
+        this.sourceCompositionIds =
+                new ArrayList<>();
 
-        this.anchorPos = anchorPos.immutable();
-        this.placedPos = null;
+        this.sourceType =
+                sourceType;
 
-        bindSourceComposition(initialSourceCompositionId);
+        this.sourceSize =
+                sourceSize;
+
+        this.sourceRole =
+                sourceRole;
+
+        this.placementProfile =
+                placementProfile;
+
+        this.facing =
+                facing;
+
+        this.anchorPos =
+                anchorPos.immutable();
+
+        this.placedPos =
+                null;
+
+        bindSourceComposition(
+                initialSourceCompositionId
+        );
     }
 
     public UUID getSourcePlacementId() {
@@ -127,7 +187,9 @@ public class SourcePlacementPlan {
             );
         }
 
-        if (sourceCompositionIds.contains(sourceCompositionId)) {
+        if (sourceCompositionIds.contains(
+                sourceCompositionId
+        )) {
             throw new IllegalArgumentException(
                     "Source placement "
                             + sourcePlacementId
@@ -137,7 +199,9 @@ public class SourcePlacementPlan {
             );
         }
 
-        sourceCompositionIds.add(sourceCompositionId);
+        sourceCompositionIds.add(
+                sourceCompositionId
+        );
     }
 
     public List<UUID> getSourceCompositionIds() {
@@ -150,7 +214,9 @@ public class SourcePlacementPlan {
             UUID sourceCompositionId
     ) {
         return sourceCompositionId != null
-                && sourceCompositionIds.contains(sourceCompositionId);
+                && sourceCompositionIds.contains(
+                sourceCompositionId
+        );
     }
 
     public int getBoundCompositionCount() {
@@ -217,7 +283,8 @@ public class SourcePlacementPlan {
             return;
         }
 
-        this.placedPos = placedPos.immutable();
+        this.placedPos =
+                placedPos.immutable();
     }
 
     /**

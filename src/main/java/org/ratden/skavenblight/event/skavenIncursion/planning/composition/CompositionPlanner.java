@@ -12,6 +12,7 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceType;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,7 @@ import java.util.Map;
 /**
  * Spends wave threat budgets and creates pre-placement mob compositions.
  *
- * This first implementation handles baseline combat composition only:
+ * Current responsibilities:
  *
  * - Scenario mob-roster weights are treated as the effective weights;
  * - mobs are purchased through weighted random selection;
@@ -27,7 +28,12 @@ import java.util.Map;
  * - the first source is always permitted for a non-empty wave;
  * - additional sources must satisfy the StructuralThreatTarget;
  * - normal combat tunnels are preferred unless a mob requires a larger
- *   source.
+ *   source;
+ * - source-sized compositions are divided into load-limited source groups.
+ *
+ * Source grouping currently uses SourceGroupRules.STANDARD and a
+ * largest-first, first-fit pass. Stratagem-specific grouping rules and
+ * authored source topology can replace that baseline later.
  *
  * Complexity purchases, Stratagem mob-weight adjustments, leadership,
  * support sources, and special source topology will be added later.
@@ -90,9 +96,12 @@ public class CompositionPlanner {
             );
         }
 
-        RandomSource random = context.level().getRandom();
+        RandomSource random =
+                context.level().getRandom();
 
-        for (FrontPlan frontPlan : incursionPlan.getFrontPlans()) {
+        for (FrontPlan frontPlan
+                : incursionPlan.getFrontPlans()) {
+
             for (FrontPlan.WavePlan wavePlan
                     : frontPlan.getWavePlans()) {
 
@@ -130,17 +139,22 @@ public class CompositionPlanner {
             FrontPlan frontPlan,
             FrontPlan.WavePlan wavePlan
     ) {
-        int waveThreatBudget = wavePlan.getThreatBudget();
+        int waveThreatBudget =
+                wavePlan.getThreatBudget();
 
         if (waveThreatBudget == 0) {
             return PlanningStepResult.success();
         }
 
-        SourceGroupComposition sourceGroupComposition =
-                new SourceGroupComposition();
+        List<SourceGroupComposition.SourceComposition>
+                plannedSourceCompositions =
+                new ArrayList<>();
 
-        int remainingThreat = waveThreatBudget;
-        int plannedSourceCapacity = 0;
+        int remainingThreat =
+                waveThreatBudget;
+
+        int plannedSourceCapacity =
+                0;
 
         while (remainingThreat > 0) {
             IncursionMobDefinition sourceSeed =
@@ -157,7 +171,9 @@ public class CompositionPlanner {
             }
 
             SourceSize sourceSize =
-                    resolveSourceSize(sourceSeed);
+                    resolveSourceSize(
+                            sourceSeed
+                    );
 
             PlannedSourceContents plannedSourceContents =
                     planSourceContents(
@@ -191,6 +207,7 @@ public class CompositionPlanner {
 
             for (Map.Entry<IncursionMobDefinition, Integer> entry
                     : plannedSourceContents.mobCounts().entrySet()) {
+
                 IncursionMobDefinition mobDefinition =
                         entry.getKey();
 
@@ -202,7 +219,7 @@ public class CompositionPlanner {
                 );
             }
 
-            sourceGroupComposition.addSourceComposition(
+            plannedSourceCompositions.add(
                     sourceComposition
             );
 
@@ -213,7 +230,7 @@ public class CompositionPlanner {
                     sourceSize.getCapacityUnits();
         }
 
-        if (sourceGroupComposition.isEmpty()) {
+        if (plannedSourceCompositions.isEmpty()) {
             return failure(
                     "Front "
                             + frontPlan.getFrontId()
@@ -225,11 +242,227 @@ public class CompositionPlanner {
             );
         }
 
-        wavePlan.addSourceGroupComposition(
-                sourceGroupComposition
-        );
+        SourceGroupingResult groupingResult =
+                groupSourceCompositions(
+                        plannedSourceCompositions,
+                        SourceGroupRules.STANDARD
+                );
+
+        if (groupingResult.hasFailed()) {
+            return failure(
+                    "Front "
+                            + frontPlan.getFrontId()
+                            + ", wave "
+                            + wavePlan.getWaveIndex()
+                            + " could not group its planned sources. "
+                            + groupingResult.failureMessage()
+            );
+        }
+
+        for (SourceGroupComposition sourceGroupComposition
+                : groupingResult.sourceGroupCompositions()) {
+            wavePlan.addSourceGroupComposition(
+                    sourceGroupComposition
+            );
+        }
 
         return PlanningStepResult.success();
+    }
+
+    /**
+     * Divides source-sized compositions into source groups without exceeding
+     * the supplied group-load limit.
+     *
+     * Sources are considered from highest load to lowest load, then inserted
+     * into the first existing compatible group with enough remaining load.
+     * A new group is created when no existing group can accept the source.
+     *
+     * SourceGroupComposition also prevents mixed SourceRole values, so this
+     * baseline naturally creates separate groups for combat, support and
+     * other source roles.
+     */
+    private SourceGroupingResult groupSourceCompositions(
+            List<SourceGroupComposition.SourceComposition>
+                    sourceCompositions,
+            SourceGroupRules sourceGroupRules
+    ) {
+        if (sourceCompositions == null
+                || sourceCompositions.isEmpty()) {
+            return SourceGroupingResult.failure(
+                    "No source compositions were supplied."
+            );
+        }
+
+        if (sourceGroupRules == null) {
+            return SourceGroupingResult.failure(
+                    "Source-group rules were not supplied."
+            );
+        }
+
+        List<SourceGroupComposition.SourceComposition>
+                sortedSourceCompositions =
+                new ArrayList<>(
+                        sourceCompositions
+                );
+
+        sortedSourceCompositions.sort(
+                Comparator.comparingInt(
+                                SourceGroupComposition
+                                        .SourceComposition
+                                        ::getSourceGroupLoadCost
+                        )
+                        .reversed()
+        );
+
+        List<SourceGroupComposition> sourceGroups =
+                new ArrayList<>();
+
+        for (SourceGroupComposition.SourceComposition
+                sourceComposition
+                : sortedSourceCompositions) {
+
+            int sourceLoad =
+                    sourceComposition.getSourceGroupLoadCost();
+
+            if (sourceLoad > sourceGroupRules.maximumLoad()) {
+                return SourceGroupingResult.failure(
+                        "Source composition "
+                                + sourceComposition
+                                .getSourceCompositionId()
+                                + " requires "
+                                + sourceLoad
+                                + " load, exceeding the group maximum of "
+                                + sourceGroupRules.maximumLoad()
+                                + "."
+                );
+            }
+
+            SourceGroupComposition selectedGroup =
+                    findFirstCompatibleGroup(
+                            sourceGroups,
+                            sourceComposition
+                    );
+
+            if (selectedGroup == null) {
+                selectedGroup =
+                        new SourceGroupComposition(
+                                sourceGroupRules
+                        );
+
+                sourceGroups.add(
+                        selectedGroup
+                );
+            }
+
+            if (!selectedGroup.canFitSourceComposition(
+                    sourceComposition
+            )) {
+                return SourceGroupingResult.failure(
+                        "Selected source group "
+                                + selectedGroup
+                                .getSourceGroupCompositionId()
+                                + " cannot fit source composition "
+                                + sourceComposition
+                                .getSourceCompositionId()
+                                + "."
+                );
+            }
+
+            selectedGroup.addSourceComposition(
+                    sourceComposition
+            );
+
+            if (!selectedGroup.isWithinSourceGroupLoadLimit()) {
+                return SourceGroupingResult.failure(
+                        "Source group "
+                                + selectedGroup
+                                .getSourceGroupCompositionId()
+                                + " exceeded its maximum load after adding "
+                                + "source composition "
+                                + sourceComposition
+                                .getSourceCompositionId()
+                                + "."
+                );
+            }
+        }
+
+        if (sourceGroups.isEmpty()) {
+            return SourceGroupingResult.failure(
+                    "Grouping produced no source groups."
+            );
+        }
+
+        int originalThreat =
+                getTotalThreatSpent(
+                        sourceCompositions
+                );
+
+        int groupedThreat =
+                getTotalThreatSpentAcrossGroups(
+                        sourceGroups
+                );
+
+        if (groupedThreat != originalThreat) {
+            return SourceGroupingResult.failure(
+                    "Grouping changed planned threat from "
+                            + originalThreat
+                            + " to "
+                            + groupedThreat
+                            + "."
+            );
+        }
+
+        return SourceGroupingResult.success(
+                sourceGroups
+        );
+    }
+
+    private SourceGroupComposition findFirstCompatibleGroup(
+            List<SourceGroupComposition> sourceGroups,
+            SourceGroupComposition.SourceComposition sourceComposition
+    ) {
+        for (SourceGroupComposition sourceGroup
+                : sourceGroups) {
+            if (sourceGroup.canFitSourceComposition(
+                    sourceComposition
+            )) {
+                return sourceGroup;
+            }
+        }
+
+        return null;
+    }
+
+    private int getTotalThreatSpent(
+            List<SourceGroupComposition.SourceComposition>
+                    sourceCompositions
+    ) {
+        int total =
+                0;
+
+        for (SourceGroupComposition.SourceComposition
+                sourceComposition
+                : sourceCompositions) {
+            total +=
+                    sourceComposition.getThreatSpent();
+        }
+
+        return total;
+    }
+
+    private int getTotalThreatSpentAcrossGroups(
+            List<SourceGroupComposition> sourceGroups
+    ) {
+        int total =
+                0;
+
+        for (SourceGroupComposition sourceGroup
+                : sourceGroups) {
+            total +=
+                    sourceGroup.getTotalThreatSpent();
+        }
+
+        return total;
     }
 
     /**
@@ -251,8 +484,10 @@ public class CompositionPlanner {
                 eligibleDefinitions =
                 new ArrayList<>();
 
-        for (ThreatDensityCalculator.WeightedMobDefinition weightedDefinition
+        for (ThreatDensityCalculator.WeightedMobDefinition
+                weightedDefinition
                 : weightedMobDefinitions) {
+
             IncursionMobDefinition mobDefinition =
                     weightedDefinition.mobDefinition();
 
@@ -266,7 +501,9 @@ public class CompositionPlanner {
             }
 
             SourceSize resolvedSourceSize =
-                    resolveSourceSize(mobDefinition);
+                    resolveSourceSize(
+                            mobDefinition
+                    );
 
             if (mobDefinition.getCapacityCost()
                     > resolvedSourceSize.getCapacityUnits()) {
@@ -294,7 +531,9 @@ public class CompositionPlanner {
                 }
             }
 
-            eligibleDefinitions.add(weightedDefinition);
+            eligibleDefinitions.add(
+                    weightedDefinition
+            );
         }
 
         return chooseWeightedMob(
@@ -326,7 +565,10 @@ public class CompositionPlanner {
             return null;
         }
 
-        mobCounts.put(sourceSeed, 1);
+        mobCounts.put(
+                sourceSeed,
+                1
+        );
 
         while (true) {
             int remainingThreat =
@@ -341,7 +583,9 @@ public class CompositionPlanner {
                     new ArrayList<>();
 
             for (ThreatDensityCalculator.WeightedMobDefinition
-                    weightedDefinition : weightedMobDefinitions) {
+                    weightedDefinition
+                    : weightedMobDefinitions) {
+
                 IncursionMobDefinition mobDefinition =
                         weightedDefinition.mobDefinition();
 
@@ -365,7 +609,9 @@ public class CompositionPlanner {
                     continue;
                 }
 
-                eligibleDefinitions.add(weightedDefinition);
+                eligibleDefinitions.add(
+                        weightedDefinition
+                );
             }
 
             IncursionMobDefinition selectedMob =
@@ -433,11 +679,14 @@ public class CompositionPlanner {
             return null;
         }
 
-        double totalWeight = 0.0D;
+        double totalWeight =
+                0.0D;
 
         for (ThreatDensityCalculator.WeightedMobDefinition
-                weightedDefinition : eligibleDefinitions) {
-            totalWeight += weightedDefinition.weight();
+                weightedDefinition
+                : eligibleDefinitions) {
+            totalWeight +=
+                    weightedDefinition.weight();
         }
 
         if (totalWeight <= 0.0D) {
@@ -445,11 +694,14 @@ public class CompositionPlanner {
         }
 
         double roll =
-                random.nextDouble() * totalWeight;
+                random.nextDouble()
+                        * totalWeight;
 
         for (ThreatDensityCalculator.WeightedMobDefinition
-                weightedDefinition : eligibleDefinitions) {
-            roll -= weightedDefinition.weight();
+                weightedDefinition
+                : eligibleDefinitions) {
+            roll -=
+                    weightedDefinition.weight();
 
             if (roll <= 0.0D) {
                 return weightedDefinition.mobDefinition();
@@ -479,7 +731,9 @@ public class CompositionPlanner {
             );
         }
 
-        return List.copyOf(weightedMobDefinitions);
+        return List.copyOf(
+                weightedMobDefinitions
+        );
     }
 
     private boolean hasPositiveWeight(
@@ -487,7 +741,8 @@ public class CompositionPlanner {
                     weightedMobDefinitions
     ) {
         for (ThreatDensityCalculator.WeightedMobDefinition
-                weightedDefinition : weightedMobDefinitions) {
+                weightedDefinition
+                : weightedMobDefinitions) {
             if (weightedDefinition.weight() > 0.0D) {
                 return true;
             }
@@ -513,13 +768,70 @@ public class CompositionPlanner {
             int threatSpent
     ) {
         private PlannedSourceContents {
-            mobCounts = Map.copyOf(mobCounts);
+            mobCounts =
+                    Map.copyOf(
+                            mobCounts
+                    );
 
             if (threatSpent <= 0) {
                 throw new IllegalArgumentException(
                         "Planned source threat must be positive."
                 );
             }
+        }
+    }
+
+    private record SourceGroupingResult(
+            List<SourceGroupComposition> sourceGroupCompositions,
+            String failureMessage
+    ) {
+        private SourceGroupingResult {
+            if (sourceGroupCompositions == null) {
+                throw new IllegalArgumentException(
+                        "Grouped source-composition list cannot be null."
+                );
+            }
+
+            sourceGroupCompositions =
+                    List.copyOf(
+                            sourceGroupCompositions
+                    );
+
+            boolean hasGroups =
+                    !sourceGroupCompositions.isEmpty();
+
+            boolean hasFailureMessage =
+                    failureMessage != null
+                            && !failureMessage.isBlank();
+
+            if (hasGroups == hasFailureMessage) {
+                throw new IllegalArgumentException(
+                        "Source grouping result must contain either groups or "
+                                + "a failure message."
+                );
+            }
+        }
+
+        private static SourceGroupingResult success(
+                List<SourceGroupComposition> sourceGroupCompositions
+        ) {
+            return new SourceGroupingResult(
+                    sourceGroupCompositions,
+                    null
+            );
+        }
+
+        private static SourceGroupingResult failure(
+                String failureMessage
+        ) {
+            return new SourceGroupingResult(
+                    List.of(),
+                    failureMessage
+            );
+        }
+
+        private boolean hasFailed() {
+            return failureMessage != null;
         }
     }
 }

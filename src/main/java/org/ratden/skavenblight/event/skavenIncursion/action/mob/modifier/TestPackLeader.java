@@ -1,4 +1,4 @@
-package org.ratden.skavenblight.event.skavenIncursion.scenario.testing;
+package org.ratden.skavenblight.event.skavenIncursion.action.mob.modifier;
 
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;

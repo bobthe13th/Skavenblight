@@ -27,7 +27,8 @@ public final class SourcePlacementProfileCatalogue {
      * - reserve a centred 5x5 area;
      * - prepare a centred 5x5 area;
      * - construct one foundation layer;
-     * - clear three blocks of emergence height.
+     * - clear three blocks of emergence height;
+     * - consume two of the standard group's six load units.
      */
     public static final SourcePlacementProfile
             SKAVEN_TUNNEL_NORMAL =
@@ -44,7 +45,8 @@ public final class SourcePlacementProfileCatalogue {
                                     5
                             ),
                             1,
-                            3
+                            3,
+                            2
                     )
             );
 

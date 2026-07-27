@@ -50,6 +50,42 @@ public final class StratagemCatalogue {
             );
 
     /**
+     * Three-wave development Stratagem used to verify ordinary multi-wave
+     * planning and runtime progression.
+     *
+     * It deliberately retains one front so the test isolates wave budget
+     * division, source reuse and source-state transitions without also
+     * introducing multi-front placement behaviour.
+     *
+     * The final wave receives the largest share to give the raid a modest
+     * escalation in pressure.
+     */
+    public static final StratagemDefinition STEADY_3 =
+            register(
+                    new StratagemDefinition(
+                            "steady_3",
+                            true,
+                            StratagemDefinition.StratagemStyle.SIMPLE,
+                            FrontPlacementPattern.ONE,
+                            FrontAllocationPattern.BALANCED,
+                            List.of(
+                                    new StratagemDefinition.WaveProfile(
+                                            0.30D,
+                                            0.30D
+                                    ),
+                                    new StratagemDefinition.WaveProfile(
+                                            0.30D,
+                                            0.30D
+                                    ),
+                                    new StratagemDefinition.WaveProfile(
+                                            0.40D,
+                                            0.40D
+                                    )
+                            )
+                    )
+            );
+
+    /**
      * Returns a Stratagem definition by its stable authored ID.
      *
      * Returns null when no matching definition exists.
@@ -82,7 +118,8 @@ public final class StratagemCatalogue {
             );
         }
 
-        String stratagemId = definition.getId();
+        String stratagemId =
+                definition.getId();
 
         StratagemDefinition existingDefinition =
                 DEFINITIONS_BY_ID.putIfAbsent(

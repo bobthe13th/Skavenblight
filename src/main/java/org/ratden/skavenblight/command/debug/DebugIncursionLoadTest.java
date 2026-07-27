@@ -27,7 +27,7 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourcePlace
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceRole;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceSize;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceType;
-import org.ratden.skavenblight.event.skavenIncursion.scenario.testing.TestPackLeader;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.modifier.TestPackLeader;
 import org.ratden.skavenblight.world.NexusTracker;
 
 import java.util.List;

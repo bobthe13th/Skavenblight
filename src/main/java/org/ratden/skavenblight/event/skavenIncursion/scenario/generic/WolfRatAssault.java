@@ -24,6 +24,7 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceDistanceProfile;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -34,6 +35,7 @@ public class WolfRatAssault implements SkavenScenario {
             new ScenarioDefinition(
                     "wolf_rat_assault",
                     ScenarioPattern.ASSAULT,
+                    SourceDistanceProfile.CLOSE,
                     ScenarioGoal.PRESSURE,
                     OverlapType.MAJOR,
                     PressureProfile.COMBAT,

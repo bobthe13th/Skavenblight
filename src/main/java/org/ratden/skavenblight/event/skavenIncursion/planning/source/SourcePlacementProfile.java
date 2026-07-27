@@ -3,8 +3,8 @@ package org.ratden.skavenblight.event.skavenIncursion.planning.source;
 import java.util.Objects;
 
 /**
- * Physical planning and preparation requirements for one source type and
- * size combination.
+ * Physical planning, preparation and grouping requirements for one source
+ * type and size combination.
  *
  * The reservation area describes all horizontal blocks that must remain
  * available to the source.
@@ -17,12 +17,17 @@ import java.util.Objects;
  *
  * - foundationDepth 1 permits preparation at Y - 1;
  * - clearanceHeight 3 permits preparation at Y, Y + 1 and Y + 2.
+ *
+ * Source group load is an authored measure of how much infrastructure this
+ * source contributes to one source group. It is intentionally separate from
+ * mob capacity, which controls how many mobs the source may contain.
  */
 public record SourcePlacementProfile(
         SourceReservationArea reservationArea,
         SourceReservationArea preparationArea,
         int foundationDepth,
-        int clearanceHeight
+        int clearanceHeight,
+        int sourceGroupLoadCost
 ) {
     public SourcePlacementProfile {
         Objects.requireNonNull(
@@ -44,6 +49,12 @@ public record SourcePlacementProfile(
         if (clearanceHeight < 0) {
             throw new IllegalArgumentException(
                     "Source clearance height cannot be negative."
+            );
+        }
+
+        if (sourceGroupLoadCost <= 0) {
+            throw new IllegalArgumentException(
+                    "Source group load cost must be greater than zero."
             );
         }
 

@@ -6,6 +6,7 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContex
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceExecutionState;
 import org.ratden.skavenblight.event.skavenIncursion.runtime.source.SourceWaveExecutionState;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,6 +36,23 @@ import java.util.UUID;
  *
  * This class does not decide when the next wave begins. It only reports when
  * every scheduled or cancelled spawn belonging to this wave is complete.
+ *
+ * The complete mutable wave state can be captured in an immutable Snapshot
+ * and restored against an already-restored ordered collection of
+ * SourceWaveExecutionState objects.
+ *
+ * Restoration validates:
+ *
+ * - wave identity;
+ * - timing configuration;
+ * - exact source-assignment order and identity;
+ * - aggregate spawn and cancellation counters;
+ * - remaining queue totals;
+ * - completion state and completion tick.
+ *
+ * Logical restoration does not interact with the world. Physical source and
+ * entity reconciliation occurs after the complete incursion runtime has been
+ * reconstructed.
  */
 public class WaveExecutionState {
 
@@ -57,6 +75,9 @@ public class WaveExecutionState {
     private int totalCancelledMobs;
     private int totalFailedSpawnAttempts;
 
+    /**
+     * Creates a fresh wave whose complete source assignments remain pending.
+     */
     public WaveExecutionState(
             int waveIndex,
             List<SourceWaveExecutionState> sourceWaveExecutionStates,
@@ -64,40 +85,42 @@ public class WaveExecutionState {
             int firstSpawnDelayTicks,
             int spawnIntervalTicks
     ) {
-        if (waveIndex < 0) {
-            throw new IllegalArgumentException(
-                    "Wave index cannot be negative."
-            );
-        }
-
-        if (sourceWaveExecutionStates == null
-                || sourceWaveExecutionStates.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Wave execution requires at least one source assignment."
-            );
-        }
-
-        if (sourceCreationDelayTicks < 0) {
-            throw new IllegalArgumentException(
-                    "Source creation delay cannot be negative."
-            );
-        }
-
-        if (firstSpawnDelayTicks < sourceCreationDelayTicks) {
-            throw new IllegalArgumentException(
-                    "First spawn delay cannot occur before source creation."
-            );
-        }
-
-        if (spawnIntervalTicks <= 0) {
-            throw new IllegalArgumentException(
-                    "Spawn interval must be greater than zero."
-            );
-        }
-
-        validateSourceAssignments(
+        this(
                 waveIndex,
-                sourceWaveExecutionStates
+                sourceWaveExecutionStates,
+                sourceCreationDelayTicks,
+                firstSpawnDelayTicks,
+                spawnIntervalTicks,
+                0,
+                firstSpawnDelayTicks,
+                false,
+                -1,
+                0,
+                0,
+                0
+        );
+    }
+
+    private WaveExecutionState(
+            int waveIndex,
+            List<SourceWaveExecutionState> sourceWaveExecutionStates,
+            int sourceCreationDelayTicks,
+            int firstSpawnDelayTicks,
+            int spawnIntervalTicks,
+            int elapsedTicks,
+            int nextSpawnTick,
+            boolean spawnScheduleComplete,
+            int spawnScheduleCompletedTick,
+            int totalSuccessfulSpawns,
+            int totalCancelledMobs,
+            int totalFailedSpawnAttempts
+    ) {
+        validateConfiguration(
+                waveIndex,
+                sourceWaveExecutionStates,
+                sourceCreationDelayTicks,
+                firstSpawnDelayTicks,
+                spawnIntervalTicks
         );
 
         this.waveIndex =
@@ -117,15 +140,66 @@ public class WaveExecutionState {
         this.spawnIntervalTicks =
                 spawnIntervalTicks;
 
-        this.elapsedTicks = 0;
-        this.nextSpawnTick = firstSpawnDelayTicks;
+        this.elapsedTicks =
+                elapsedTicks;
 
-        this.spawnScheduleComplete = false;
-        this.spawnScheduleCompletedTick = -1;
+        this.nextSpawnTick =
+                nextSpawnTick;
 
-        this.totalSuccessfulSpawns = 0;
-        this.totalCancelledMobs = 0;
-        this.totalFailedSpawnAttempts = 0;
+        this.spawnScheduleComplete =
+                spawnScheduleComplete;
+
+        this.spawnScheduleCompletedTick =
+                spawnScheduleCompletedTick;
+
+        this.totalSuccessfulSpawns =
+                totalSuccessfulSpawns;
+
+        this.totalCancelledMobs =
+                totalCancelledMobs;
+
+        this.totalFailedSpawnAttempts =
+                totalFailedSpawnAttempts;
+
+        validateInternalState();
+    }
+
+    /**
+     * Restores one wave from saved progress.
+     *
+     * The supplied source-wave states must already have been restored from the
+     * source-wave snapshots contained by the wave snapshot. Their order is
+     * significant and must exactly match the saved order.
+     */
+    public static WaveExecutionState restore(
+            List<SourceWaveExecutionState> sourceWaveExecutionStates,
+            Snapshot snapshot
+    ) {
+        if (snapshot == null) {
+            throw new IllegalArgumentException(
+                    "Wave execution snapshot cannot be null."
+            );
+        }
+
+        validateRestoredSourceAssignments(
+                sourceWaveExecutionStates,
+                snapshot.sourceWaveExecutionSnapshots()
+        );
+
+        return new WaveExecutionState(
+                snapshot.waveIndex(),
+                sourceWaveExecutionStates,
+                snapshot.sourceCreationDelayTicks(),
+                snapshot.firstSpawnDelayTicks(),
+                snapshot.spawnIntervalTicks(),
+                snapshot.elapsedTicks(),
+                snapshot.nextSpawnTick(),
+                snapshot.spawnScheduleComplete(),
+                snapshot.spawnScheduleCompletedTick(),
+                snapshot.totalSuccessfulSpawns(),
+                snapshot.totalCancelledMobs(),
+                snapshot.totalFailedSpawnAttempts()
+        );
     }
 
     public int getWaveIndex() {
@@ -153,6 +227,14 @@ public class WaveExecutionState {
         return elapsedTicks;
     }
 
+    /**
+     * Returns the next wave-relative tick on which streamed spawning becomes
+     * eligible.
+     */
+    public int getNextSpawnTick() {
+        return nextSpawnTick;
+    }
+
     public int getTotalSuccessfulSpawns() {
         return totalSuccessfulSpawns;
     }
@@ -165,8 +247,23 @@ public class WaveExecutionState {
         return totalFailedSpawnAttempts;
     }
 
+    public int getPlannedMobCount() {
+        int plannedMobCount =
+                0;
+
+        for (SourceWaveExecutionState sourceWaveState
+                : sourceWaveExecutionStates) {
+
+            plannedMobCount +=
+                    sourceWaveState.getPlannedMobCount();
+        }
+
+        return plannedMobCount;
+    }
+
     public int getRemainingMobCount() {
-        int remainingMobCount = 0;
+        int remainingMobCount =
+                0;
 
         for (SourceWaveExecutionState sourceWaveState
                 : sourceWaveExecutionStates) {
@@ -209,6 +306,38 @@ public class WaveExecutionState {
     }
 
     /**
+     * Captures the exact mutable progress required to resume this wave.
+     */
+    public Snapshot createSnapshot() {
+        List<SourceWaveExecutionState.Snapshot>
+                sourceWaveSnapshots =
+                new ArrayList<>();
+
+        for (SourceWaveExecutionState sourceWaveState
+                : sourceWaveExecutionStates) {
+
+            sourceWaveSnapshots.add(
+                    sourceWaveState.createSnapshot()
+            );
+        }
+
+        return new Snapshot(
+                waveIndex,
+                sourceCreationDelayTicks,
+                firstSpawnDelayTicks,
+                spawnIntervalTicks,
+                elapsedTicks,
+                nextSpawnTick,
+                spawnScheduleComplete,
+                spawnScheduleCompletedTick,
+                totalSuccessfulSpawns,
+                totalCancelledMobs,
+                totalFailedSpawnAttempts,
+                sourceWaveSnapshots
+        );
+    }
+
+    /**
      * Advances source creation and streamed spawning by one server tick.
      *
      * Each source assignment with remaining mobs may attempt at most one
@@ -240,6 +369,8 @@ public class WaveExecutionState {
         elapsedTicks++;
 
         if (spawnScheduleComplete) {
+            validateInternalState();
+
             return new TickResult(
                     0,
                     0,
@@ -249,12 +380,21 @@ public class WaveExecutionState {
             );
         }
 
-        int sourcesCreatedThisTick = 0;
-        int sourceCreationFailuresThisTick = 0;
-        int successfulSpawnsThisTick = 0;
-        int failedSpawnAttemptsThisTick = 0;
+        int sourcesCreatedThisTick =
+                0;
 
-        if (elapsedTicks >= sourceCreationDelayTicks) {
+        int sourceCreationFailuresThisTick =
+                0;
+
+        int successfulSpawnsThisTick =
+                0;
+
+        int failedSpawnAttemptsThisTick =
+                0;
+
+        if (elapsedTicks
+                >= sourceCreationDelayTicks) {
+
             for (SourceWaveExecutionState sourceWaveState
                     : sourceWaveExecutionStates) {
 
@@ -277,6 +417,7 @@ public class WaveExecutionState {
 
                 if (!wasAvailable
                         && isAvailable) {
+
                     sourcesCreatedThisTick++;
                 }
 
@@ -286,7 +427,9 @@ public class WaveExecutionState {
             }
         }
 
-        if (elapsedTicks >= nextSpawnTick) {
+        if (elapsedTicks
+                >= nextSpawnTick) {
+
             for (SourceWaveExecutionState sourceWaveState
                     : sourceWaveExecutionStates) {
 
@@ -332,6 +475,8 @@ public class WaveExecutionState {
 
         updateSpawnScheduleCompletion();
 
+        validateInternalState();
+
         return new TickResult(
                 sourcesCreatedThisTick,
                 sourceCreationFailuresThisTick,
@@ -376,6 +521,7 @@ public class WaveExecutionState {
                     .matchesCurrentRuntimeSourceId(
                             runtimeSourceId
                     )) {
+
                 continue;
             }
 
@@ -404,7 +550,8 @@ public class WaveExecutionState {
          */
         destroyedSourceState.markDestroyed();
 
-        int cancelledNow = 0;
+        int cancelledNow =
+                0;
 
         for (SourceWaveExecutionState sourceWaveState
                 : sourceWaveExecutionStates) {
@@ -412,6 +559,7 @@ public class WaveExecutionState {
             if (!sourcePlacementId.equals(
                     sourceWaveState.getSourcePlacementId()
             )) {
+
                 continue;
             }
 
@@ -423,6 +571,8 @@ public class WaveExecutionState {
                 cancelledNow;
 
         updateSpawnScheduleCompletion();
+
+        validateInternalState();
 
         return SourceDestructionResult.recognised(
                 runtimeSourceId,
@@ -442,7 +592,8 @@ public class WaveExecutionState {
      * or use another retirement behaviour.
      */
     public int cancelAllRemainingMobs() {
-        int cancelledNow = 0;
+        int cancelledNow =
+                0;
 
         for (SourceWaveExecutionState sourceWaveState
                 : sourceWaveExecutionStates) {
@@ -455,6 +606,8 @@ public class WaveExecutionState {
                 cancelledNow;
 
         updateSpawnScheduleCompletion();
+
+        validateInternalState();
 
         return cancelledNow;
     }
@@ -546,8 +699,239 @@ public class WaveExecutionState {
             }
         }
 
-        spawnScheduleComplete = true;
-        spawnScheduleCompletedTick = elapsedTicks;
+        spawnScheduleComplete =
+                true;
+
+        spawnScheduleCompletedTick =
+                elapsedTicks;
+    }
+
+    private void validateInternalState() {
+        validateConfiguration(
+                waveIndex,
+                sourceWaveExecutionStates,
+                sourceCreationDelayTicks,
+                firstSpawnDelayTicks,
+                spawnIntervalTicks
+        );
+
+        validateProgressValues(
+                sourceWaveExecutionStates,
+                elapsedTicks,
+                nextSpawnTick,
+                spawnScheduleComplete,
+                spawnScheduleCompletedTick,
+                totalSuccessfulSpawns,
+                totalCancelledMobs,
+                totalFailedSpawnAttempts
+        );
+    }
+
+    private static void validateConfiguration(
+            int waveIndex,
+            List<SourceWaveExecutionState> sourceWaveExecutionStates,
+            int sourceCreationDelayTicks,
+            int firstSpawnDelayTicks,
+            int spawnIntervalTicks
+    ) {
+        if (waveIndex < 0) {
+            throw new IllegalArgumentException(
+                    "Wave index cannot be negative."
+            );
+        }
+
+        if (sourceWaveExecutionStates == null
+                || sourceWaveExecutionStates.isEmpty()) {
+
+            throw new IllegalArgumentException(
+                    "Wave execution requires at least one source assignment."
+            );
+        }
+
+        if (sourceCreationDelayTicks < 0) {
+            throw new IllegalArgumentException(
+                    "Source creation delay cannot be negative."
+            );
+        }
+
+        if (firstSpawnDelayTicks
+                < sourceCreationDelayTicks) {
+
+            throw new IllegalArgumentException(
+                    "First spawn delay cannot occur before source creation."
+            );
+        }
+
+        if (spawnIntervalTicks <= 0) {
+            throw new IllegalArgumentException(
+                    "Spawn interval must be greater than zero."
+            );
+        }
+
+        validateSourceAssignments(
+                waveIndex,
+                sourceWaveExecutionStates
+        );
+    }
+
+    private static void validateProgressValues(
+            List<SourceWaveExecutionState> sourceWaveExecutionStates,
+            int elapsedTicks,
+            int nextSpawnTick,
+            boolean spawnScheduleComplete,
+            int spawnScheduleCompletedTick,
+            int totalSuccessfulSpawns,
+            int totalCancelledMobs,
+            int totalFailedSpawnAttempts
+    ) {
+        if (elapsedTicks < 0) {
+            throw new IllegalArgumentException(
+                    "Wave elapsed ticks cannot be negative."
+            );
+        }
+
+        if (nextSpawnTick < 0) {
+            throw new IllegalArgumentException(
+                    "Wave next-spawn tick cannot be negative."
+            );
+        }
+
+        if (totalSuccessfulSpawns < 0) {
+            throw new IllegalArgumentException(
+                    "Wave successful-spawn total cannot be negative."
+            );
+        }
+
+        if (totalCancelledMobs < 0) {
+            throw new IllegalArgumentException(
+                    "Wave cancelled-mob total cannot be negative."
+            );
+        }
+
+        if (totalFailedSpawnAttempts < 0) {
+            throw new IllegalArgumentException(
+                    "Wave failed-spawn-attempt total cannot be negative."
+            );
+        }
+
+        int countedSuccessfulSpawns =
+                0;
+
+        int countedCancelledMobs =
+                0;
+
+        int countedRemainingMobs =
+                0;
+
+        int countedPlannedMobs =
+                0;
+
+        boolean everySourceAssignmentComplete =
+                true;
+
+        for (SourceWaveExecutionState sourceWaveState
+                : sourceWaveExecutionStates) {
+
+            countedSuccessfulSpawns +=
+                    sourceWaveState.getSuccessfulSpawnCount();
+
+            countedCancelledMobs +=
+                    sourceWaveState.getCancelledMobCount();
+
+            countedRemainingMobs +=
+                    sourceWaveState.getRemainingMobCount();
+
+            countedPlannedMobs +=
+                    sourceWaveState.getPlannedMobCount();
+
+            if (!sourceWaveState.isComplete()) {
+                everySourceAssignmentComplete =
+                        false;
+            }
+        }
+
+        if (totalSuccessfulSpawns
+                != countedSuccessfulSpawns) {
+
+            throw new IllegalArgumentException(
+                    "Wave reports "
+                            + totalSuccessfulSpawns
+                            + " successful spawns, but its source "
+                            + "assignments report "
+                            + countedSuccessfulSpawns
+                            + "."
+            );
+        }
+
+        if (totalCancelledMobs
+                != countedCancelledMobs) {
+
+            throw new IllegalArgumentException(
+                    "Wave reports "
+                            + totalCancelledMobs
+                            + " cancelled mobs, but its source assignments "
+                            + "report "
+                            + countedCancelledMobs
+                            + "."
+            );
+        }
+
+        long accountedMobCount =
+                (long) countedSuccessfulSpawns
+                        + countedCancelledMobs
+                        + countedRemainingMobs;
+
+        if (accountedMobCount
+                != countedPlannedMobs) {
+
+            throw new IllegalArgumentException(
+                    "Wave source assignments account for "
+                            + accountedMobCount
+                            + " mobs, but they planned "
+                            + countedPlannedMobs
+                            + ". Successful: "
+                            + countedSuccessfulSpawns
+                            + ". Cancelled: "
+                            + countedCancelledMobs
+                            + ". Remaining: "
+                            + countedRemainingMobs
+                            + "."
+            );
+        }
+
+        if (spawnScheduleComplete
+                != everySourceAssignmentComplete) {
+
+            throw new IllegalArgumentException(
+                    "Wave completion flag must exactly match whether every "
+                            + "source assignment is complete."
+            );
+        }
+
+        if (spawnScheduleComplete) {
+            if (spawnScheduleCompletedTick < 0) {
+                throw new IllegalArgumentException(
+                        "A completed wave requires a non-negative completion "
+                                + "tick."
+                );
+            }
+
+            if (spawnScheduleCompletedTick
+                    > elapsedTicks) {
+
+                throw new IllegalArgumentException(
+                        "Wave completion tick "
+                                + spawnScheduleCompletedTick
+                                + " cannot occur after elapsed tick "
+                                + elapsedTicks
+                                + "."
+                );
+            }
+        } else if (spawnScheduleCompletedTick != -1) {
+            throw new IllegalArgumentException(
+                    "An incomplete wave must use completion tick -1."
+            );
+        }
     }
 
     private static void validateSourceAssignments(
@@ -568,6 +952,7 @@ public class WaveExecutionState {
 
             if (sourceWaveState.getWaveIndex()
                     != waveIndex) {
+
                 throw new IllegalArgumentException(
                         "Source assignment belongs to wave "
                                 + sourceWaveState.getWaveIndex()
@@ -583,10 +968,412 @@ public class WaveExecutionState {
             if (!sourceCompositionIds.add(
                     sourceCompositionId
             )) {
+
                 throw new IllegalArgumentException(
                         "Wave contains duplicate source-composition ID "
                                 + sourceCompositionId
                                 + "."
+                );
+            }
+        }
+    }
+
+    /**
+     * Confirms that the already-restored source assignments exactly match the
+     * saved identities, order, and progress contained by the wave snapshot.
+     */
+    private static void validateRestoredSourceAssignments(
+            List<SourceWaveExecutionState> restoredSourceStates,
+            List<SourceWaveExecutionState.Snapshot> savedSourceSnapshots
+    ) {
+        if (restoredSourceStates == null
+                || restoredSourceStates.isEmpty()) {
+
+            throw new IllegalArgumentException(
+                    "Restored wave requires at least one source assignment."
+            );
+        }
+
+        if (savedSourceSnapshots == null
+                || savedSourceSnapshots.isEmpty()) {
+
+            throw new IllegalArgumentException(
+                    "Wave snapshot requires at least one source assignment."
+            );
+        }
+
+        if (restoredSourceStates.size()
+                != savedSourceSnapshots.size()) {
+
+            throw new IllegalArgumentException(
+                    "Restored wave contains "
+                            + restoredSourceStates.size()
+                            + " source assignments, but its snapshot contains "
+                            + savedSourceSnapshots.size()
+                            + "."
+            );
+        }
+
+        for (int assignmentIndex = 0;
+             assignmentIndex < restoredSourceStates.size();
+             assignmentIndex++) {
+
+            SourceWaveExecutionState restoredState =
+                    restoredSourceStates.get(
+                            assignmentIndex
+                    );
+
+            SourceWaveExecutionState.Snapshot savedSnapshot =
+                    savedSourceSnapshots.get(
+                            assignmentIndex
+                    );
+
+            if (restoredState == null) {
+                throw new IllegalArgumentException(
+                        "Restored source assignment at index "
+                                + assignmentIndex
+                                + " cannot be null."
+                );
+            }
+
+            if (savedSnapshot == null) {
+                throw new IllegalArgumentException(
+                        "Saved source assignment at index "
+                                + assignmentIndex
+                                + " cannot be null."
+                );
+            }
+
+            SourceWaveExecutionState.Snapshot restoredSnapshot =
+                    restoredState.createSnapshot();
+
+            if (!restoredSnapshot.equals(
+                    savedSnapshot
+            )) {
+                throw new IllegalArgumentException(
+                        "Restored source assignment at index "
+                                + assignmentIndex
+                                + " does not exactly match its saved state."
+                                + "\nExpected placement: "
+                                + savedSnapshot.sourcePlacementId()
+                                + "."
+                                + "\nRestored placement: "
+                                + restoredSnapshot.sourcePlacementId()
+                                + "."
+                                + "\nExpected composition: "
+                                + savedSnapshot.sourceCompositionId()
+                                + "."
+                                + "\nRestored composition: "
+                                + restoredSnapshot.sourceCompositionId()
+                                + "."
+                );
+            }
+        }
+    }
+
+    /**
+     * Immutable persistence snapshot for one complete global wave.
+     *
+     * Source assignment snapshots remain ordered because WaveExecutionState
+     * creates, ticks, and spawns through those assignments in that order.
+     */
+    public record Snapshot(
+            int waveIndex,
+            int sourceCreationDelayTicks,
+            int firstSpawnDelayTicks,
+            int spawnIntervalTicks,
+            int elapsedTicks,
+            int nextSpawnTick,
+            boolean spawnScheduleComplete,
+            int spawnScheduleCompletedTick,
+            int totalSuccessfulSpawns,
+            int totalCancelledMobs,
+            int totalFailedSpawnAttempts,
+            List<SourceWaveExecutionState.Snapshot>
+            sourceWaveExecutionSnapshots
+    ) {
+
+        public Snapshot {
+            if (sourceWaveExecutionSnapshots == null
+                    || sourceWaveExecutionSnapshots.isEmpty()) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot requires at least one source "
+                                + "assignment."
+                );
+            }
+
+            sourceWaveExecutionSnapshots =
+                    List.copyOf(
+                            sourceWaveExecutionSnapshots
+                    );
+
+            validateSnapshotSourceAssignments(
+                    waveIndex,
+                    sourceWaveExecutionSnapshots
+            );
+
+            validateSnapshotConfiguration(
+                    waveIndex,
+                    sourceCreationDelayTicks,
+                    firstSpawnDelayTicks,
+                    spawnIntervalTicks
+            );
+
+            validateSnapshotProgress(
+                    sourceWaveExecutionSnapshots,
+                    elapsedTicks,
+                    nextSpawnTick,
+                    spawnScheduleComplete,
+                    spawnScheduleCompletedTick,
+                    totalSuccessfulSpawns,
+                    totalCancelledMobs,
+                    totalFailedSpawnAttempts
+            );
+        }
+
+        public int getPlannedMobCount() {
+            int plannedMobCount =
+                    0;
+
+            for (SourceWaveExecutionState.Snapshot sourceSnapshot
+                    : sourceWaveExecutionSnapshots) {
+
+                plannedMobCount +=
+                        sourceSnapshot.plannedMobCount();
+            }
+
+            return plannedMobCount;
+        }
+
+        public int getRemainingMobCount() {
+            int remainingMobCount =
+                    0;
+
+            for (SourceWaveExecutionState.Snapshot sourceSnapshot
+                    : sourceWaveExecutionSnapshots) {
+
+                remainingMobCount +=
+                        sourceSnapshot.getRemainingMobCount();
+            }
+
+            return remainingMobCount;
+        }
+
+        private static void validateSnapshotConfiguration(
+                int waveIndex,
+                int sourceCreationDelayTicks,
+                int firstSpawnDelayTicks,
+                int spawnIntervalTicks
+        ) {
+            if (waveIndex < 0) {
+                throw new IllegalArgumentException(
+                        "Wave snapshot index cannot be negative."
+                );
+            }
+
+            if (sourceCreationDelayTicks < 0) {
+                throw new IllegalArgumentException(
+                        "Wave snapshot source-creation delay cannot be "
+                                + "negative."
+                );
+            }
+
+            if (firstSpawnDelayTicks
+                    < sourceCreationDelayTicks) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot first-spawn delay cannot occur before "
+                                + "source creation."
+                );
+            }
+
+            if (spawnIntervalTicks <= 0) {
+                throw new IllegalArgumentException(
+                        "Wave snapshot spawn interval must be greater than "
+                                + "zero."
+                );
+            }
+        }
+
+        private static void validateSnapshotSourceAssignments(
+                int waveIndex,
+                List<SourceWaveExecutionState.Snapshot> sourceSnapshots
+        ) {
+            Set<UUID> sourceCompositionIds =
+                    new HashSet<>();
+
+            for (SourceWaveExecutionState.Snapshot sourceSnapshot
+                    : sourceSnapshots) {
+
+                if (sourceSnapshot == null) {
+                    throw new IllegalArgumentException(
+                            "Wave snapshot cannot contain a null source "
+                                    + "assignment."
+                    );
+                }
+
+                if (sourceSnapshot.waveIndex()
+                        != waveIndex) {
+
+                    throw new IllegalArgumentException(
+                            "Saved source assignment belongs to wave "
+                                    + sourceSnapshot.waveIndex()
+                                    + " rather than wave "
+                                    + waveIndex
+                                    + "."
+                    );
+                }
+
+                if (!sourceCompositionIds.add(
+                        sourceSnapshot.sourceCompositionId()
+                )) {
+
+                    throw new IllegalArgumentException(
+                            "Wave snapshot contains duplicate source "
+                                    + "composition ID "
+                                    + sourceSnapshot.sourceCompositionId()
+                                    + "."
+                    );
+                }
+            }
+        }
+
+        private static void validateSnapshotProgress(
+                List<SourceWaveExecutionState.Snapshot> sourceSnapshots,
+                int elapsedTicks,
+                int nextSpawnTick,
+                boolean spawnScheduleComplete,
+                int spawnScheduleCompletedTick,
+                int totalSuccessfulSpawns,
+                int totalCancelledMobs,
+                int totalFailedSpawnAttempts
+        ) {
+            if (elapsedTicks < 0) {
+                throw new IllegalArgumentException(
+                        "Wave snapshot elapsed ticks cannot be negative."
+                );
+            }
+
+            if (nextSpawnTick < 0) {
+                throw new IllegalArgumentException(
+                        "Wave snapshot next-spawn tick cannot be negative."
+                );
+            }
+
+            if (totalSuccessfulSpawns < 0
+                    || totalCancelledMobs < 0
+                    || totalFailedSpawnAttempts < 0) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot aggregate counters cannot be negative."
+                );
+            }
+
+            int countedSuccessfulSpawns =
+                    0;
+
+            int countedCancelledMobs =
+                    0;
+
+            int countedRemainingMobs =
+                    0;
+
+            int countedPlannedMobs =
+                    0;
+
+            boolean everyAssignmentComplete =
+                    true;
+
+            for (SourceWaveExecutionState.Snapshot sourceSnapshot
+                    : sourceSnapshots) {
+
+                countedSuccessfulSpawns +=
+                        sourceSnapshot.successfulSpawnCount();
+
+                countedCancelledMobs +=
+                        sourceSnapshot.cancelledMobCount();
+
+                countedRemainingMobs +=
+                        sourceSnapshot.getRemainingMobCount();
+
+                countedPlannedMobs +=
+                        sourceSnapshot.plannedMobCount();
+
+                if (!sourceSnapshot.isComplete()) {
+                    everyAssignmentComplete =
+                            false;
+                }
+            }
+
+            if (totalSuccessfulSpawns
+                    != countedSuccessfulSpawns) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot reports "
+                                + totalSuccessfulSpawns
+                                + " successful spawns, but its source "
+                                + "snapshots report "
+                                + countedSuccessfulSpawns
+                                + "."
+                );
+            }
+
+            if (totalCancelledMobs
+                    != countedCancelledMobs) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot reports "
+                                + totalCancelledMobs
+                                + " cancelled mobs, but its source snapshots "
+                                + "report "
+                                + countedCancelledMobs
+                                + "."
+                );
+            }
+
+            long accountedMobCount =
+                    (long) countedSuccessfulSpawns
+                            + countedCancelledMobs
+                            + countedRemainingMobs;
+
+            if (accountedMobCount
+                    != countedPlannedMobs) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot accounts for "
+                                + accountedMobCount
+                                + " mobs, but its source snapshots planned "
+                                + countedPlannedMobs
+                                + "."
+                );
+            }
+
+            if (spawnScheduleComplete
+                    != everyAssignmentComplete) {
+
+                throw new IllegalArgumentException(
+                        "Wave snapshot completion flag must exactly match "
+                                + "whether every source assignment is "
+                                + "complete."
+                );
+            }
+
+            if (spawnScheduleComplete) {
+                if (spawnScheduleCompletedTick < 0
+                        || spawnScheduleCompletedTick > elapsedTicks) {
+
+                    throw new IllegalArgumentException(
+                            "Completed wave snapshot requires a completion "
+                                    + "tick between zero and elapsed tick "
+                                    + elapsedTicks
+                                    + "."
+                    );
+                }
+            } else if (spawnScheduleCompletedTick != -1) {
+                throw new IllegalArgumentException(
+                        "Incomplete wave snapshot must use completion tick "
+                                + "-1."
                 );
             }
         }
@@ -606,6 +1393,7 @@ public class WaveExecutionState {
             boolean sourceRecognised,
             int cancelledMobs
     ) {
+
         public SourceDestructionResult {
             if (runtimeSourceId == null) {
                 throw new IllegalArgumentException(
@@ -621,6 +1409,7 @@ public class WaveExecutionState {
 
             if (sourceRecognised
                     && sourcePlacementId == null) {
+
                 throw new IllegalArgumentException(
                         "A recognised source destruction requires a source "
                                 + "placement ID."
@@ -629,6 +1418,7 @@ public class WaveExecutionState {
 
             if (!sourceRecognised
                     && sourcePlacementId != null) {
+
                 throw new IllegalArgumentException(
                         "An unrecognised source destruction cannot have a "
                                 + "source placement ID."
@@ -637,6 +1427,7 @@ public class WaveExecutionState {
 
             if (!sourceRecognised
                     && cancelledMobs != 0) {
+
                 throw new IllegalArgumentException(
                         "An unrecognised source destruction cannot cancel "
                                 + "mobs."
@@ -679,11 +1470,13 @@ public class WaveExecutionState {
             int failedSpawnAttempts,
             boolean spawnScheduleComplete
     ) {
+
         public TickResult {
             if (sourcesCreated < 0
                     || sourceCreationFailures < 0
                     || successfulSpawns < 0
                     || failedSpawnAttempts < 0) {
+
                 throw new IllegalArgumentException(
                         "Wave tick counts cannot be negative."
                 );

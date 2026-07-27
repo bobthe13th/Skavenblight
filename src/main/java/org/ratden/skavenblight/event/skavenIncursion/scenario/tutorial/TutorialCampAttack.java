@@ -22,6 +22,7 @@ import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceDistanceProfile;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -32,6 +33,7 @@ public class TutorialCampAttack implements SkavenScenario {
             new ScenarioDefinition(
                     "tutorial_camp_attack",
                     ScenarioPattern.AMBUSH,
+                    SourceDistanceProfile.CLOSE,
                     ScenarioGoal.PRESSURE,
                     OverlapType.MAJOR,
                     PressureProfile.COMBAT,

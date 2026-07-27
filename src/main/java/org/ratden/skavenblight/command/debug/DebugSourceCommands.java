@@ -22,10 +22,10 @@ import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceRole;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceSize;
 import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceType;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
-import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
-import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
-import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
-import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
+import org.ratden.skavenblight.event.skavenIncursion.debug.DebugIncursionAnchorPlacementService;
+import org.ratden.skavenblight.event.skavenIncursion.debug.DebugIncursionAnchorTracker;
+import org.ratden.skavenblight.event.skavenIncursion.debug.DebugSourceVisualisation;
 
 import java.util.List;
 import java.util.UUID;
@@ -70,6 +70,35 @@ public class DebugSourceCommands {
                                 .executes(context -> setSourceState(context.getSource(), SourceState.COLLAPSED)))
                 )
 
+                .then(Commands.literal("visualisation")
+                        .then(Commands.literal("show")
+                                .executes(context ->
+                                        setSourceVisualisation(
+                                                context.getSource(),
+                                                true
+                                        )
+                                ))
+                        .then(Commands.literal("hide")
+                                .executes(context ->
+                                        setSourceVisualisation(
+                                                context.getSource(),
+                                                false
+                                        )
+                                ))
+                        .then(Commands.literal("toggle")
+                                .executes(context ->
+                                        toggleSourceVisualisation(
+                                                context.getSource()
+                                        )
+                                ))
+                        .then(Commands.literal("status")
+                                .executes(context ->
+                                        sourceVisualisationStatus(
+                                                context.getSource()
+                                        )
+                                ))
+                )
+
                 .then(Commands.literal("info")
                         .executes(context -> sourceInfo(context.getSource()))
                 );
@@ -85,7 +114,7 @@ public class DebugSourceCommands {
                                 context.getSource(),
                                 placementPattern,
                                 SourceState.ACTIVE,
-                                getDefaultSourceCountForPattern(placementPattern)
+                                getMinimumDemonstrationSourceCount(placementPattern)
                         ))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 32))
                                 .executes(context -> createSourcePattern(
@@ -99,7 +128,7 @@ public class DebugSourceCommands {
                                 context.getSource(),
                                 placementPattern,
                                 SourceState.DORMANT,
-                                getDefaultSourceCountForPattern(placementPattern)
+                                getMinimumDemonstrationSourceCount(placementPattern)
                         ))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 32))
                                 .executes(context -> createSourcePattern(
@@ -113,7 +142,7 @@ public class DebugSourceCommands {
                                 context.getSource(),
                                 placementPattern,
                                 SourceState.COLLAPSED,
-                                getDefaultSourceCountForPattern(placementPattern)
+                                getMinimumDemonstrationSourceCount(placementPattern)
                         ))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 32))
                                 .executes(context -> createSourcePattern(
@@ -142,38 +171,18 @@ public class DebugSourceCommands {
                 return 0;
             }
 
-            LeadershipRegistry leadershipRegistry = createDebugLeadershipRegistry();
+            UUID debugScenarioId = UUID.randomUUID();
 
-            LeaderGroup vermintideGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.VERMINTIDE,
-                    LeaderRank.NONE
-            );
-
-            LeaderGroup fangGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.FANG,
-                    LeaderRank.NONE
-            );
-
-            LeaderGroup clawGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.CLAW,
-                    LeaderRank.NONE
-            );
-
-            LeaderGroup packGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.PACK,
-                    LeaderRank.NONE
-            );
+            LeadershipContext leadershipContext =
+                    LeadershipContext.debug(
+                            debugScenarioId
+                    );
 
             UUID createdSourceId = CreateTunnelSource.execute(
                     player.serverLevel(),
                     hitResult.getBlockPos().above(),
                     sourceState,
-                    leadershipRegistry.createContext(
-                            vermintideGroup,
-                            fangGroup,
-                            clawGroup,
-                            packGroup
-                    )
+                    leadershipContext
             );
 
             if (createdSourceId != null) {
@@ -182,6 +191,8 @@ public class DebugSourceCommands {
                                 "Created tunnel source in state: "
                                         + sourceState.getSerializedName()
                                         + "\nSource ID: " + createdSourceId
+                                        + "\nScenario ID: " + debugScenarioId
+                                        + "\nOptional leadership IDs: none"
                         ),
                         false
                 );
@@ -224,22 +235,12 @@ public class DebugSourceCommands {
                 return 0;
             }
 
-            LeadershipRegistry leadershipRegistry = createDebugLeadershipRegistry();
+            UUID debugScenarioId = UUID.randomUUID();
 
-            LeaderGroup vermintideGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.VERMINTIDE,
-                    LeaderRank.NONE
-            );
-
-            LeaderGroup fangGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.FANG,
-                    LeaderRank.NONE
-            );
-
-            LeaderGroup clawGroup = leadershipRegistry.createLeaderGroup(
-                    LeaderGroupType.CLAW,
-                    LeaderRank.NONE
-            );
+            LeadershipContext leadershipContext =
+                    LeadershipContext.debug(
+                            debugScenarioId
+                    );
 
             int plannedCount = countPlannedSources(sourceGroups);
             int createdCount = 0;
@@ -258,18 +259,16 @@ public class DebugSourceCommands {
                     .append("\nTarget: ")
                     .append(formatBlockPos(targetPos))
                     .append("\nGroups: ")
-                    .append(sourceGroups.size());
+                    .append(sourceGroups.size())
+                    .append("\nScenario ID: ")
+                    .append(debugScenarioId)
+                    .append("\nOptional leadership IDs: none");
 
             for (int groupIndex = 0; groupIndex < sourceGroups.size(); groupIndex++) {
                 SourceGroupPlan sourceGroup = sourceGroups.get(groupIndex);
 
                 for (SourcePlan sourcePlan : sourceGroup.getSourcePlans()) {
                     sourceNumber++;
-
-                    LeaderGroup packGroup = leadershipRegistry.createLeaderGroup(
-                            LeaderGroupType.PACK,
-                            LeaderRank.NONE
-                    );
 
                     BlockPos placementPos = sourcePlan.hasPlacedPos()
                             ? sourcePlan.getPlacedPos()
@@ -279,12 +278,7 @@ public class DebugSourceCommands {
                             level,
                             placementPos,
                             sourceState,
-                            leadershipRegistry.createContext(
-                                    vermintideGroup,
-                                    fangGroup,
-                                    clawGroup,
-                                    packGroup
-                            )
+                            leadershipContext
                     );
 
                     message.append("\n\nSource ")
@@ -421,12 +415,12 @@ public class DebugSourceCommands {
                             "Tunnel Source Info"
                                     + "\nPosition: " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
                                     + "\nState: " + sourceState.getSerializedName()
-                                    + "\nSource ID: " + tunnelSource.getSourceId()
-                                    + "\nScenario ID: " + tunnelSource.getScenarioId()
-                                    + "\nVermintide ID: " + tunnelSource.getVermintideId()
-                                    + "\nFang ID: " + tunnelSource.getFangId()
-                                    + "\nClaw ID: " + tunnelSource.getClawId()
-                                    + "\nPack ID: " + tunnelSource.getPackId()
+                                    + "\nSource ID: " + formatUuid(tunnelSource.getSourceId())
+                                    + "\nScenario ID: " + formatUuid(tunnelSource.getScenarioId())
+                                    + "\nVermintide ID: " + formatUuid(tunnelSource.getVermintideId())
+                                    + "\nFang ID: " + formatUuid(tunnelSource.getFangId())
+                                    + "\nClaw ID: " + formatUuid(tunnelSource.getClawId())
+                                    + "\nPack ID: " + formatUuid(tunnelSource.getPackId())
                                     + "\nCreated Game Time: " + tunnelSource.getCreatedGameTime()
                     ),
                     false
@@ -452,7 +446,14 @@ public class DebugSourceCommands {
         return total;
     }
 
-    private static int getDefaultSourceCountForPattern(
+    /**
+     * Supplies enough sources for the legacy debug pattern command to visibly
+     * demonstrate its intended shape when no explicit count is provided.
+     *
+     * This is not a production planning rule. Normal incursion source counts are
+     * determined by composition, capacity and source-group planning.
+     */
+    private static int getMinimumDemonstrationSourceCount(
             SourcePlacementPattern placementPattern
     ) {
         return switch (placementPattern) {
@@ -464,12 +465,93 @@ public class DebugSourceCommands {
         };
     }
 
-    private static LeadershipRegistry createDebugLeadershipRegistry() {
-        return new LeadershipRegistry(UUID.randomUUID());
+    private static String formatUuid(UUID uuid) {
+        return uuid == null
+                ? "none"
+                : uuid.toString();
     }
 
     private static String formatBlockPos(BlockPos pos) {
         return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
+    }
+
+    private static int setSourceVisualisation(
+            CommandSourceStack source,
+            boolean enabled
+    ) {
+        DebugSourceVisualisation.setEnabled(
+                enabled
+        );
+
+        return sendSourceVisualisationStatus(
+                source
+        );
+    }
+
+    private static int toggleSourceVisualisation(
+            CommandSourceStack source
+    ) {
+        DebugSourceVisualisation.toggle();
+
+        return sendSourceVisualisationStatus(
+                source
+        );
+    }
+
+    private static int sourceVisualisationStatus(
+            CommandSourceStack source
+    ) {
+        return sendSourceVisualisationStatus(
+                source
+        );
+    }
+
+    private static int sendSourceVisualisationStatus(
+            CommandSourceStack source
+    ) {
+        ServerLevel level =
+                source.getLevel();
+
+        boolean enabled =
+                DebugSourceVisualisation.isEnabled();
+
+        int trackedIncursionCount =
+                DebugIncursionAnchorTracker
+                        .getTrackedIncursionCount(
+                                level
+                        );
+
+        int trackedAnchorCount =
+                0;
+
+        for (DebugIncursionAnchorPlacementService.PlacementResult
+                placementResult
+                : DebugIncursionAnchorTracker
+                .getPlacementResults(level)) {
+
+            trackedAnchorCount +=
+                    placementResult.getAnchorCount();
+        }
+
+        int finalTrackedAnchorCount =
+                trackedAnchorCount;
+
+        source.sendSuccess(
+                () -> Component.literal(
+                        "Source visualisation: "
+                                + (enabled
+                                ? "shown"
+                                : "hidden")
+                                + "\nScope: server-wide"
+                                + "\nTracked incursions in this level: "
+                                + trackedIncursionCount
+                                + "\nTracked anchors in this level: "
+                                + finalTrackedAnchorCount
+                ),
+                false
+        );
+
+        return 1;
     }
 
     private DebugSourceCommands() {

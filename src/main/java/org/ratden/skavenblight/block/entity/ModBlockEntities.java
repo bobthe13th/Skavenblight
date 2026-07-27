@@ -7,6 +7,7 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.block.ModBlocks;
+import org.ratden.skavenblight.block.entity.debug.DebugIncursionAnchorEntity;
 
 /**
  * Registers the BlockEntityTypes added by Skavenblight.
@@ -32,6 +33,19 @@ public final class ModBlockEntities {
                     () -> BlockEntityType.Builder.of(
                             SkavenTunnelSourceEntity::new,
                             ModBlocks.SKAVEN_TUNNEL_SOURCE.get()
+                    ).build(null)
+            );
+
+    public static final DeferredHolder<
+            BlockEntityType<?>,
+            BlockEntityType<DebugIncursionAnchorEntity>
+            > DEBUG_INCURSION_ANCHOR =
+            BLOCK_ENTITY_TYPES.register(
+                    "debug_incursion_anchor",
+                    () -> BlockEntityType.Builder.of(
+                            DebugIncursionAnchorEntity::new,
+                            ModBlocks.DEBUG_FRONT_ANCHOR.get(),
+                            ModBlocks.DEBUG_SOURCE_GROUP_ANCHOR.get()
                     ).build(null)
             );
 

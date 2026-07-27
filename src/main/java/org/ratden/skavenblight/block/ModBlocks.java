@@ -31,6 +31,8 @@ import org.ratden.skavenblight.block.custom.WarpFluxFurnaceBlock;
 import org.ratden.skavenblight.block.custom.WarpFluxStorageBlock;
 import org.ratden.skavenblight.item.ModItems;
 import org.ratden.skavenblight.item.custom.WarpFluxStorageBlockItem;
+import org.ratden.skavenblight.block.custom.debug.DebugIncursionAnchorBlock;
+import org.ratden.skavenblight.block.entity.debug.DebugAnchorType;
 
 import java.util.function.Supplier;
 
@@ -240,6 +242,38 @@ public final class ModBlocks {
                     )
             );
 
+    /**
+     * Invisible debug representation of one front anchor.
+     *
+     * Registered without a BlockItem because it is created and removed only by
+     * the incursion debug visualisation system.
+     */
+    public static final DeferredBlock<DebugIncursionAnchorBlock>
+            DEBUG_FRONT_ANCHOR =
+            BLOCKS.register(
+                    "debug_front_anchor",
+                    () -> new DebugIncursionAnchorBlock(
+                            DebugAnchorType.FRONT,
+                            createDebugAnchorProperties()
+                    )
+            );
+
+    /**
+     * Invisible debug representation of an additional physical source-group
+     * anchor.
+     *
+     * The first source group uses its parent front anchor instead.
+     */
+    public static final DeferredBlock<DebugIncursionAnchorBlock>
+            DEBUG_SOURCE_GROUP_ANCHOR =
+            BLOCKS.register(
+                    "debug_source_group_anchor",
+                    () -> new DebugIncursionAnchorBlock(
+                            DebugAnchorType.SOURCE_GROUP,
+                            createDebugAnchorProperties()
+                    )
+            );
+
     public static final DeferredBlock<SpawnTunnelSmall>
             SPAWN_TUNNEL_SMALL =
             registerBlock(
@@ -313,6 +347,17 @@ public final class ModBlocks {
                                     .noOcclusion()
                     )
             );
+
+    private static BlockBehaviour.Properties
+    createDebugAnchorProperties() {
+        return BlockBehaviour.Properties.of()
+                .noCollission()
+                .noOcclusion()
+                .strength(
+                        -1.0F,
+                        3_600_000.0F
+                );
+    }
 
     /**
      * Registers a block with its specialised storage BlockItem.
