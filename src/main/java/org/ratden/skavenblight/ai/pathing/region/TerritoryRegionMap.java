@@ -556,15 +556,21 @@ public class TerritoryRegionMap {
             // too often, which is reclaimConnectorCells's own, separate parking note) - see that
             // method's javadoc for the full trace and why a fix wasn't attempted opportunistically
             // here. Production reachability is NOT uniform across scenarios: confirmed-plausible
-            // for a same-level WALL-break-type merge (production's real neighborsAndSelf check
-            // works normally there - nothing about the gap below applies), but NOT yet confirmed
-            // for a FLOOR-support-type merge specifically, because production's actual event path
+            // for a same-level WALL-break-type merge (the same-Y flanking cells on either side of
+            // the wall were ALREADY indexed region members before the break, so production's real
+            // neighborsAndSelf check succeeds immediately there), but NOT yet confirmed for a
+            // FLOOR-support-type merge specifically, because production's actual event path
             // (SiegeBlockEventHandler.handleBlockChange) reports the literal changed floor-block
-            // position, not the walkable cell one Y above it that this test reports instead - and
-            // tick()'s neighborsAndSelf only checks same-Y neighbors, so a production-faithful
-            // floor-support change produces zero dirty regions and never reaches this method at
-            // all for that case. See task-9-report.md's narrowed "Is this reproducible in
-            // production, or just this test's geometry?" section for the full reconciliation.
+            // position, not the walkable cell one Y above it that this test reports instead.
+            // neighborsAndSelf DOES check above()/below() (all 6 face-adjacent neighbors plus the
+            // position itself, not just same-Y ones) - the gap is a stale-index/timing one, not a
+            // directional blind spot: every one of those 7 candidates was unwalkable, unindexed
+            // terrain before this exact change (the floor block itself, and the newly-walkable
+            // cell its above() lands on, which only just became walkable because of this same
+            // change), so a production-faithful floor-support change produces zero dirty regions
+            // and never reaches this method at all for that case. See task-9-report.md's narrowed
+            // "Is this reproducible in production, or just this test's geometry?" section for the
+            // full reconciliation.
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
@@ -723,11 +729,17 @@ public class TerritoryRegionMap {
      * deviation from what production actually does (confirmed by reading {@code
      * SiegeBlockEventHandler.handleBlockChange}: it passes the literal changed-block position
      * straight into {@code onBlockChanged}, unmodified). {@code tick()}'s {@code neighborsAndSelf}
-     * only checks same-Y orthogonal neighbors, so a production-faithful report of a floor block's
-     * own position never resolves to any dirty region for a floor-support change in the first
-     * place - {@code recomputeDirtyRegions} is never reached for that case, and neither is this
-     * bug. For a same-level WALL-break-type merge, nothing about that floor-vs-walkable-cell gap
-     * applies (production's real neighbor check works normally, same-Y, same as this test's own
+     * DOES check {@code above()}/{@code below()} (all 6 face-adjacent neighbors plus the position
+     * itself, not just same-Y ones) - the gap is a stale-index/timing one, not a directional blind
+     * spot: every one of those 7 candidates is resolved against a {@code regionIndex} snapshot from
+     * BEFORE the change, and for a floor placement, all 7 were unwalkable, unindexed terrain prior
+     * to it (the floor block itself, and the newly-walkable cell {@code above()} lands on, which
+     * only just became walkable because of this same change) - so a production-faithful report of
+     * a floor block's own position never resolves to any dirty region for a floor-support change in
+     * the first place - {@code recomputeDirtyRegions} is never reached for that case, and neither
+     * is this bug. For a same-level WALL-break-type merge, nothing about that gap applies (the
+     * same-Y flanking cells on either side of the wall were ALREADY indexed region members before
+     * the break, so production's real neighbor check succeeds immediately, same as this test's own
      * workaround), so the mechanism traced above is confirmed-plausible reachable there via
      * production's real event path - but this has not been separately tested. In short: confirmed
      * reproducible in GameTest for a floor-support merge (via a non-production reporting
