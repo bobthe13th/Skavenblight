@@ -29,6 +29,7 @@ import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.magic.ModMagic;
 import org.ratden.skavenblight.magic.wind.WindGridManager;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.screen.ModMenus;
@@ -105,6 +106,8 @@ public class Skavenblight {
         // Add this line right below your other addListener calls in the constructor!
         modEventBus.addListener(this::registerCapabilities);
         ModMenus.register(modEventBus);
+
+        ModMagic.register(modEventBus);
 
     }
 
