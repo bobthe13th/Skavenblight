@@ -70,10 +70,10 @@ public class SiegeLineTracer {
     }
 
     /**
-     * Same as the 8-arg overload, but with the line's own length bound overridable instead of
+     * Same as the 9-arg overload, but with the line's own length bound overridable instead of
      * always using {@code MAX_PROJECT_LENGTH} - see SiegeProjectManager.setMaxCandidateProjectLength
      * for why a region-scoped caller wants a shorter bound than RegionGraph's own territory-wide
-     * connector discovery (which always calls the 8-arg overload above, keeping its full 32-block
+     * connector discovery (which always calls the 9-arg overload above, keeping its full 32-block
      * reach regardless of this parameter).
      */
     public TraceResult trace(TerrainAccess terrain, BlockPos anchorPos, int dx, int dy, int dz,
