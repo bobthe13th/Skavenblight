@@ -5,7 +5,7 @@
   "icon": "minecraft:blaze_powder",
   "x": 1,
   "y": 0,
-  "parent": "skavenblight:overview",
+  "parents": [ { "entry": "winds_of_magic_aqshy/overview" } ],
   "pages": [
     {
       "type": "modonomicon:text",

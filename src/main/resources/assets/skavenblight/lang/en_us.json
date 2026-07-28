@@ -55,6 +55,15 @@
   "page.skavenblight.nexus_research.wip.title": "Work in Progress",
   "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!",
 
+  "wind.skavenblight.hysh": "Light",
+  "wind.skavenblight.azyr": "Heavens",
+  "wind.skavenblight.chamon": "Metal",
+  "wind.skavenblight.ghyran": "Life",
+  "wind.skavenblight.aqshy": "Fire",
+  "wind.skavenblight.ghur": "Beasts",
+  "wind.skavenblight.ulgu": "Shadow",
+  "wind.skavenblight.shyish": "Death",
+
   "category.skavenblight.nexus_research.winds_of_magic_hysh.name": "Hysh — The Light",
   "category.skavenblight.nexus_research.winds_of_magic_azyr.name": "Azyr — The Heavens",
   "category.skavenblight.nexus_research.winds_of_magic_chamon.name": "Chamon — Metal",

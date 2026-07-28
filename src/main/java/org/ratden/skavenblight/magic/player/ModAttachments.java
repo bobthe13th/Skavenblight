@@ -17,6 +17,7 @@ public class ModAttachments {
                     "player_magic",
                     () -> AttachmentType.builder(() -> PlayerMagicData.EMPTY)
                             .serialize(PlayerMagicData.CODEC)
+                            .copyOnDeath()
                             .build()
             );
 

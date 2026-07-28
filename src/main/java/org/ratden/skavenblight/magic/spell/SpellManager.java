@@ -26,9 +26,15 @@ public class SpellManager extends SimpleJsonResourceReloadListener {
     @Override
     protected void apply(Map<ResourceLocation, JsonElement> resourceList, ResourceManager resourceManager, ProfilerFiller profiler) {
         Map<ResourceLocation, Spell> result = new HashMap<>();
-        resourceList.forEach((id, json) -> Spell.CODEC.parse(JsonOps.INSTANCE, json)
-                .resultOrPartial(error -> LOGGER.error("Failed to parse spell {}: {}", id, error))
-                .ifPresent(spell -> result.put(id, spell)));
+        resourceList.forEach((id, json) -> {
+            try {
+                Spell.CODEC.parse(JsonOps.INSTANCE, json)
+                        .resultOrPartial(error -> LOGGER.error("Failed to parse spell {}: {}", id, error))
+                        .ifPresent(spell -> result.put(id, spell));
+            } catch (RuntimeException e) {
+                LOGGER.error("Failed to parse spell {}", id, e);
+            }
+        });
         spells = Map.copyOf(result);
         LOGGER.info("Loaded {} spells", spells.size());
     }

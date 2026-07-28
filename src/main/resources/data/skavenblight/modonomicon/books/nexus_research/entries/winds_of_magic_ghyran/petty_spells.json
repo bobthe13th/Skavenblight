@@ -5,7 +5,7 @@
   "icon": "minecraft:oak_sapling",
   "x": 1,
   "y": 0,
-  "parent": "skavenblight:overview",
+  "parents": [ { "entry": "winds_of_magic_ghyran/overview" } ],
   "pages": [
     {
       "type": "modonomicon:text",

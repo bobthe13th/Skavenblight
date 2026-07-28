@@ -34,6 +34,8 @@ public class WindGridManager extends SavedData {
     /** Fraction of the current-to-baseline gap closed per tick. */
     private static final float DRIFT_RATE = 0.02f;
 
+    private static final Wind[] VALUES = Wind.values();
+
     private final Map<ChunkPos, ChunkWindState> chunkStates = new HashMap<>();
     private final Set<ChunkPos> loadedChunks = new HashSet<>();
 
@@ -57,15 +59,15 @@ public class WindGridManager extends SavedData {
     }
 
     public void tick(ServerLevel level) {
-        float[] baselineDelta = new float[Wind.values().length];
+        float[] baselineTotal = new float[VALUES.length];
         for (ChunkPos pos : loadedChunks) {
             ChunkWindState state = getOrCreate(pos);
-            Arrays.fill(baselineDelta, 0f);
+            Arrays.fill(baselineTotal, 0f);
             for (WindBaselineInfluence influence : INFLUENCES) {
-                influence.apply(level, pos, baselineDelta);
+                influence.apply(level, pos, baselineTotal);
             }
-            for (Wind wind : Wind.values()) {
-                float newBaseline = Math.max(0f, baselineDelta[wind.ordinal()]);
+            for (Wind wind : VALUES) {
+                float newBaseline = Math.max(0f, baselineTotal[wind.ordinal()]);
                 state.setBaseline(wind, newBaseline);
                 float currentValue = state.getCurrent(wind);
                 state.setCurrent(wind, currentValue + (newBaseline - currentValue) * DRIFT_RATE);

@@ -12,6 +12,7 @@ public record Spell(
         int tier,
         int castingNumber,
         CastingTime castingTime,
+        // Parsed but not yet consumed by casting logic — component-item cost is a Phase 2 concern.
         Optional<Ingredient> componentItem,
         SpellEffect effect,
         String descriptionKey

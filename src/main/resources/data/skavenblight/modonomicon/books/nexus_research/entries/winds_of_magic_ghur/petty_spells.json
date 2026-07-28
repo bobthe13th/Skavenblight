@@ -5,7 +5,7 @@
   "icon": "minecraft:bone",
   "x": 1,
   "y": 0,
-  "parent": "skavenblight:overview",
+  "parents": [ { "entry": "winds_of_magic_ghur/overview" } ],
   "pages": [
     {
       "type": "modonomicon:text",

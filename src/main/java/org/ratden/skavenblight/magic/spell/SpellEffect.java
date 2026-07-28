@@ -29,7 +29,7 @@ public sealed interface SpellEffect permits SpellEffect.DamageEffect, SpellEffec
 
     record DamageEffect(float amount) implements SpellEffect {
         public static final MapCodec<DamageEffect> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
-                com.mojang.serialization.Codec.FLOAT.fieldOf("amount").forGetter(DamageEffect::amount)
+                Codec.FLOAT.fieldOf("amount").forGetter(DamageEffect::amount)
         ).apply(instance, DamageEffect::new));
 
         @Override
@@ -46,8 +46,8 @@ public sealed interface SpellEffect permits SpellEffect.DamageEffect, SpellEffec
     record MobEffectApply(Holder<MobEffect> effect, int durationTicks, int amplifier) implements SpellEffect {
         public static final MapCodec<MobEffectApply> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
                 BuiltInRegistries.MOB_EFFECT.holderByNameCodec().fieldOf("effect").forGetter(MobEffectApply::effect),
-                com.mojang.serialization.Codec.INT.fieldOf("duration_ticks").forGetter(MobEffectApply::durationTicks),
-                com.mojang.serialization.Codec.INT.optionalFieldOf("amplifier", 0).forGetter(MobEffectApply::amplifier)
+                Codec.INT.fieldOf("duration_ticks").forGetter(MobEffectApply::durationTicks),
+                Codec.INT.optionalFieldOf("amplifier", 0).forGetter(MobEffectApply::amplifier)
         ).apply(instance, MobEffectApply::new));
 
         @Override

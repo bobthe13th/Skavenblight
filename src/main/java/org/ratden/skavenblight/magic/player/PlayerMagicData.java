@@ -16,6 +16,12 @@ public record PlayerMagicData(
         Map<Wind, Integer> aptitude,
         Set<ResourceLocation> knownSpells
 ) {
+    public PlayerMagicData {
+        tier = Map.copyOf(tier);
+        aptitude = Map.copyOf(aptitude);
+        knownSpells = Set.copyOf(knownSpells);
+    }
+
     public static final Codec<PlayerMagicData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.unboundedMap(Wind.CODEC, Codec.INT).fieldOf("tier").forGetter(PlayerMagicData::tier),
             Codec.unboundedMap(Wind.CODEC, Codec.INT).fieldOf("aptitude").forGetter(PlayerMagicData::aptitude),

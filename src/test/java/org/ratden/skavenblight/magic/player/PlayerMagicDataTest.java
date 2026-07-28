@@ -5,12 +5,40 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import org.ratden.skavenblight.magic.Wind;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlayerMagicDataTest {
+
+    @Test
+    void constructorDefensivelyCopiesMutableCollections() {
+        Map<Wind, Integer> tier = new HashMap<>();
+        tier.put(Wind.HYSH, 1);
+        Map<Wind, Integer> aptitude = new HashMap<>();
+        aptitude.put(Wind.HYSH, 10);
+        Set<ResourceLocation> knownSpells = new HashSet<>();
+        ResourceLocation boon = ResourceLocation.fromNamespaceAndPath("skavenblight", "boon_of_hysh");
+        knownSpells.add(boon);
+
+        PlayerMagicData data = new PlayerMagicData(tier, aptitude, knownSpells);
+
+        // Mutating the caller's original collections must not affect the record.
+        tier.put(Wind.AZYR, 5);
+        aptitude.put(Wind.AZYR, 50);
+        knownSpells.clear();
+
+        assertEquals(0, data.getTier(Wind.AZYR));
+        assertEquals(0, data.getAptitude(Wind.AZYR));
+        assertEquals(Set.of(boon), data.knownSpells());
+
+        assertThrows(UnsupportedOperationException.class, () -> data.tier().put(Wind.GHUR, 9));
+        assertThrows(UnsupportedOperationException.class, () -> data.aptitude().put(Wind.GHUR, 9));
+        assertThrows(UnsupportedOperationException.class, () -> data.knownSpells().add(boon));
+    }
 
     @Test
     void emptyHasZeroForEverything() {

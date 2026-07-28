@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -25,6 +26,8 @@ public class DebugMagicCommands {
         return Commands.literal("magic")
                 .then(Commands.literal("cast")
                         .then(Commands.argument("spell", ResourceLocationArgument.id())
+                                .suggests((context, builder) -> SharedSuggestionProvider.suggestResource(
+                                        SpellManager.getAll().keySet(), builder))
                                 .executes(context -> cast(context.getSource(),
                                         ResourceLocationArgument.getId(context, "spell")))))
                 .then(Commands.literal("set_aptitude")
