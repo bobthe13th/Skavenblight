@@ -487,4 +487,101 @@ public class PathingRegionGameTests {
             check(index.regionIdAt(aboveCeiling) == null, "a position far above the structure shouldn't resolve to any region");
         });
     }
+
+    /**
+     * Task-8: a region's cell {@code BitSet} otherwise only grows via a full rebuild or a
+     * dirty-region rescan of that region's OWN prior bounding box, so a long chained connector's
+     * midpoint can sit outside BOTH endpoint regions' natural flood-fill bounds indefinitely -
+     * {@link TerritoryRegionMap#getRegionFlowFieldFor} resolves a region FIRST, so a mob standing
+     * on such a cell mid-crossing fails that lookup even though the connector's own instructions
+     * would otherwise be available.
+     *
+     * <p>Geometry: a lone elevated platform 40 blocks straight up from the main floor, built
+     * directly above one of the main floor's own boundary cells (deliberately placed at the
+     * anchored chunk's own edge, per {@link #anchorChunkFor}, so it qualifies as a boundary cell
+     * under the class javadoc's "territory wider than one chunk" constraints without needing any
+     * carve at all). {@code SiegeLineTracer}'s own per-trace cap is 32 blocks
+     * ({@code MAX_PROJECT_LENGTH}), so a single vertical trace from the main floor can't reach the
+     * platform directly: it ends in a synthetic, unsupported {@code BUILD_LANDING} mid-shaft (at
+     * +32), and {@code RegionGraph.tryTrace} has to chain a SECOND hop from there to actually reach
+     * the platform - exactly the multi-hop-chained-connector scenario this task targets, and it
+     * fits entirely inside one anchored chunk (no horizontal room needed at all, so none of the
+     * class javadoc's carve-related gotchas apply here).
+     *
+     * <p>Every cell either orientation of the resulting connector's {@code SiegeProject} touches is
+     * a position a mob could be standing on mid-crossing (see {@code RegionGraph.outboundInstructions}/
+     * {@code inboundInstructions}'s docs for why each hop is paired with its own action rather than
+     * reusing the tracer's raw, one-off instruction map) - none of them should fail a region lookup.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 800, skyAccess = true)
+    public static void testLongConnectorCellsAreNeverOrphanedFromLookup(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        // Launch column at the chunk's own edge (local x = 0) - guaranteed a Region-A boundary
+        // cell (fewer than BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD walkable neighbors, since stepping
+        // further in -x leaves the single-chunk territory bounds) regardless of this run's actual
+        // world-alignment offset.
+        int shaftLocalX = 0;
+        int shaftLocalZ = 8;
+
+        // Elevated platform: a single solid block at helper-y=41 (40 blocks above the main floor's
+        // own walkable layer, helper-y=1), with open air both above (head clearance) and all the
+        // way down the shaft to the main floor - isolated enough (no solid neighbor at its own
+        // layer) that RegionScanner floods it as its own single-cell Region.
+        helper.setBlock(new BlockPos(baseX + shaftLocalX, 41, baseZ + shaftLocalZ), Blocks.STONE.defaultBlockState());
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 4, 1, baseZ + 4);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] loggedDump = {false};
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(regions.size() == 2,
+                    "expected exactly 2 regions (main floor + elevated platform), found " + regions.size());
+
+            check(regionMap.getRegionGraph().getAllConnectors().size() == 1,
+                    "expected exactly 1 chained connector between the main floor and the elevated platform, found "
+                            + regionMap.getRegionGraph().getAllConnectors().size());
+
+            RegionConnector connector = regionMap.getRegionGraph().getAllConnectors().get(0);
+
+            boolean logThisPass = !loggedDump[0];
+            if (logThisPass) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount());
+                }
+                LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={} entryInA={} entryInB={}",
+                        connector.regionA(), connector.regionB(), connector.cost(),
+                        connector.entryInA().toShortString(), connector.entryInB().toShortString());
+            }
+
+            // Every position either orientation's instruction map touches is a cell a mob can be
+            // standing on mid-crossing - none of them should fail a region lookup, regardless of
+            // which endpoint region ends up resolving it (see task-8-report.md's tie-break note).
+            for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
+                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                check(resolvedRegion != null,
+                        "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
+                if (logThisPass) {
+                    LOGGER.info("[Skavenblight][test] connector cell {} -> region {}", step.toShortString(), resolvedRegion);
+                }
+            }
+            for (BlockPos step : connector.projectTowardB().getInstructions().keySet()) {
+                check(regionMap.getRegionIndex().regionIdAt(step) != null,
+                        "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
+            }
+            loggedDump[0] = true;
+        });
+    }
 }

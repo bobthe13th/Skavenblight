@@ -123,6 +123,27 @@ public class RegionGraph {
 
         SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), endPos, cost);
         SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), boundaryCell, cost);
+
+        // Claim every cell this connector actually traced into BOTH endpoint regions' own
+        // membership, right here at graph-build time - not just at the two regions' boundary
+        // cells. A region's BitSet otherwise only grows via a full rebuild or a dirty-region
+        // rescan of that region's OWN prior bounding box (see RegionScanner.floodFill), and a
+        // long chained connector's midpoint (a mid-air BUILD_LANDING several hops out) can sit
+        // outside BOTH endpoints' natural flood-fill bounds indefinitely - getRegionFlowFieldFor
+        // resolves a region FIRST, so a mob standing on such a cell mid-crossing would otherwise
+        // fail that lookup and fall back to wilderness/StrandedGoal even though the connector's
+        // own instructions are sitting right there. Both regions claiming the SAME physical cells
+        // is intentional and harmless: either region answering "yes, I contain this cell" is
+        // exactly what makes the lookup succeed, and this only runs once per discovered
+        // connector, not per Dijkstra step, so it isn't a hot-path cost. Simplest correct
+        // implementation - just call the existing addCell and accept the cells becoming
+        // permanent region members even if a later, cheaper connector for the same region pair
+        // supersedes this one in bestPerPair; only a full rebuild would ever re-partition them.
+        for (SiegeNode step : orderedSteps) {
+            fromRegion.addCell(step.pos());
+            toRegion.addCell(step.pos());
+        }
+
         RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), boundaryCell, endPos, cost, towardA, towardB);
         bestPerPair.put(pairKey, connector);
         hopsPerPair.put(pairKey, hops);

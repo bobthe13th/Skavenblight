@@ -34,6 +34,17 @@ public class Region {
         this.height = height;
     }
 
+    /**
+     * Two callers, deliberately: {@code RegionScanner.floodFill} (the initial partition scan) and
+     * {@code RegionGraph.registerConnector} (task-8), which claims a discovered connector's full
+     * traced footprint into BOTH of its endpoint regions so a mob mid-crossing can never resolve
+     * to no region at all. The latter is the only place membership grows AFTER a region's initial
+     * scan without a full rebuild or a dirty-region rescan replacing the Region object outright -
+     * safe here because {@code RegionGraph.build} (and every {@code addCell} call it makes) runs
+     * to completion before any region's {@code FlowFieldState} is constructed (see
+     * TerritoryRegionMap.rebuildRegionsAndGraph), so no calculation pass ever sees a partially-grown
+     * BitSet.
+     */
     public void addCell(BlockPos pos) {
         ChunkPos chunk = new ChunkPos(pos);
         BitSet bits = chunkCells.computeIfAbsent(chunk, c -> new BitSet(16 * 16 * height));

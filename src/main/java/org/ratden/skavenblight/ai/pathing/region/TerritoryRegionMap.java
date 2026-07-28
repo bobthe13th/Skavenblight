@@ -159,8 +159,26 @@ public class TerritoryRegionMap {
         TerrainSnapshot snapshot = this.terrainSnapshot;
         List<Region> regions = regionScanner.scan(snapshot, territoryChunks, nexusPos,
                 snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
+        // Built from the flood-fill-only membership, and passed to RegionGraph.build for ITS OWN
+        // internal use (tryTrace's "did this trace land inside a different region" check) - that
+        // detection must see only genuine flood-fill membership, not connector claims a trace in
+        // progress might itself be adding, or a trace could spuriously terminate early against
+        // its own not-yet-finished chain.
+        RegionIndex preGraphIndex = new RegionIndex(regions);
+        RegionGraph newGraph = RegionGraph.build(snapshot, preGraphIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
+
+        // RegionGraph.build's registerConnector (see task-8) calls Region.addCell on both of a
+        // connector's endpoint regions for every cell it traced, mutating the SAME Region objects
+        // this method's own `regions` list holds. RegionIndex takes no live view of a Region's
+        // BitSet, though - its constructor copies each region's currently-set bits into its own
+        // flat per-chunk int[] arrays once, at construction time - so preGraphIndex above, built
+        // BEFORE those addCell calls happened, is now stale for exactly the connector cells this
+        // task exists to stop orphaning. Rebuild once more from the same (mutated-in-place)
+        // `regions` list now that every connector has been registered, and use THIS index for
+        // rootRegion resolution and everything published below - getRegionFlowFieldFor and every
+        // other real caller of getRegionIndex() only ever sees this field, never RegionGraph's own
+        // (unused-elsewhere) copy, so this is the one index that actually needs to be current.
         RegionIndex newIndex = new RegionIndex(regions);
-        RegionGraph newGraph = RegionGraph.build(snapshot, newIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
 
         // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS in
         // ModBlocks - plain full-collision blocks, no shape override), so RegionScanner never
