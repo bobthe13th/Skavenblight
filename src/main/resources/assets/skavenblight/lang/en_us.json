@@ -110,6 +110,18 @@
   "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
   "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools.",
 
+  "entry.skavenblight.nexus_research.warpstone_mutation.name": "Warpstone Exposure",
+  "page.skavenblight.nexus_research.warpstone_exposure.title": "The Glow of Dhar",
+  "page.skavenblight.nexus_research.warpstone_exposure.text": "Prolonged contact with raw Warpstone or consumption of Rat Juice triggers a build-up of Warpstone Exposure inside players and mobs. As this exposure increases, it warps the spirit and body in chaotic ways, leading to unpredictable mutations.",
+  "page.skavenblight.nexus_research.warpstone_mutations.title": "Chaotic Mutations",
+  "page.skavenblight.nexus_research.warpstone_mutations.text": "Mutations manifest at higher exposure thresholds. Minor mutations might alter speed or grant night vision, while severe corruption permanently shifts attributes (e.g., maximum health or scale) or triggers horrific transformations (such as wild Wolves warping into Rat Wolves!).",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_lab.title": "The Golden Lab",
+  "page.skavenblight.nexus_research.alchemy_lab.text": "Transmutation of matter is the pride of Chamon. By researching higher tiers of Chamon, you can construct alchemical laboratories of Poor, Good, or Best quality. Superior laboratory quality significantly reduces potion volatility and increases the chance of brewing success.",
+  "page.skavenblight.nexus_research.brewing_process.title": "Brewing & Volatility",
+  "page.skavenblight.nexus_research.brewing_process.text": "Brewing requires recipe sheets and biome-specific ingredients. Every attempt tests the brewer's skill: high success generates extra potions (up to Xd10/2), while failure can cause catastrophic failures, triggering toxic gas leaks or explosive warp-lightning discharges!",
+
   "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name": "Petty Spells",
   "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name": "Petty Spells",
   "entry.skavenblight.nexus_research.winds_of_magic_chamon_petty_spells.name": "Petty Spells",
