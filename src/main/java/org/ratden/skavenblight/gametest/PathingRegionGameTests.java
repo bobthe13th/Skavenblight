@@ -852,10 +852,16 @@ public class PathingRegionGameTests {
      * connector's {@code addCell}-claimed cells (they aren't flood-fill-reachable from the
      * region's interior - that's the whole reason task-8 needed {@code addCell} in the first
      * place). The fix (see {@code reclaimConnectorCells}) re-adds them right after the rescan.
-     * That fast path is NOT exercised by any GameTest in this class, and - per the report's
-     * corrected finding - is not reachable by ANY connector-bearing region in ANY territory shape,
-     * GameTest or production; the fix is verified by code inspection only. THIS test verifies
-     * something adjacent but distinct, discovered while writing it.
+     * That fast path is NOT exercised by any GameTest in this class - this test's own geometry
+     * (a single unrelated block change, never closing any connector's gap) cannot reach it, for
+     * the general reason traced below; the fix is verified by code inspection only for THIS
+     * geometry. **Narrowed per a later finding (Task 9 Steps 1-5 - see task-9-report.md's
+     * fix-round and {@code reclaimConnectorCells}'s own updated javadoc): the fast path IS
+     * reachable, and reaches a real, distinct, unfixed bug (duplicate overlapping Region objects,
+     * a stale connector graph, one region silently orphaned) at the exact moment a connector's
+     * gap fully closes, if that closing dirty batch contains both endpoint region ids - which
+     * {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount} exercises and confirms.**
+     * THIS test verifies something adjacent but distinct, discovered while writing it.
      *
      * <p><b>This geometry cannot reach the fast path at all - it always full-rebuilds instead,
      * exactly like {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}. The cause is NOT
@@ -874,12 +880,18 @@ public class PathingRegionGameTests {
      * and {@code RegionScanner.scan} always sweeps that hull's FULL height, any dirty rescan of
      * either endpoint region therefore always rediscovers the other endpoint's landing cell as a
      * separate component ({@code rescanned.size() &gt;= 2}) - the TOPOLOGY-CHANGED branch, not the
-     * fast path. This applies symmetrically to the OTHER endpoint too (the first traced step is
-     * "the first position past the anchor," pulling that region's own bbox back toward THIS
-     * region's boundary cell). The {@code getGeneration()} assertion below pins this specific run's
-     * outcome down as an executable fact. See the report for why this means the fast path is
-     * effectively unreachable for any region with an active connector at all, not a GameTest-only
-     * limitation, and what that implies for characterizing rebuild frequency.</b>
+     * fast path - FOR AS LONG AS THE GAP REMAINS GENUINELY OPEN, which is always true for this
+     * test's own one-off unrelated-block-change geometry. This applies symmetrically to the OTHER
+     * endpoint too (the first traced step is "the first position past the anchor," pulling that
+     * region's own bbox back toward THIS region's boundary cell). The {@code getGeneration()}
+     * assertion below pins this specific run's outcome down as an executable fact. **Narrowed per
+     * a later finding (Task 9 Steps 1-5): the fast path is NOT unreachable in general - once a
+     * connector's gap fully closes (not exercised by this test's own geometry), the completing
+     * dirty rescan finds exactly 1 piece and takes the fast path instead, which - when the closing
+     * batch contains both endpoint ids, as {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount}
+     * confirms it deterministically does for that test's geometry - exposes a real, distinct,
+     * unfixed bug. See task-9-report.md's Steps 1-5 fix-round and {@code reclaimConnectorCells}'s
+     * own updated javadoc for the full trace and evidence.</b>
      *
      * <p>What this test DOES prove, which is still new/genuine coverage: extends
      * {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s exact geometry (unmodified -
@@ -1199,6 +1211,49 @@ public class PathingRegionGameTests {
             check(!regionMap.isCalculating(), "region map still calculating");
             LOGGER.info("[Skavenblight][test] final counts after {} column placements: topologyRebuildCount={} blockChangeRebuildCount={}",
                     FILL_COLUMN_COUNT, regionMap.getTopologyRebuildCount(), regionMap.getBlockChangeRebuildCount());
+
+            // Post-review diagnostic: a review of this test's blockChangeRebuildCount=2 result
+            // (instead of the 1 the "6th placement completes the merge via the fast path" prose
+            // implied) raised a real, distinct hypothesis - see task-9-report.md's fix-round for
+            // the full write-up - that the merge-completing batch can carry BOTH the near and far
+            // region ids as dirty simultaneously (the closing placement's west neighbor resolves
+            // to the already-absorbed near id, its east neighbor to the far region's own native
+            // cell), and since the fast-path branch below only `continue`s (no early return, unlike
+            // the topology-changed branch), BOTH ids can independently take the fast path in the
+            // SAME batch once the gap is fully closed - each re-flooding the identical, now-unified
+            // chunk and getting stamped with its OWN id via `withId`, producing two Region objects
+            // in `updatedRegions` with fully overlapping cell sets. RegionIndex's last-write-wins
+            // per-cell stamping (see its constructor) would then make whichever region processed
+            // LAST the only one any position actually resolves to, silently orphaning the other
+            // (still present in getRegions(), zero resolvable cells) - while regionGraph/routeTree,
+            // untouched by the fast path, keep listing the now-physically-stale connector between
+            // them. This directly inspects the post-merge state to confirm or refute that.
+            List<Region> finalRegions = regionMap.getRegionIndex().getRegions();
+            for (Region r : finalRegions) {
+                LOGGER.info("[Skavenblight][test][diagnostic] post-merge region {} min={} max={} cells={}",
+                        r.getId(), r.getMin(), r.getMax(), r.cellCount());
+            }
+            List<RegionConnector> finalConnectors = regionMap.getRegionGraph() != null
+                    ? regionMap.getRegionGraph().getAllConnectors() : List.of();
+            LOGGER.info("[Skavenblight][test][diagnostic] post-merge connector count={}", finalConnectors.size());
+
+            // Probes the ORIGINAL near-side interior (local x=1, well inside the pre-fill near
+            // region, unrelated to any fill column) and the ORIGINAL far-side interior (local x =
+            // 6+FILL_COLUMN_COUNT+1, well inside the pre-fill far region) - two positions that
+            // were on opposite sides of the trench before any column was ever filled. Once the
+            // trench is fully closed these are physically one connected floor; if the duplicate-
+            // region hypothesis is correct, RegionIndex's tie-break resolves BOTH to whichever
+            // region's id happened to be processed last in updatedRegions, even though
+            // finalRegions.size() still reports >= 2 (the orphaned duplicate never gets removed
+            // from the list, only masked from lookups).
+            BlockPos nearProbe = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ + fillLocalZ));
+            BlockPos farProbe = helper.absolutePos(new BlockPos(baseX + 6 + FILL_COLUMN_COUNT + 1, 2, baseZ + fillLocalZ));
+            Integer nearProbeId = regionMap.getRegionIndex().regionIdAt(nearProbe);
+            Integer farProbeId = regionMap.getRegionIndex().regionIdAt(farProbe);
+            LOGGER.info("[Skavenblight][test][diagnostic] post-merge nearProbe -> region {}, farProbe -> region {}, "
+                            + "region count={}, blockChangeRebuildCount={}",
+                    nearProbeId, farProbeId, finalRegions.size(), regionMap.getBlockChangeRebuildCount());
+
             check(regionMap.getTopologyRebuildCount() <= 3,
                     "filling in one " + FILL_COLUMN_COUNT + "-block-wide connector triggered "
                             + regionMap.getTopologyRebuildCount()

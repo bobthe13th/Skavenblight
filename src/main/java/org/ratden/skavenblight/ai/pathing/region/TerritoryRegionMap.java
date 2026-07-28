@@ -535,6 +535,26 @@ public class TerritoryRegionMap {
             List<Region> rescanned = regionScanner.scan(snapshot, localBounds, oldRegion.getMin(),
                     snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
 
+            // PARKING NOTE (Task 9, not yet resolved): this check reliably flags a SPLIT
+            // (rescanned.size() > 1 - more pieces than before) but silently MISSES a completing
+            // MERGE. When a connector's gap fully closes, rescanning EITHER old endpoint region's
+            // own localBounds (already inflated by addCell to cover the other endpoint's chunk -
+            // see reclaimConnectorCells's own parking note) now finds exactly 1 piece: itself,
+            // having absorbed what used to be the other region. rescanned.size() != 1 reads that
+            // as "no topology change" even though a merge - the most dramatic topology change
+            // possible - just happened. Confirmed empirically (see task-9-report.md's Steps 1-5
+            // fix-round): when the closing dirty batch contains BOTH endpoint region ids (which it
+            // does, deterministically, for the specific geometry that test exercises), BOTH take
+            // the non-topology-changed branch below IN THE SAME BATCH, each independently
+            // re-flooding the identical now-merged cell set and getting stamped with its own,
+            // different id - producing two Region objects with fully overlapping cell sets, a
+            // regionGraph/routeTree left completely stale (never rebuilt, since neither id
+            // triggered rebuildRegionsAndGraph), and RegionIndex's last-write-wins tie-break
+            // silently orphaning one of the two duplicates with no generation bump to signal it.
+            // This is a real, distinct, UNFIXED bug (not merely the topology-changed branch firing
+            // too often, which is reclaimConnectorCells's own, separate parking note) - see that
+            // method's javadoc for the full trace and why a fix wasn't attempted opportunistically
+            // here.
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
@@ -646,24 +666,45 @@ public class TerritoryRegionMap {
      * into {@code freshRegion} - see Task 9 Step 0c's call site for why the plain rescan that
      * produced {@code freshRegion} can never include them on its own.
      *
-     * <p><b>PARKING NOTE (Task 9, not yet resolved):</b> this method's own call site (the
-     * non-topology-changed branch above) is, as far as could be determined, unreachable for ANY
-     * region with an active connector, in GameTest or production. {@code addCell}'s unconditional
-     * {@code expandBounds} means a connector's endpoint region bounding boxes always grow to
-     * include each OTHER's landing chunk (confirmed via {@code SiegeLineTracer.trace}: a completed
-     * trace's {@code orderedSteps} always ends with the landing position itself, which
-     * {@code registerConnector} then {@code addCell}s into BOTH endpoints) - and since
-     * {@code localBounds} above is the full chunk-grid rectangle from a region's min to max bounds,
-     * a dirty rescan of either endpoint always re-sweeps the other's chunk too, always rediscovering
-     * it as a separate component ({@code rescanned.size() &gt;= 2}), always taking the
-     * topology-changed branch instead of reaching this method. Unlocking a test (or confirming a
-     * production fix is needed) requires either: (a) a code fix that stops connector-claimed cells
-     * from inflating the bbox {@code localBounds} is derived from (e.g. tracking a region's
-     * "natural" flood-fill bounds separately from its full addCell-inclusive bounds), or (b) proof
-     * that some other, as-yet-unidentified geometry avoids this. See task-9-report.md's Step 0c
-     * section for the full trace. Until one of those exists, this method is exercised only by full
-     * rebuilds (where it is never called) and is effectively dead code on the fast path it was
-     * written for.
+     * <p><b>PARKING NOTE (Task 9, corrected - NOT simply "unreachable"):</b> this method's own
+     * call site (the non-topology-changed branch above) is unreachable for a region with an
+     * active connector for as long as the connector's gap remains genuinely open - {@code
+     * addCell}'s unconditional {@code expandBounds} means a connector's endpoint region bounding
+     * boxes always grow to include each OTHER's landing chunk (confirmed via {@code
+     * SiegeLineTracer.trace}: a completed trace's {@code orderedSteps} always ends with the
+     * landing position itself, which {@code registerConnector} then {@code addCell}s into BOTH
+     * endpoints), so a dirty rescan of either endpoint re-sweeps the other's chunk too and
+     * (while the gap is open) always rediscovers it as a separate component ({@code
+     * rescanned.size() &gt;= 2}), taking the topology-changed branch instead.
+     *
+     * <p><b>It IS reachable, and confirmed empirically reached, at the exact moment the gap fully
+     * closes</b> - see {@code recomputeDirtyRegions}'s {@code rescanned.size() != 1} check (its
+     * own parking note documents why a completing merge satisfies "found exactly 1 piece" and
+     * reads as no-change) - and this exposes a real, DISTINCT, more serious bug than merely
+     * reaching previously-dead code: when the closing dirty batch contains BOTH endpoint region
+     * ids (confirmed to happen - the closing placement's near-side neighbor resolves to the
+     * already-absorbed near region, its far-side neighbor to the far region's own native cell),
+     * BOTH ids independently take this fast path in the SAME batch (nothing here mirrors the
+     * topology-changed branch's early {@code return} after the first hit), each re-flooding the
+     * now-IDENTICAL fully-merged cell set and calling {@code reclaimConnectorCells} against the
+     * STALE {@code regionGraph} (never rebuilt, since neither id triggered a full rebuild) -
+     * producing two {@code Region} objects in {@code updatedRegions} with fully overlapping cell
+     * sets, while {@code regionGraph}/{@code routeTree} keep listing the now-physically-stale
+     * connector between them. {@code RegionIndex}'s last-write-wins per-cell stamping then makes
+     * whichever region was processed last in the list the only one any position resolves to,
+     * silently orphaning the other (still present in {@code getRegionIndex().getRegions()}, zero
+     * resolvable cells) - with no {@code generation} bump to signal anything happened. Confirmed
+     * reproducibly (6/6 runs) via direct inspection in
+     * {@code PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: two
+     * regions with byte-identical {@code min}/{@code max}/{@code cellCount}, a connector still
+     * listed between them, and two probes on opposite original sides of the trench both resolving
+     * to the same winning region id. See task-9-report.md's Steps 1-5 fix-round for the full
+     * empirical evidence and trace. THIS IS AN UNFIXED, DISTINCT BUG, not merely a documentation
+     * correction - it was not fixed in this pass because a correct fix likely requires either
+     * mirroring the topology-changed branch's early-return/single-winner semantics onto the fast
+     * path, or detecting "multiple ids in one batch resolved to the identical merged content" and
+     * collapsing them into one before publishing {@code updatedRegions} - both real design
+     * decisions needing their own scoped follow-up, not a fix attempted opportunistically here.
      */
     private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
         if (graph == null) return;
