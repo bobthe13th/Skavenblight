@@ -3,6 +3,7 @@ package org.ratden.skavenblight.ai.pathing.region;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
+import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.ai.pathing.FlowFieldState;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
@@ -26,11 +27,6 @@ import java.util.Set;
 public final class RegionScanner {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-
-    // Overall cell budget for one scan pass, mirroring Config.maxFlowFieldNodes' role for the
-    // ordinary Dijkstra pass - without a cap, a very tall/wide territory's full build-height
-    // scan has no upper bound on how long one pass can run.
-    private static final int MAX_SCANNED_CELLS = 200_000;
 
     // Same cap, and for the same reason, as FlowFieldCalculator's private
     // MAX_CONSECUTIVE_MINE_DEPTH (kept as a local constant rather than exposing that one):
@@ -84,7 +80,7 @@ public final class RegionScanner {
 
                         if (settled.contains(seed) || !terrainEvaluator.isWalkableTerrain(snapshot, seed)) continue;
 
-                        if (scannedCells[0] >= MAX_SCANNED_CELLS) {
+                        if (scannedCells[0] >= Config.regionScanMaxCells) {
                             budgetExhausted[0] = true;
                             break outer;
                         }
@@ -105,7 +101,7 @@ public final class RegionScanner {
         }
 
         if (budgetExhausted[0]) {
-            LOGGER.warn("[Skavenblight] RegionScanner hit MAX_SCANNED_CELLS ({}) - territory may be under-scanned this pass", MAX_SCANNED_CELLS);
+            LOGGER.warn("[Skavenblight] RegionScanner hit regionScanMaxCells ({}) - territory may be under-scanned this pass", Config.regionScanMaxCells);
         }
 
         LOGGER.info("[Skavenblight] RegionScanner found {} regions ({} cells scanned)", regions.size(), scannedCells[0]);
@@ -165,7 +161,7 @@ public final class RegionScanner {
             // connected region - the common case, e.g. "a single unbroken room" - can't flood
             // through an entire territory's full-build-height column in one uninterrupted pass
             // before the cap is ever consulted again.
-            if (scannedCells[0] >= MAX_SCANNED_CELLS) {
+            if (scannedCells[0] >= Config.regionScanMaxCells) {
                 budgetExhausted[0] = true;
                 return;
             }

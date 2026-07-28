@@ -49,6 +49,8 @@ public class Config {
             .defineInRange("buildingBasePenalty", 150, 1, 1000);
     private static final ModConfigSpec.IntValue MAX_FLOW_FIELD_NODES = BUILDER.comment("Maximum total nodes a Flow Field is allowed to map, acting as a hard limit on pathfinding range.")
             .defineInRange("maxFlowFieldNodes", 25000, 1000, 1000000);
+    private static final ModConfigSpec.IntValue REGION_SCAN_MAX_CELLS = BUILDER.comment("Maximum walkable cells RegionScanner will flood-fill in a single territory scan pass.")
+            .defineInRange("regionScanMaxCells", 200_000, 10_000, 2_000_000);
 
     // The settle delay config
     private static final ModConfigSpec.IntValue MINIMUM_SETTLE_DELAY_MS = BUILDER.comment("The minimum time in milliseconds the flow field pathfinder will wait after a block change before recalculating.")
@@ -100,6 +102,7 @@ public class Config {
     public static int miningBasePenalty;
     public static int buildingBasePenalty;
     public static int maxFlowFieldNodes;
+    public static int regionScanMaxCells;
     public static int minimumSettleDelayMs;
 
     // --- Warp Lightning Coil Public Variables ---
@@ -138,6 +141,7 @@ public class Config {
         miningBasePenalty = MINING_BASE_PENALTY.get();
         buildingBasePenalty = BUILDING_BASE_PENALTY.get();
         maxFlowFieldNodes = MAX_FLOW_FIELD_NODES.get();
+        regionScanMaxCells = REGION_SCAN_MAX_CELLS.get();
         minimumSettleDelayMs = MINIMUM_SETTLE_DELAY_MS.get();
 
         // Load Warp Lightning Coil Configs
