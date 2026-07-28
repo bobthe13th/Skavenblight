@@ -1,0 +1,13 @@
+{
+  "wind": "ghyran",
+  "tier": 0,
+  "casting_number": 20,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:regeneration",
+    "duration_ticks": 300,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.earthblood.description"
+}

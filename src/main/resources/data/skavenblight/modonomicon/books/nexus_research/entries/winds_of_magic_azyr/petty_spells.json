@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:winds_of_magic_azyr",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name",
+  "icon": "minecraft:lapis_lazuli",
+  "x": 1,
+  "y": 0,
+  "parent": "skavenblight:overview",
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.lightning_bolt.name",
+      "text": "spell.skavenblight.lightning_bolt.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.starshine.name",
+      "text": "spell.skavenblight.starshine.description"
+    }
+  ]
+}

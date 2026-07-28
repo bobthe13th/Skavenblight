@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:winds_of_magic_ulgu",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_ulgu_petty_spells.name",
+  "icon": "minecraft:ink_sac",
+  "x": 1,
+  "y": 0,
+  "parent": "skavenblight:overview",
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.bewilder.name",
+      "text": "spell.skavenblight.bewilder.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.shroud_of_invisibility.name",
+      "text": "spell.skavenblight.shroud_of_invisibility.description"
+    }
+  ]
+}

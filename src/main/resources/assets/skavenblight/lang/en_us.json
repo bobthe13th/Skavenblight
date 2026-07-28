@@ -99,6 +99,55 @@
 
   "entry.skavenblight.nexus_research.dark_magic_overview.name": "Dark Magic (Dhar)",
   "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
-  "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools."
+  "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_chamon_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ghyran_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_aqshy_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ghur_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ulgu_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_shyish_petty_spells.name": "Petty Spells",
+
+  "spell.skavenblight.boon_of_hysh.name": "Boon of Hysh",
+  "spell.skavenblight.boon_of_hysh.description": "A soft white light bathes the caster, knitting flesh and easing pain.",
+  "spell.skavenblight.blinding_light.name": "Blinding Light",
+  "spell.skavenblight.blinding_light.description": "A flare of pure white light sears the eyes of all who look upon it.",
+
+  "spell.skavenblight.lightning_bolt.name": "Lightning Bolt",
+  "spell.skavenblight.lightning_bolt.description": "A crackling blue bolt leaps from the caster's hand, born of the storm-wracked heavens.",
+  "spell.skavenblight.starshine.name": "Starshine",
+  "spell.skavenblight.starshine.description": "The caster's fall slows as if drifting gently down from the night sky.",
+
+  "spell.skavenblight.curse_of_rust.name": "Curse of Rust",
+  "spell.skavenblight.curse_of_rust.description": "Metal pits and flakes, weakening the target's grip and guard.",
+  "spell.skavenblight.armour_of_lead.name": "Armour of Lead",
+  "spell.skavenblight.armour_of_lead.description": "A dull grey sheen of transmuted metal hardens over the caster's skin.",
+
+  "spell.skavenblight.earthblood.name": "Earthblood",
+  "spell.skavenblight.earthblood.description": "The green vitality of growing things flows into the caster's veins.",
+  "spell.skavenblight.curse_of_thorns.name": "Curse of Thorns",
+  "spell.skavenblight.curse_of_thorns.description": "Thorned vines erupt and lash at the target.",
+
+  "spell.skavenblight.fireball.name": "Fireball",
+  "spell.skavenblight.fireball.description": "A roaring ball of flame bursts from the caster's outstretched hand.",
+  "spell.skavenblight.shield_of_aqshy.name": "Shield of Aqshy",
+  "spell.skavenblight.shield_of_aqshy.description": "A shimmering heat haze wreathes the caster, turning aside flame.",
+
+  "spell.skavenblight.claws_of_fury.name": "Claws of Fury",
+  "spell.skavenblight.claws_of_fury.description": "The caster's muscles surge with bestial, savage strength.",
+  "spell.skavenblight.cowering_beasts.name": "Cowering Beasts",
+  "spell.skavenblight.cowering_beasts.description": "A primal snarl of dominance saps the target's will to fight.",
+
+  "spell.skavenblight.bewilder.name": "Bewilder",
+  "spell.skavenblight.bewilder.description": "Shifting grey shadows swim before the target's eyes, sowing confusion.",
+  "spell.skavenblight.shroud_of_invisibility.name": "Shroud of Invisibility",
+  "spell.skavenblight.shroud_of_invisibility.description": "Ulgu's grey mist wraps the caster, bending sight away from them.",
+
+  "spell.skavenblight.steal_life.name": "Steal Life",
+  "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
+  "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
+  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl."
 
 }

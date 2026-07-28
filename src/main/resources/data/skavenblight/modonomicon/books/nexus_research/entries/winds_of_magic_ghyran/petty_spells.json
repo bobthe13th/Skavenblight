@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:winds_of_magic_ghyran",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_ghyran_petty_spells.name",
+  "icon": "minecraft:oak_sapling",
+  "x": 1,
+  "y": 0,
+  "parent": "skavenblight:overview",
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.earthblood.name",
+      "text": "spell.skavenblight.earthblood.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.curse_of_thorns.name",
+      "text": "spell.skavenblight.curse_of_thorns.description"
+    }
+  ]
+}

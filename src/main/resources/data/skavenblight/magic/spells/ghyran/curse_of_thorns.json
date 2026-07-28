@@ -1,0 +1,8 @@
+{
+  "wind": "ghyran",
+  "tier": 0,
+  "casting_number": 25,
+  "casting_time": "instant",
+  "effect": { "type": "damage", "amount": 3.0 },
+  "description_key": "spell.skavenblight.curse_of_thorns.description"
+}

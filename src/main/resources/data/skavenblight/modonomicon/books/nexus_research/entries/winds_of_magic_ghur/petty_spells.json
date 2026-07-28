@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:winds_of_magic_ghur",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_ghur_petty_spells.name",
+  "icon": "minecraft:bone",
+  "x": 1,
+  "y": 0,
+  "parent": "skavenblight:overview",
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.claws_of_fury.name",
+      "text": "spell.skavenblight.claws_of_fury.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.cowering_beasts.name",
+      "text": "spell.skavenblight.cowering_beasts.description"
+    }
+  ]
+}

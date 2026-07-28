@@ -1,0 +1,13 @@
+{
+  "wind": "chamon",
+  "tier": 0,
+  "casting_number": 25,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:weakness",
+    "duration_ticks": 200,
+    "amplifier": 1
+  },
+  "description_key": "spell.skavenblight.curse_of_rust.description"
+}
