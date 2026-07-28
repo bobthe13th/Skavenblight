@@ -544,8 +544,9 @@ public class TerritoryRegionMap {
             // as "no topology change" even though a merge - the most dramatic topology change
             // possible - just happened. Confirmed empirically (see task-9-report.md's Steps 1-5
             // fix-round): when the closing dirty batch contains BOTH endpoint region ids (which it
-            // does, deterministically, for the specific geometry that test exercises), BOTH take
-            // the non-topology-changed branch below IN THE SAME BATCH, each independently
+            // does, deterministically, for the specific FLOOR-support-type geometry that test
+            // exercises - via a deliberate, non-production onBlockChanged convention; see below),
+            // BOTH take the non-topology-changed branch below IN THE SAME BATCH, each independently
             // re-flooding the identical now-merged cell set and getting stamped with its own,
             // different id - producing two Region objects with fully overlapping cell sets, a
             // regionGraph/routeTree left completely stale (never rebuilt, since neither id
@@ -554,7 +555,16 @@ public class TerritoryRegionMap {
             // This is a real, distinct, UNFIXED bug (not merely the topology-changed branch firing
             // too often, which is reclaimConnectorCells's own, separate parking note) - see that
             // method's javadoc for the full trace and why a fix wasn't attempted opportunistically
-            // here.
+            // here. Production reachability is NOT uniform across scenarios: confirmed-plausible
+            // for a same-level WALL-break-type merge (production's real neighborsAndSelf check
+            // works normally there - nothing about the gap below applies), but NOT yet confirmed
+            // for a FLOOR-support-type merge specifically, because production's actual event path
+            // (SiegeBlockEventHandler.handleBlockChange) reports the literal changed floor-block
+            // position, not the walkable cell one Y above it that this test reports instead - and
+            // tick()'s neighborsAndSelf only checks same-Y neighbors, so a production-faithful
+            // floor-support change produces zero dirty regions and never reaches this method at
+            // all for that case. See task-9-report.md's narrowed "Is this reproducible in
+            // production, or just this test's geometry?" section for the full reconciliation.
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
@@ -705,6 +715,27 @@ public class TerritoryRegionMap {
      * path, or detecting "multiple ids in one batch resolved to the identical merged content" and
      * collapsing them into one before publishing {@code updatedRegions} - both real design
      * decisions needing their own scoped follow-up, not a fix attempted opportunistically here.
+     *
+     * <p><b>Production reachability is scenario-dependent, not uniform</b> - the GameTest above
+     * reaches this bug via a FLOOR-support-type merge (filling a trench's floor one column at a
+     * time), but only by deliberately reporting {@code onBlockChanged} against the newly-walkable
+     * cell one Y above the placed floor block, NOT the floor block's own position - a documented
+     * deviation from what production actually does (confirmed by reading {@code
+     * SiegeBlockEventHandler.handleBlockChange}: it passes the literal changed-block position
+     * straight into {@code onBlockChanged}, unmodified). {@code tick()}'s {@code neighborsAndSelf}
+     * only checks same-Y orthogonal neighbors, so a production-faithful report of a floor block's
+     * own position never resolves to any dirty region for a floor-support change in the first
+     * place - {@code recomputeDirtyRegions} is never reached for that case, and neither is this
+     * bug. For a same-level WALL-break-type merge, nothing about that floor-vs-walkable-cell gap
+     * applies (production's real neighbor check works normally, same-Y, same as this test's own
+     * workaround), so the mechanism traced above is confirmed-plausible reachable there via
+     * production's real event path - but this has not been separately tested. In short: confirmed
+     * reproducible in GameTest for a floor-support merge (via a non-production reporting
+     * convention), confirmed-plausible for a production wall-break merge, NOT yet confirmed
+     * reachable via production's actual event path for a floor-support merge specifically. See
+     * task-9-report.md's narrowed "Is this reproducible in production, or just this test's
+     * geometry?" section for the full reconciliation against the separately-documented
+     * floor-support dirty-detection gap.
      */
     private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
         if (graph == null) return;
