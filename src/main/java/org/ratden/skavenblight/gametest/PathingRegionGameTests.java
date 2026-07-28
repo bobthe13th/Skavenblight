@@ -1,5 +1,6 @@
 package org.ratden.skavenblight.gametest;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestAssertException;
@@ -10,7 +11,9 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.pathing.region.Region;
+import org.ratden.skavenblight.ai.pathing.region.RegionConnector;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
+import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Set;
@@ -84,6 +87,8 @@ import java.util.Set;
 @GameTestHolder(Skavenblight.MODID)
 @PrefixGameTestTemplate(false)
 public class PathingRegionGameTests {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     /** Throws (so {@code succeedWhen} keeps retrying) until {@code condition} holds. */
     static void check(boolean condition, String message) {
@@ -234,6 +239,125 @@ public class PathingRegionGameTests {
                     .findFirst().orElseThrow();
             check(regionMap.getRouteTree().isReachable(farRegionId),
                     "far region should be reachable via the planned connector");
+        });
+    }
+
+    /**
+     * The literal headline requirement: with three regions in a line - C, then B, then A (the
+     * nexus region) - and NO connector geometrically possible directly between C and A, the route
+     * tree must route C through B (the intermediate region) rather than treat C as unreachable or
+     * invent some other path. {@code RegionRouteTree.compute} is a plain Dijkstra over whatever
+     * connectors {@code RegionGraph.build} actually discovered (see that method's own javadoc), so
+     * the only way to make "C's parent is B" a SAFE assertion - rather than one that merely
+     * happens to hold today - is to make a direct C-A connector geometrically impossible, not just
+     * more expensive. That's what forces the routing decision structurally instead of leaving it
+     * to a cost comparison against a connector that might or might not exist (see the class
+     * javadoc bullet on {@code RegionGraph}'s per-pair dedup NOT guaranteeing a connector exists at
+     * all for a given pair).
+     *
+     * <p>Kept within a single {@link #anchorChunkFor} chunk (16x16) like
+     * {@link #testTwoDisconnectedRegionsGetOneConnector}, for the same reason - see that test's
+     * javadoc and the class javadoc's "territory wider than one chunk" bullet. All three regions
+     * plus both gaps have to fit in that one 16-wide (local x) window:
+     *
+     * <pre>
+     * local x:  0  1  2 | 3  4  5  6  7 | 8  9 10 | 11 12 | 13 14 15
+     *           `---C---'  `--gapCB(5)--'  `--B---'  `gapBA`  `---A---'
+     * </pre>
+     *
+     * <p>Region C (local x 0-2) and region A (local x 13-15, containing the nexus) are separated
+     * by the full 16-wide corridor; region B (local x 8-10) sits in the middle. The gap on B's far
+     * side from C is 5 blocks wide ("long/expensive" - more BUILD_BRIDGE steps, matching the
+     * brief's "wide/expensive-looking" framing), the gap on B's near side to A is 2 blocks wide
+     * ("short/cheap"). Both gaps are carved full-depth (down to {@link #minRelY}, not just the
+     * floor layer) per the class javadoc's underside-sliver note, exactly like the two-region
+     * test's trench.
+     *
+     * <p>A connector bridging C directly to A is expected to be geometrically unreachable, not
+     * merely more expensive than the B-adjacent route: {@code RegionGraph.tryTrace} traces a
+     * straight line (fixed direction per call - see that method's javadoc) from a boundary cell
+     * and returns as soon as it lands on ANY region's walkable ground, and since B's own floor
+     * spans the ENTIRE local-x range between the two gaps at every local z (this territory's full
+     * width), a ray cast from C toward A's side should land on B's floor first and register a C-B
+     * connector rather than reaching A in the same trace - it would need to clear OVER B's floor
+     * without ever touching it, which shouldn't be possible for a ray starting at the same
+     * coplanar floor height B itself sits at (a flat single-story platform). This is reasoning
+     * about {@code tryTrace}'s behavior, not a proven enumeration of all 14 trace directions
+     * through {@code TerrainEvaluator.determineMacroAction} - what actually confirms it is the
+     * connector list logged below: across two independent runs (different structure placement
+     * offsets each time, per {@link #anchorChunkFor}'s alignment proof), it contained only C-B and
+     * B-A connectors, never C-A - see task-5-report.md for both runs' full connector/hop-cost dumps.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
+    public static void testThreeRegionsRouteThroughCheaperIntermediateHop(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+        int minRelY = minRelY(helper);
+
+        // Gap C|B: local x 3-7 (5 wide, "long/expensive"). Gap B|A: local x 11-12 (2 wide,
+        // "short/cheap"). Both carved full-depth (see method javadoc) so no walkable sliver
+        // survives underneath either one.
+        for (int lx = 3; lx <= 7; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        for (int lx = 11; lx <= 12; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+
+        // Nexus marker inside region A (local x 13-15), helper-Y=2 (the walkable layer) - same
+        // convention as testTwoDisconnectedRegionsGetOneConnector's nexus placement.
+        BlockPos relativeNexusPos = new BlockPos(baseX + 14, 2, baseZ + 8);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        // Probes into region C (local x 0-2) and region B (local x 8-10), untouched walkable
+        // cells (helper-Y=2) well clear of either trench edge.
+        BlockPos probeC = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ + 8));
+        BlockPos probeB = helper.absolutePos(new BlockPos(baseX + 9, 2, baseZ + 8));
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(regions.size() == 3, "expected 3 regions (A/B/C), found " + regions.size());
+
+            Integer regionC = regionMap.getRegionIndex().regionIdAt(probeC);
+            check(regionC != null, "region C probe position isn't in any region - adjust the probe");
+            Integer regionB = regionMap.getRegionIndex().regionIdAt(probeB);
+            check(regionB != null, "region B probe position isn't in any region - adjust the probe");
+
+            // Evidence dump: every region's bounds/cell count plus the route tree's hop cost and
+            // parent for it, and every connector RegionGraph actually built (with cost) - so the
+            // C->B->A routing decision is visible in the log, not just asserted.
+            for (Region region : regions) {
+                LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={} hopCost={} parent={}",
+                        region.getId(), region.getMin(), region.getMax(), region.cellCount(),
+                        regionMap.getRouteTree().getHopCost(region.getId()),
+                        regionMap.getRouteTree().getParentRegion(region.getId()));
+            }
+            for (RegionConnector connector : regionMap.getRegionGraph().getAllConnectors()) {
+                LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={}",
+                        connector.regionA(), connector.regionB(), connector.cost());
+            }
+            LOGGER.info("[Skavenblight][test] regionC={} regionB={} rootRegion={}",
+                    regionC, regionB, regionMap.getRouteTree().getRootRegionId());
+
+            Integer parentOfC = regionMap.getRouteTree().getParentRegion(regionC);
+            check(parentOfC != null, "region C should be reachable through some parent hop");
+            check(regionC != regionB && java.util.Objects.equals(parentOfC, regionB),
+                    "region C's route should hop through region B (found parent=" + parentOfC + ", regionB=" + regionB + ")");
         });
     }
 }
