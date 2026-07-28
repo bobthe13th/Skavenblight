@@ -16,6 +16,16 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.icy_grip_of_death.name",
       "text": "spell.skavenblight.icy_grip_of_death.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.scythe_of_shyish.name",
+      "text": "spell.skavenblight.scythe_of_shyish.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.reap_soul.name",
+      "text": "spell.skavenblight.reap_soul.description"
     }
   ]
 }

@@ -195,5 +195,37 @@
   "page.skavenblight.nexus_research.alchemy_brewing.title1": "Alchemical Laboratory",
   "page.skavenblight.nexus_research.alchemy_brewing.text1": "Unlocking Chamon research grants access to the Alchemical Laboratory (Poor, Good, or Best quality). These laboratories allow mages to brew authentic Warhammer potions using local botanical and metallic ingredients.",
   "page.skavenblight.nexus_research.alchemy_brewing.title2": "The Brewing Process",
-  "page.skavenblight.nexus_research.alchemy_brewing.text2": "Brewing is governed by potion Name, Effect, Lag Time, Volatility, Cost, Locale, Difficulty, Creation Number, and Time. A d100 skill check determines output potions: failure wastes ingredients, while a critical failure triggers a volatile Brewing Disaster!"
+  "page.skavenblight.nexus_research.alchemy_brewing.text2": "Brewing is governed by potion Name, Effect, Lag Time, Volatility, Cost, Locale, Difficulty, Creation Number, and Time. A d100 skill check determines output potions: failure wastes ingredients, while a critical failure triggers a volatile Brewing Disaster!",
+
+  "spell.skavenblight.flaming_sword_of_rhuin.name": "Flaming Sword of Rhuin",
+  "spell.skavenblight.flaming_sword_of_rhuin.description": "Wreathes the caster's weapon in brilliant, searing flames that guide their strikes and increase physical damage.",
+  "spell.skavenblight.bolts_of_aqshy.name": "Bolts of Aqshy",
+  "spell.skavenblight.bolts_of_aqshy.description": "Launches a volley of small, crackling fire-darts from the caster's fingertips to ignite foes.",
+
+  "spell.skavenblight.fleet_foot_of_ghur.name": "Fleet Foot of Ghur",
+  "spell.skavenblight.fleet_foot_of_ghur.description": "Channels the spirit of the running stag, imbuing limbs with tireless speed and jump height.",
+
+  "spell.skavenblight.phas_protection.name": "Pha’s Protection",
+  "spell.skavenblight.phas_protection.description": "Surrounds the target in a shimmering golden aura of Hysh that dampens incoming blows.",
+  "spell.skavenblight.eyes_of_truth.name": "Eyes of Truth",
+  "spell.skavenblight.eyes_of_truth.description": "Illuminates the surrounding environment with white light, stripping away shadows to grant night sight.",
+  "spell.skavenblight.banishment.name": "Banishment",
+  "spell.skavenblight.banishment.description": "Directs a beam of pure, burning light that deals devastating damage to undead and nether monsters.",
+
+  "spell.skavenblight.father_of_the_thorn.name": "Father of the Thorn",
+  "spell.skavenblight.father_of_the_thorn.description": "The caster’s skin hardens into tough, thorny bark, increasing defense and turning aside attacks.",
+
+  "spell.skavenblight.creeping_dread.name": "Creeping Dread",
+  "spell.skavenblight.creeping_dread.description": "Projects a chilling aura of absolute, dark shadow-terror into the minds of surrounding foes, slowing their movements.",
+
+  "spell.skavenblight.silver_arrows_of_arha.name": "Silver Arrows of Arha",
+  "spell.skavenblight.silver_arrows_of_arha.description": "Summons gleaming, heat-seeking darts of transmuted quicksilver that slice through targets.",
+
+  "spell.skavenblight.scythe_of_shyish.name": "Scythe of Shyish",
+  "spell.skavenblight.scythe_of_shyish.description": "Sweeps a spectral, purple scythe through the air, reaping the lifeforce of all enemies immediately in front of the wizard.",
+  "spell.skavenblight.reap_soul.name": "Reap Soul",
+  "spell.skavenblight.reap_soul.description": "Commands the target's spirit to depart, dealing devastating instant damage if they are already weakened.",
+
+  "spell.skavenblight.wind_blast.name": "Wind Blast",
+  "spell.skavenblight.wind_blast.description": "Unleashes a sudden, powerful gale that blows away enemies and pushes them back."
 }

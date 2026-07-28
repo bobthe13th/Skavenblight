@@ -16,6 +16,21 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.blinding_light.name",
       "text": "spell.skavenblight.blinding_light.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.phas_protection.name",
+      "text": "spell.skavenblight.phas_protection.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.eyes_of_truth.name",
+      "text": "spell.skavenblight.eyes_of_truth.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.banishment.name",
+      "text": "spell.skavenblight.banishment.description"
     }
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "wind": "azyr",
+  "tier": 1,
+  "casting_number": 35,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "vector_push",
+    "strength": 2.0
+  },
+  "description_key": "spell.skavenblight.wind_blast.description"
+}

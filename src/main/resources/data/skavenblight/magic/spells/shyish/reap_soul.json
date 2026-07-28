@@ -1,0 +1,13 @@
+{
+  "wind": "shyish",
+  "tier": 2,
+  "casting_number": 65,
+  "casting_time": "full_action",
+  "effect": {
+    "type": "execute_damage",
+    "base_amount": 8.0,
+    "execute_amount": 40.0,
+    "threshold_fraction": 0.30
+  },
+  "description_key": "spell.skavenblight.reap_soul.description"
+}

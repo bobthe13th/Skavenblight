@@ -16,6 +16,11 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.cowering_beasts.name",
       "text": "spell.skavenblight.cowering_beasts.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.fleet_foot_of_ghur.name",
+      "text": "spell.skavenblight.fleet_foot_of_ghur.description"
     }
   ]
 }
