@@ -226,6 +226,11 @@ public class TerritoryRegionMap {
             // region: a connector's traced instructions are direction-locked, and this region can
             // be on either end of it (see RegionConnector).
             projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(region.getId()) : null);
+            // Task 9 Step 0b fix: also seed this pass with the crossing project for any connector
+            // this region is the route-tree PARENT of - see injectSharedConnectorProjects's doc
+            // for why the primary project alone leaves the parent side without instructions for
+            // cells the tie-break may hand it.
+            injectSharedConnectorProjects(newGraph, newRouteTree, region.getId());
 
             FlowFieldState state = new FlowFieldState(target, territoryChunks, region::contains);
             // Unthrottled: this is the one-shot rebuild pass, run once at world-join/territory
@@ -442,6 +447,15 @@ public class TerritoryRegionMap {
     private void recomputeDirtyRegions(Set<Integer> dirtyIds, Set<ChunkPos> territoryChunks) {
         TerrainSnapshot snapshot = this.terrainSnapshot;
 
+        // Task 9 Step 0 fix: accumulated across the WHOLE batch and turned into exactly one new
+        // RegionIndex after the loop finishes, instead of the old code's `this.regionIndex = new
+        // RegionIndex(updatedRegions)` sitting INSIDE the loop below (one full ~384KB-per-chunk
+        // reconstruction per dirty region in this batch, N-1 of which were built from a
+        // still-incomplete snapshot and discarded unread before the batch finished). Seeded from
+        // the pre-batch region list, exactly like the old per-iteration code's own
+        // `new ArrayList<>(regionIndex.getRegions())` did on its first iteration.
+        List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+
         for (int regionId : dirtyIds) {
             Region oldRegion = regionIndex.getRegions().stream().filter(r -> r.getId() == regionId).findFirst().orElse(null);
             if (oldRegion == null || oldRegion.getMin() == null || oldRegion.getMax() == null) continue;
@@ -482,9 +496,26 @@ public class TerritoryRegionMap {
                 // this int - keep referring to the same region, just with membership that now
                 // matches current terrain.
                 Region freshRegion = rescanned.get(0).withId(regionId);
-                List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+
+                // Task 9 Step 0c fix: a connector's traced cells were claimed into this region via
+                // Region.addCell (see RegionGraph.registerConnector) at the last full rebuild, and
+                // by construction are NOT ordinary flood-fill reachable from this region's interior
+                // - that's the whole reason addCell exists instead of relying on the scan above.
+                // The plain rescan just above therefore can never rediscover them, so without
+                // re-adding them here BEFORE freshRegion replaces the old (already-claiming)
+                // Region object, this region would silently drop every connector cell it was
+                // claiming on its very first dirty rescan after a rebuild - reopening task-8's
+                // orphan-lookup gap until the next full rebuild. Only projectTowardA's instruction
+                // keys are used (not the union with projectTowardB): inboundInstructions (which
+                // backs projectTowardA) keys its map by every traced step's OWN position, exactly
+                // matching registerConnector's own addCell loop; outboundInstructions (projectTowardB)
+                // additionally keys on the connector's ANCHOR cell, which already belongs to
+                // whichever region the trace started from via ordinary flood-fill - re-adding it
+                // into the OTHER region too would over-claim a cell registerConnector never
+                // actually gave it.
+                reclaimConnectorCells(freshRegion, regionGraph, regionId);
+
                 updatedRegions.replaceAll(r -> r.getId() == regionId ? freshRegion : r);
-                this.regionIndex = new RegionIndex(updatedRegions);
 
                 FlowFieldState state = regionStates.get(regionId);
                 if (state != null) {
@@ -503,6 +534,11 @@ public class TerritoryRegionMap {
                     projectManager.setMaxCandidateProjectLength(
                             parentConnector != null ? 6 : SiegeProjectManager.DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH);
                     projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(regionId) : null);
+                    // Task 9 Step 0b fix: also seed this pass with the crossing project for any
+                    // connector this region is the route-tree PARENT of - see
+                    // injectSharedConnectorProjects's doc for why the primary project alone isn't
+                    // enough.
+                    injectSharedConnectorProjects(regionGraph, routeTree, regionId);
                     calculator.calculateFully(snapshot, state);
                 }
                 continue;
@@ -519,6 +555,55 @@ public class TerritoryRegionMap {
             BlockPos rootTarget = this.nexusPos != null ? this.nexusPos : oldRegion.getMin();
             rebuildRegionsAndGraph(territoryChunks, rootTarget);
             return;
+        }
+
+        this.regionIndex = new RegionIndex(updatedRegions);
+    }
+
+    /**
+     * Re-adds a connector's traced cells (see RegionGraph.registerConnector's addCell claim) back
+     * into {@code freshRegion} - see Task 9 Step 0c's call site for why the plain rescan that
+     * produced {@code freshRegion} can never include them on its own.
+     */
+    private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
+        if (graph == null) return;
+        for (RegionConnector connector : graph.getConnectorsFor(regionId)) {
+            for (BlockPos pos : connector.projectTowardA().getInstructions().keySet()) {
+                freshRegion.addCell(pos);
+            }
+        }
+    }
+
+    /**
+     * Layers the crossing project for every connector {@code regionId} is the route-tree PARENT
+     * side of on top of whatever {@code setActiveConnectorProject} already seeded for this same
+     * region's pass - see Task 9 Step 0b. RegionGraph.registerConnector (task-8) claims a
+     * connector's traced cells into BOTH endpoint regions so a mob mid-crossing never fails a
+     * REGION lookup, but RegionIndex's shared-cell tie-break (last-write-wins in region SCAN/
+     * discovery order) and the route tree's parent/child assignment (cost order from the root) are
+     * two entirely unrelated orderings. Before this fix, only the CHILD side of a connector ever
+     * got its crossing instructions injected (via parentConnector.projectFor(childId) in the
+     * caller), so a shared cell that the tie-break happened to hand to the PARENT instead had no
+     * instruction at all, even though the region lookup itself succeeded. Injecting the SAME
+     * project (`connector.projectFor(childId)`, i.e. exactly what the child's own pass already
+     * gets) into the parent's pass too means the answer no longer depends on which side wins the
+     * tie-break.
+     *
+     * <p>Deliberately additive, not a replacement: must be called AFTER
+     * {@code setActiveConnectorProject} (which clears and reseeds this region's OWN upstream
+     * project) and BEFORE the one {@code calculateFully} call that consumes the active-project
+     * list - {@code injectActiveProjects} iterates the whole list at that point, so both the
+     * region's own project and every downstream child's crossing project it stacks on top must
+     * already be present together.
+     */
+    private void injectSharedConnectorProjects(RegionGraph graph, RegionRouteTree tree, int regionId) {
+        if (graph == null || tree == null) return;
+        for (RegionConnector connector : graph.getConnectorsFor(regionId)) {
+            int otherId = connector.other(regionId);
+            Integer otherParent = tree.getParentRegion(otherId);
+            if (otherParent != null && otherParent == regionId) {
+                projectManager.addSharedConnectorProject(connector.projectFor(otherId));
+            }
         }
     }
 }

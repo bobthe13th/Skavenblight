@@ -85,6 +85,25 @@ public class SiegeProjectManager {
     }
 
     /**
+     * Layers an ADDITIONAL active project on top of whatever {@code setActiveConnectorProject}
+     * already seeded for this pass, rather than replacing it - see
+     * TerritoryRegionMap.injectSharedConnectorProjects (Task 9 Step 0b) for the caller. A region
+     * can simultaneously be the route-tree CHILD of one connector (its own upstream project, set
+     * via setActiveConnectorProject) and the route-tree PARENT of one or more other connectors
+     * (each needing its own crossing project stacked here) - both must be present in
+     * {@code activeProjects} together when {@code injectActiveProjects} next consumes the list.
+     * Safe with the same "regions processed strictly sequentially" reasoning
+     * setActiveConnectorProject's own doc already relies on: every region's pass always starts
+     * with a setActiveConnectorProject clear+reseed, so nothing added here ever leaks into the
+     * NEXT region's pass.
+     */
+    public void addSharedConnectorProject(SiegeProject project) {
+        if (project != null) {
+            this.activeProjects.add(project);
+        }
+    }
+
+    /**
      * Called once per region-scoped pass (TerritoryRegionMap, mirroring its existing
      * setActiveConnectorProject call). Pass a short cap when this region already has a
      * route-tree-assigned parent connector - long-range connectivity is that connector's job now,

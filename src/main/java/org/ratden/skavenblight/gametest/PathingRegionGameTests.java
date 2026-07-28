@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionConnector;
 import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
@@ -580,6 +581,374 @@ public class PathingRegionGameTests {
             for (BlockPos step : connector.projectTowardB().getInstructions().keySet()) {
                 check(regionMap.getRegionIndex().regionIdAt(step) != null,
                         "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
+            }
+            loggedDump[0] = true;
+        });
+    }
+
+    /**
+     * Task 9 Step 0: {@code recomputeDirtyRegions} used to rebuild {@code this.regionIndex} from
+     * the FULL region list once per dirty region INSIDE its per-region loop (task-6 made this a
+     * real ~384KB-per-chunk allocation, not the old cheap {@code List.copyOf}) - for N
+     * simultaneously-dirty regions in one batch that discarded N-1 intermediate RegionIndex
+     * instances unread before the batch finished. The fix moves the reconstruction out of the
+     * loop to run exactly once per batch.
+     *
+     * <p>This is purely a wasted-allocation fix, not a behavior change: the OLD code's
+     * per-iteration RegionIndex was already built from an up-to-date region list each time, so its
+     * final published value (whichever iteration ran last) was already correct. There is
+     * deliberately no failing-before/passing-after split for this one - see the report for why
+     * red-green doesn't apply here - this is a coherence check that a post-dirty-batch state still
+     * resolves correctly, which held before the fix and must keep holding after it.
+     *
+     * <p><b>Important caveat discovered while writing this test (see the report):</b> this
+     * geometry does NOT exercise {@code recomputeDirtyRegions}'s per-region loop / non-topology-
+     * changed fast path at all, despite the name. {@code RegionScanner.scan}'s dirty-rescan call
+     * always sweeps the FULL vertical build-height column for whichever (x,z) chunks
+     * {@code localBounds} covers, regardless of the dirtied region's own bounds - and both regions
+     * here (like every multi-region test in this class - see the class javadoc's "territory wider
+     * than one chunk" constraint) live in the SAME single chunk. Rescanning either one therefore
+     * always rediscovers BOTH as separate components ({@code rescanned.size() == 2}), which is
+     * {@code recomputeDirtyRegions}'s TOPOLOGY-CHANGED branch, not the fast path - it triggers a
+     * full {@code rebuildRegionsAndGraph}, confirmed below via the {@code getGeneration()} bump.
+     * What this test actually proves is that a real, {@code tick()}-driven 2-region dirty batch
+     * (as opposed to task-8/9's other tests, which only ever call {@code rebuild()} once) still
+     * lands on a coherent, correctly-resolving index either way - genuine coverage, just not of
+     * Step 0's specific code path. See the report for why the fast path is structurally
+     * unreachable from any GameTest confined to one chunk, and what that implies for future tests.
+     *
+     * <p>Geometry: {@link #testTwoDisconnectedRegionsGetOneConnector}'s exact trench split (2
+     * regions). After the initial rebuild settles, BOTH regions are marked dirty via two
+     * {@code onBlockChanged} calls queued back-to-back BEFORE either is drained by a
+     * {@code tick()} call, so the very next eligible {@code tick()} hands
+     * {@code recomputeDirtyRegions} both region ids in one batch.
+     * {@code regionMap.tick(helper.getLevel())} is driven manually every GameTest tick from inside
+     * {@code succeedWhen} because this test's {@code TerritoryRegionMap} is a bare instance, not
+     * registered with anything (like {@code WarpFluxNetwork}) that would otherwise call
+     * {@code tick()} for it.
+     */
+    // timeoutTicks generous relative to Config.minimumSettleDelayMs (1000ms real time, the actual
+    // gate here - see tick()'s terrainSettled check): observed empirically that 800 ticks was too
+    // tight a budget under this GameTest server's real (non-1:1) tick pacing and occasionally
+    // timed out before 1000ms of wall-clock time had actually elapsed since the block changes were
+    // reported, even though the batch was otherwise handled correctly once given enough time.
+    @GameTest(template = "pathing_test", timeoutTicks = 1600, skyAccess = true)
+    public static void testDirtyRegionBatchProducesOneCoherentFinalIndex(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+        int minRelY = minRelY(helper);
+
+        for (int lx = 6; lx <= 9; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 1, 2, baseZ + 8);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        BlockPos nearProbe = helper.absolutePos(new BlockPos(baseX + 2, 2, baseZ + 8));
+        BlockPos farProbe = helper.absolutePos(new BlockPos(baseX + 12, 2, baseZ + 8));
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        int[] nearRegionBefore = {-1};
+        int[] farRegionBefore = {-1};
+        boolean[] changesReported = {false};
+        RegionIndex[] indexBeforeChange = {null};
+        long[] generationBeforeChange = {-1};
+
+        helper.succeedWhen(() -> {
+            regionMap.tick(helper.getLevel());
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            if (indexBeforeChange[0] == null) {
+                List<Region> regions = regionMap.getRegionIndex().getRegions();
+                check(regions.size() == 2, "expected exactly 2 regions before the dirty batch, found " + regions.size());
+
+                Integer nearId = regionMap.getRegionIndex().regionIdAt(nearProbe);
+                Integer farId = regionMap.getRegionIndex().regionIdAt(farProbe);
+                check(nearId != null && farId != null, "both probes must resolve before the dirty batch");
+                check(!nearId.equals(farId), "the two probes must be in different regions to begin with");
+
+                nearRegionBefore[0] = nearId;
+                farRegionBefore[0] = farId;
+                indexBeforeChange[0] = regionMap.getRegionIndex();
+                generationBeforeChange[0] = regionMap.getGeneration();
+
+                // Both queued before either is drained by a tick() call, so the very next dirty
+                // recompute sees BOTH region ids in one batch - see method javadoc.
+                regionMap.onBlockChanged(nearProbe);
+                regionMap.onBlockChanged(farProbe);
+                changesReported[0] = true;
+                check(false, "waiting for the 2-region dirty batch to be picked up");
+            }
+
+            check(changesReported[0], "block changes were never reported");
+            check(regionMap.getRegionIndex() != indexBeforeChange[0],
+                    "getRegionIndex() is still the SAME instance as before the block changes - the dirty "
+                            + "batch hasn't been recomputed yet");
+
+            // Pins the method javadoc's caveat as an executable claim: this geometry always lands
+            // on the topology-changed/full-rebuild branch (generation bumps), never the
+            // non-topology-changed fast path (which would leave generation unchanged).
+            check(regionMap.getGeneration() > generationBeforeChange[0],
+                    "expected the dirty batch to trigger a full rebuild (generation bump) - if this "
+                            + "ever fails, the fast path became reachable and this test's javadoc caveat is stale");
+
+            Integer nearIdAfter = regionMap.getRegionIndex().regionIdAt(nearProbe);
+            Integer farIdAfter = regionMap.getRegionIndex().regionIdAt(farProbe);
+            check(nearIdAfter != null && farIdAfter != null, "both probes must still resolve after the batch recompute");
+            check(nearIdAfter == nearRegionBefore[0],
+                    "near-side probe resolved to a different region after the batch (" + nearIdAfter + " vs " + nearRegionBefore[0] + ")");
+            check(farIdAfter == farRegionBefore[0],
+                    "far-side probe resolved to a different region after the batch (" + farIdAfter + " vs " + farRegionBefore[0] + ")");
+            check(!nearIdAfter.equals(farIdAfter),
+                    "the two probes collapsed into the same region after the batch recompute - the batch's "
+                            + "final index isn't coherent");
+        });
+    }
+
+    /**
+     * Task 9 Step 0b: {@code RegionGraph.registerConnector} (task-8) claims a connector's traced
+     * cells into BOTH endpoint regions, but {@code RegionIndex}'s shared-cell tie-break
+     * (last-write-wins in region SCAN/discovery order) and the route tree's parent/child
+     * assignment (cost order from the root) are unrelated orderings.
+     * {@code rebuildRegionsAndGraph}'s active-project injection used to only ever give the
+     * connector's crossing project to the route tree's CHILD side
+     * ({@code parentConnector.projectFor(childId)}) - the PARENT side got nothing for these cells
+     * beyond its own (unrelated) upstream project, so a shared cell the tie-break happened to hand
+     * to the PARENT had no flow-field instruction at all, even though the region lookup itself
+     * succeeded (task-8's own check).
+     *
+     * <p>Geometry: reuses {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s exact
+     * vertical shaft (a main floor plus an isolated elevated platform 40 blocks up, joined by one
+     * chained connector), but relocates the nexus marker from the main floor onto the platform's
+     * own support block - an inert re-placement of the same STONE already there (same convention
+     * as every other nexus marker in this class), whose {@code .above()} neighbor is the
+     * platform's one walkable cell. {@code RegionScanner.scan} discovers regions strictly
+     * Y-ascending within a single-chunk territory, so the low main floor is ALWAYS discovered (and
+     * numbered) before the high platform, regardless of where the nexus sits - moving the nexus
+     * onto the platform therefore makes the platform BOTH the route tree's root/parent (it
+     * contains the nexus) AND the region {@code RegionIndex} writes LAST for any cell the
+     * connector claims into both endpoints (last-write-wins) - i.e. the tie-break winner is now
+     * the PARENT, the exact case task-8's own test happened not to cover (there, the child
+     * coincidentally won both the tie-break and the project injection). The root/parent-id
+     * assertions below confirm this geometry inversion actually landed as intended, rather than
+     * silently falling back to the coincidental case this test is specifically trying to avoid.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 800, skyAccess = true)
+    public static void testParentRegionGetsRealInstructionsForSharedConnectorCells(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        int shaftLocalX = 0;
+        int shaftLocalZ = 8;
+
+        helper.setBlock(new BlockPos(baseX + shaftLocalX, 41, baseZ + shaftLocalZ), Blocks.STONE.defaultBlockState());
+
+        // Nexus on the platform's OWN support block (already stone - an inert re-placement, same
+        // convention as every other nexus marker in this class): its .above() neighbor is the
+        // platform's one walkable cell, making the platform the route tree's root - see method
+        // javadoc for why this inverts the tie-break/parent-child scan order relative to task-8's
+        // own test.
+        BlockPos relativeNexusPos = new BlockPos(baseX + shaftLocalX, 41, baseZ + shaftLocalZ);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] loggedDump = {false};
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(regions.size() == 2,
+                    "expected exactly 2 regions (main floor + elevated platform), found " + regions.size());
+            check(regionMap.getRegionGraph().getAllConnectors().size() == 1,
+                    "expected exactly 1 chained connector, found "
+                            + regionMap.getRegionGraph().getAllConnectors().size());
+
+            RegionConnector connector = regionMap.getRegionGraph().getAllConnectors().get(0);
+            int rootId = regionMap.getRouteTree().getRootRegionId();
+            int childId = connector.other(rootId);
+            Integer childsParent = regionMap.getRouteTree().getParentRegion(childId);
+
+            if (!loggedDump[0]) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount());
+                }
+                LOGGER.info("[Skavenblight][test] rootId={} childId={} childsParent={} connector region{}<->region{}",
+                        rootId, childId, childsParent, connector.regionA(), connector.regionB());
+            }
+
+            // Geometry proof (see method javadoc): the platform, which contains the nexus, must be
+            // the root/parent - if this ever fails, the inverted-scan-order trick stopped working
+            // and every assertion below would be proving nothing.
+            check(rootId != childId, "root and child must be different regions");
+            check(childsParent != null && childsParent == rootId,
+                    "expected the platform (root) to be the child's parent - geometry didn't invert as intended");
+
+            boolean anyCellResolvedToParent = false;
+            for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
+                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                check(resolvedRegion != null,
+                        "connector cell " + step.toShortString() + " isn't claimed by any region");
+
+                if (!loggedDump[0]) {
+                    LOGGER.info("[Skavenblight][test] connector cell {} -> region {}", step.toShortString(), resolvedRegion);
+                }
+
+                if (resolvedRegion == rootId) {
+                    anyCellResolvedToParent = true;
+                }
+
+                SiegeNode instruction = regionMap.getRegionFlowFieldFor(step).getNextSiegeNode(helper.getLevel(), step);
+                check(instruction != null,
+                        "connector cell " + step.toShortString() + " resolved to region " + resolvedRegion
+                                + " but got no flow-field instruction - a mob standing there would be stuck");
+            }
+            loggedDump[0] = true;
+
+            // Confirms the tie-break actually landed on the PARENT for at least one cell -
+            // without this, the test could pass vacuously if every shared cell happened to
+            // resolve to the child instead, which wouldn't exercise Step 0b's fix at all.
+            check(anyCellResolvedToParent,
+                    "no connector cell resolved to the parent region (id " + rootId + ") - the "
+                            + "tie-break/geometry didn't actually land on the parent, so this test isn't "
+                            + "exercising the bug it targets");
+        });
+    }
+
+    /**
+     * Task 9 Step 0c: {@code recomputeDirtyRegions}'s non-topology-changed fast path replaces a
+     * dirty region wholesale with a fresh ordinary flood-fill result
+     * ({@code rescanned.get(0).withId(regionId)}), which by construction can never include a
+     * connector's {@code addCell}-claimed cells (they aren't flood-fill-reachable from the
+     * region's interior - that's the whole reason task-8 needed {@code addCell} in the first
+     * place). The fix (see {@code reclaimConnectorCells}) re-adds them right after the rescan.
+     * That fast path is exercised and verified separately (unit/inspection-level - see the
+     * report); THIS test verifies something adjacent but distinct, discovered while writing it.
+     *
+     * <p><b>This geometry cannot reach the fast path at all - it always full-rebuilds instead,
+     * exactly like {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}, and for the SAME
+     * structural reason (see that method's javadoc): the shaft's main floor and elevated platform
+     * live in the same single chunk (mandatory per the class javadoc's territory constraint), and
+     * a dirty rescan always sweeps that chunk's FULL height regardless of which region triggered
+     * it - rediscovering BOTH regions as separate components every time
+     * ({@code rescanned.size() == 2}), which is the TOPOLOGY-CHANGED branch, not the fast path.
+     * The {@code getGeneration()} assertion below pins this down as an executable fact instead of
+     * an assumption. Step 0c's actual fix is therefore reviewed by inspection only, not proven by
+     * this (or any) GameTest in this class - see the report for why a fast-path-reaching geometry
+     * is not achievable while staying inside the single-chunk constraint this whole class already
+     * depends on.</b>
+     *
+     * <p>What this test DOES prove, which is still new/genuine coverage: extends
+     * {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s exact geometry (unmodified -
+     * nexus stays on the main floor) with a REAL {@code tick()}-driven dirty-region recompute
+     * (task-8's own test never calls {@code tick()} at all, only {@code rebuild()}) - after an
+     * unrelated block change is reported near the main floor's interior and the resulting full
+     * rebuild completes, every connector cell still resolves correctly, exactly as it did after
+     * the very first rebuild. That's real regression coverage against the topology-changed path
+     * regressing, even though it says nothing about the fast path Step 0c actually targets.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 1200, skyAccess = true)
+    public static void testConnectorCellsSurviveADirtyRegionRescan(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        int shaftLocalX = 0;
+        int shaftLocalZ = 8;
+
+        helper.setBlock(new BlockPos(baseX + shaftLocalX, 41, baseZ + shaftLocalZ), Blocks.STONE.defaultBlockState());
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 4, 1, baseZ + 4);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        // Well inside the main floor's own interior, far from the shaft (local x=0) and the nexus
+        // marker (local x=4,z=4) - an unrelated position that should still resolve cleanly to the
+        // main floor's region both before and after whatever recompute it provokes (see method
+        // javadoc for why that recompute is always a full rebuild in this geometry, not the fast
+        // path the method name suggests).
+        BlockPos unrelatedPos = helper.absolutePos(new BlockPos(baseX + 10, 2, baseZ + 10));
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        RegionIndex[] indexBeforeChange = {null};
+        long[] generationBeforeChange = {-1};
+        boolean[] changeReported = {false};
+        boolean[] loggedDump = {false};
+
+        helper.succeedWhen(() -> {
+            regionMap.tick(helper.getLevel());
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            if (indexBeforeChange[0] == null) {
+                // First settle: capture the post-rebuild index/generation and fire the unrelated
+                // block change that should provoke exactly one dirty-region recompute.
+                indexBeforeChange[0] = regionMap.getRegionIndex();
+                generationBeforeChange[0] = regionMap.getGeneration();
+                regionMap.onBlockChanged(unrelatedPos);
+                changeReported[0] = true;
+                check(false, "waiting for the dirty recompute to run");
+            }
+
+            check(changeReported[0], "unrelated block change was never reported");
+            check(regionMap.getRegionIndex() != indexBeforeChange[0],
+                    "getRegionIndex() is still the SAME instance as before the block change - the dirty "
+                            + "recompute hasn't run yet (or never will)");
+
+            // Pins the method javadoc's caveat as an executable claim: this geometry always lands
+            // on the topology-changed/full-rebuild branch (generation bumps), never the
+            // non-topology-changed fast path Step 0c actually targets.
+            check(regionMap.getGeneration() > generationBeforeChange[0],
+                    "expected the dirty recompute to trigger a full rebuild (generation bump) - if "
+                            + "this ever fails, the fast path became reachable and this test's javadoc "
+                            + "caveat is stale");
+
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(regions.size() == 2,
+                    "expected still exactly 2 regions after the recompute (no real topology change to "
+                            + "the SHAPE of either region, just a full rebuild that reconstructs the same "
+                            + "partition), found " + regions.size());
+
+            RegionConnector connector = regionMap.getRegionGraph().getAllConnectors().get(0);
+
+            if (!loggedDump[0]) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] post-rescan region {}: min={} max={} cells={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount());
+                }
+            }
+
+            for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
+                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                check(resolvedRegion != null,
+                        "connector cell " + step.toShortString() + " was dropped by the dirty rescan - a "
+                                + "mob standing there would be orphaned");
+                if (!loggedDump[0]) {
+                    LOGGER.info("[Skavenblight][test] post-rescan connector cell {} -> region {}", step.toShortString(), resolvedRegion);
+                }
+            }
+            for (BlockPos step : connector.projectTowardB().getInstructions().keySet()) {
+                check(regionMap.getRegionIndex().regionIdAt(step) != null,
+                        "connector cell " + step.toShortString() + " was dropped by the dirty rescan - a "
+                                + "mob standing there would be orphaned");
             }
             loggedDump[0] = true;
         });
