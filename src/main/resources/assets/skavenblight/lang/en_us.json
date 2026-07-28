@@ -157,6 +157,35 @@
   "spell.skavenblight.steal_life.name": "Steal Life",
   "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
   "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
-  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl."
+  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl.",
 
+  "entry.skavenblight.nexus_research.tzeentch_curse.name": "The Curse of Tzeentch",
+  "page.skavenblight.nexus_research.tzeentch_curse.title1": "Aethyrical Resonance",
+  "page.skavenblight.nexus_research.tzeentch_curse.text1": "Casting spells in Warhammer is never completely safe. The Aethyr is a roiling ocean of chaotic energy; drawing too much of it, or losing focus for a microsecond, allows the fabric of reality to buckle. This is represented by 'The Curse of Tzeentch' (Miscasts).",
+  "page.skavenblight.nexus_research.tzeentch_curse.title2": "Miscast Severities",
+  "page.skavenblight.nexus_research.tzeentch_curse.text2": "When matching digits (doubles) are rolled on a d100 casting check, a miscast occurs! Depending on the spell tier and failure margin, this can range from a Minor Miscast (causing whispers and nausea), to a Major Miscast (draining local winds), to a Catastrophic Miscast (localized chaos explosion).",
+
+  "entry.skavenblight.nexus_research.witchsight.name": "Witchsight",
+  "page.skavenblight.nexus_research.witchsight.title1": "The Third Eye",
+  "page.skavenblight.nexus_research.witchsight.text1": "Magisters possess the 'Third Eye', allowing them to perceive the ambient flows of the Aethyr. To an untrained peasant, a magical leyline looks like an empty field. To a wizard with Witchsight, it is a glowing, turbulent river of color reflecting the dominant Wind.",
+  "page.skavenblight.nexus_research.witchsight.title2": "Perceiving the Winds",
+  "page.skavenblight.nexus_research.witchsight.text2": "By wearing specialized Witchsight Goggles or drinking an Aethyr Elixir, the player gains Witchsight. This renders ambient particles matching the dominant Wind of each chunk. In highly saturated chunks, a subtle visual distortion wreathes the atmosphere.",
+
+  "entry.skavenblight.nexus_research.power_stones.name": "Power Stones",
+  "page.skavenblight.nexus_research.power_stones.title1": "Arcane Batteries",
+  "page.skavenblight.nexus_research.power_stones.text1": "Only master wizards can craft Power Stones—dense crystal matrixes attuned to a single wind. They act as magical sponges, soaking up ambient energy to release it in times of need. The 8 canonical stones range from Lumen Stones to Fire Rubies.",
+  "page.skavenblight.nexus_research.power_stones.title2": "Dual-State Mechanics",
+  "page.skavenblight.nexus_research.power_stones.text2": "When in high-wind areas, the stone passively absorbs local wind. In low-wind areas, it leaks charge, acting as a portable baseline anchor. While held in the off-hand, it can be actively consumed to grant a Catalytic Bonus (+1 to +25) to casting checks.",
+
+  "entry.skavenblight.nexus_research.grimoires_scribing.name": "Grimoires & Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.title1": "Scroll Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.text1": "Spells are not naturally retained in the human mind forever—they must be meticulously cataloged in massive Grimoires or prepared on single-use Scrolls. At a Scribing Desk, players use ink catalysts (like Goldstone dust) to scribe spells onto parchment.",
+  "page.skavenblight.nexus_research.grimoires_scribing.title2": "Grimoires of Power",
+  "page.skavenblight.nexus_research.grimoires_scribing.text2": "Scrolls are single-use items that bypass spell knowledge checks but still consume local winds. Grimoires are multi-use books that increase aptitude for a specific wind by +10, but elevate Tzeentch's Curse severity by one tier if a double is rolled.",
+
+  "entry.skavenblight.nexus_research.environmental_catalysts.name": "Environmental Catalysts",
+  "page.skavenblight.nexus_research.environmental_catalysts.title1": "Block & Biome Baselines",
+  "page.skavenblight.nexus_research.environmental_catalysts.text1": "To make the ambient wind system truly dynamic, chunk wind baselines respond organically to their surroundings. This is driven by two key systems: Block-Level Baselines (local blocks) and Biome-Level Baselines (geographical multipliers).",
+  "page.skavenblight.nexus_research.environmental_catalysts.title2": "Catalytic Resonance",
+  "page.skavenblight.nexus_research.environmental_catalysts.text2": "Aqshy (Fire) baselines are boosted by lava and blast furnaces; Ghyran (Life) by moss and fully grown crops; Shyish (Death) by soul sand and spawners. Biome modifiers apply multipliers (e.g. Oceans boost Ghyran/Azyr, Netheir heavily boosts Aqshy)."
 }
