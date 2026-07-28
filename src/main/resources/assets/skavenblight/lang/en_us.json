@@ -49,11 +49,56 @@
   "page.skavenblight.nexus_research.welcome.title": "The Nexus",
   "page.skavenblight.nexus_research.welcome.text": "Welcome, yes-yes! Your journey into the depths of Skaven engineering and chaotic magic begins here...",
 
-  "entry.skavenblight.nexus_research.magic_wip.name": "Winds of Magic (WIP)",
   "entry.skavenblight.nexus_research.skaven_wip.name": "Skaven Engineering (WIP)",
   "entry.skavenblight.nexus_research.dwarven_wip.name": "Dwarven Archeology (WIP)",
 
   "page.skavenblight.nexus_research.wip.title": "Work in Progress",
-  "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!"
+  "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!",
+
+  "category.skavenblight.nexus_research.winds_of_magic_hysh.name": "Hysh — The Light",
+  "category.skavenblight.nexus_research.winds_of_magic_azyr.name": "Azyr — The Heavens",
+  "category.skavenblight.nexus_research.winds_of_magic_chamon.name": "Chamon — Metal",
+  "category.skavenblight.nexus_research.winds_of_magic_ghyran.name": "Ghyran — Life",
+  "category.skavenblight.nexus_research.winds_of_magic_aqshy.name": "Aqshy — Fire",
+  "category.skavenblight.nexus_research.winds_of_magic_ghur.name": "Ghur — Beasts",
+  "category.skavenblight.nexus_research.winds_of_magic_ulgu.name": "Ulgu — Shadow",
+  "category.skavenblight.nexus_research.winds_of_magic_shyish.name": "Shyish — Death",
+  "category.skavenblight.nexus_research.dark_magic.name": "Dark Magic",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_hysh_overview.name": "The Wind of Light",
+  "page.skavenblight.nexus_research.winds_of_magic_hysh_overview.title": "Hysh",
+  "page.skavenblight.nexus_research.winds_of_magic_hysh_overview.text": "Hysh, the White Wind, flows strongest by daylight. It is the wind of healing, protection, and banishment — the Order of Light draws on it to ward the innocent and destroy the undead.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_azyr_overview.name": "The Wind of the Heavens",
+  "page.skavenblight.nexus_research.winds_of_magic_azyr_overview.title": "Azyr",
+  "page.skavenblight.nexus_research.winds_of_magic_azyr_overview.text": "Azyr, the Blue Wind, whispers of fate and weather. The Celestial College reads its currents to divine the future and command the storm.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_chamon_overview.name": "The Wind of Metal",
+  "page.skavenblight.nexus_research.winds_of_magic_chamon_overview.title": "Chamon",
+  "page.skavenblight.nexus_research.winds_of_magic_chamon_overview.text": "Chamon, the Yellow Wind, binds to metal and matter. The Golden Order shapes it into alchemy, transmutation, and enchantment.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ghyran_overview.name": "The Wind of Life",
+  "page.skavenblight.nexus_research.winds_of_magic_ghyran_overview.title": "Ghyran",
+  "page.skavenblight.nexus_research.winds_of_magic_ghyran_overview.text": "Ghyran, the Green Wind, is the breath of growing things. The Jade College tends it to heal the land and command nature's bounty.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_aqshy_overview.name": "The Wind of Fire",
+  "page.skavenblight.nexus_research.winds_of_magic_aqshy_overview.title": "Aqshy",
+  "page.skavenblight.nexus_research.winds_of_magic_aqshy_overview.text": "Aqshy, the Red Wind, burns hottest in destruction. The Bright Order channels it into flame, forge, and ruin.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ghur_overview.name": "The Wind of Beasts",
+  "page.skavenblight.nexus_research.winds_of_magic_ghur_overview.title": "Ghur",
+  "page.skavenblight.nexus_research.winds_of_magic_ghur_overview.text": "Ghur, the Brown Wind, runs wild and hungry. The Amber Brotherhood rides it to command beasts and take their shape.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ulgu_overview.name": "The Wind of Shadow",
+  "page.skavenblight.nexus_research.winds_of_magic_ulgu_overview.title": "Ulgu",
+  "page.skavenblight.nexus_research.winds_of_magic_ulgu_overview.text": "Ulgu, the Grey Wind, thickens after dark. The Grey Order weaves it into illusion, fear, and things unseen.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_shyish_overview.name": "The Wind of Death",
+  "page.skavenblight.nexus_research.winds_of_magic_shyish_overview.title": "Shyish",
+  "page.skavenblight.nexus_research.winds_of_magic_shyish_overview.text": "Shyish, the Purple Wind, pools where things end. The Amethyst Order commands it over death, decay, and the fates of mortals.",
+
+  "entry.skavenblight.nexus_research.dark_magic_overview.name": "Dark Magic (Dhar)",
+  "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
+  "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools."
 
 }
