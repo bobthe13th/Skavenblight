@@ -227,5 +227,20 @@
   "spell.skavenblight.reap_soul.description": "Commands the target's spirit to depart, dealing devastating instant damage if they are already weakened.",
 
   "spell.skavenblight.wind_blast.name": "Wind Blast",
-  "spell.skavenblight.wind_blast.description": "Unleashes a sudden, powerful gale that blows away enemies and pushes them back."
+  "spell.skavenblight.wind_blast.description": "Unleashes a sudden, powerful gale that blows away enemies and pushes them back.",
+
+  "spell.skavenblight.mantle_of_chamon.name": "Mantle of Chamon",
+  "spell.skavenblight.mantle_of_chamon.description": "Wreathes the caster in a metallic sheen of Chamon, granting standard defense and resistance.",
+  "spell.skavenblight.swift_ghyran.name": "Swift Ghyran",
+  "spell.skavenblight.swift_ghyran.description": "Infuses the caster with botanical speed, allowing rapid land movement.",
+  "spell.skavenblight.breath_of_life.name": "Breath of Life",
+  "spell.skavenblight.breath_of_life.description": "Gently touches the target, closing wounds and instantly restoring vital health.",
+  "spell.skavenblight.breath_of_aqshy.name": "Breath of Aqshy",
+  "spell.skavenblight.breath_of_aqshy.description": "Exhales a sweeping cone of bright fire that scorches all enemies in front of the caster.",
+  "spell.skavenblight.dazzling_brightness.name": "Dazzling Brightness",
+  "spell.skavenblight.dazzling_brightness.description": "Emits a sudden, blinding flash of Hysh light that temporarily deprives the target of sight.",
+  "spell.skavenblight.chilling_grave.name": "Chilling Grave",
+  "spell.skavenblight.chilling_grave.description": "Channels the deep freeze of the tomb, slowing the target to a crawl.",
+  "spell.skavenblight.primal_snarl.name": "Primal Snarl",
+  "spell.skavenblight.primal_snarl.description": "Emits a territorial beast roar that strikes weakness and fear into the target."
 }

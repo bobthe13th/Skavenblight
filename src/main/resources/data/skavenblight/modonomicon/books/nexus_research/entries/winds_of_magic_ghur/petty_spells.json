@@ -21,6 +21,11 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.fleet_foot_of_ghur.name",
       "text": "spell.skavenblight.fleet_foot_of_ghur.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.primal_snarl.name",
+      "text": "spell.skavenblight.primal_snarl.description"
     }
   ]
 }

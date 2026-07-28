@@ -1,0 +1,13 @@
+{
+  "wind": "aqshy",
+  "tier": 2,
+  "casting_number": 50,
+  "casting_time": "full_action",
+  "effect": {
+    "type": "sweeping_cone_damage",
+    "amount": 8.0,
+    "radius": 4.0,
+    "angle_degrees": 90.0
+  },
+  "description_key": "spell.skavenblight.breath_of_aqshy.description"
+}

@@ -21,6 +21,16 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.father_of_the_thorn.name",
       "text": "spell.skavenblight.father_of_the_thorn.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.swift_ghyran.name",
+      "text": "spell.skavenblight.swift_ghyran.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.breath_of_life.name",
+      "text": "spell.skavenblight.breath_of_life.description"
     }
   ]
 }

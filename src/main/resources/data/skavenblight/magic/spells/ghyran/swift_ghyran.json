@@ -1,0 +1,13 @@
+{
+  "wind": "ghyran",
+  "tier": 1,
+  "casting_number": 30,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:speed",
+    "duration_ticks": 800,
+    "amplifier": 1
+  },
+  "description_key": "spell.skavenblight.swift_ghyran.description"
+}

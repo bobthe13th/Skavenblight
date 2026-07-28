@@ -26,6 +26,11 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.reap_soul.name",
       "text": "spell.skavenblight.reap_soul.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.chilling_grave.name",
+      "text": "spell.skavenblight.chilling_grave.description"
     }
   ]
 }
