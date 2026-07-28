@@ -1260,4 +1260,201 @@ public class PathingRegionGameTests {
                             + " full topology rebuilds - expected at most a handful, not one per block");
         });
     }
+
+    /**
+     * Task 12: the two player-countermeasure scenarios named explicitly in the original
+     * requirements ("players will put their nexus at build height or bury it in bedrock") - a
+     * floating nexus (this test) and a bedrock-buried nexus ({@link #testBedrockBuriedNexusGetsMinedTo}).
+     * Both reuse a taller structure ({@code pathing_test_tall}, 32x24x32 - see this method's own
+     * "why 32 wide" note below and task-12-report.md) instead of {@code pathing_test} (32x8x32,
+     * whose 8-block height doesn't leave enough room for a real "bridge down to the ground" case).
+     *
+     * <p><b>Why 32 wide, not the task brief's original 16 wide:</b> a footprint exactly 16 wide
+     * would exactly equal one chunk, so whether it lands as a single clean chunk or straddles two
+     * depends entirely on GameTest's placement alignment for that run - and the class javadoc's
+     * "territory wider than one chunk" bullet, plus {@link #anchorChunkFor}'s own alignment proof,
+     * already establish (empirically, across every earlier task in this file) that GameTest does
+     * NOT place structures at 16-aligned world positions. A 32-wide footprint is what makes
+     * {@link #anchorChunkFor}'s proof (the chunk containing structure-relative (16,*,16) is always
+     * fully inside 0..31) hold at all; reusing it here is far lower-risk than deriving a fresh
+     * alignment proof for a 16-wide structure. See task-12-report.md for the full reasoning.
+     *
+     * <p>Geometry (kept as close to the brief's original figures as the anchoring rewrite allows -
+     * only X/Z are rebased onto {@link #anchorChunkFor}'s baseX/baseZ, every Y is unchanged): an
+     * isolated 5x5 platform at helper-y=19 (template y=18), with the nexus at helper-y=20 (template
+     * y=19) sitting on it - nothing supporting the platform and nothing else at that height, so it
+     * only exists as its own disconnected Region if {@code RegionScanner} is working correctly, and
+     * the ~18-block vertical gap down to the main floor's own walkable layer (helper-y=2/template
+     * y=1) is comfortably inside a single {@code SiegeLineTracer} trace ({@code MAX_PROJECT_LENGTH}
+     * = 32 - no chaining needed here, unlike {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s
+     * 40-block shaft, which is the proven reference this task's own brief points at for what
+     * vertical spans actually work within these caps).
+     */
+    @GameTest(template = "pathing_test_tall", timeoutTicks = 800, skyAccess = true)
+    public static void testFloatingNexusGetsBridgedToGround(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        // Isolated 5x5 platform, nothing supporting it and nothing else at that height - matches
+        // the task brief's own geometry verbatim aside from the baseX/baseZ rebasing.
+        for (int lx = 6; lx <= 10; lx++) {
+            for (int lz = 6; lz <= 10; lz++) {
+                helper.setBlock(new BlockPos(baseX + lx, 19, baseZ + lz), Blocks.STONE.defaultBlockState());
+            }
+        }
+        BlockPos relativeNexusPos = new BlockPos(baseX + 8, 20, baseZ + 8);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] loggedDump = {false};
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+
+            if (!loggedDump[0]) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount());
+                }
+                for (RegionConnector connector : regionMap.getRegionGraph().getAllConnectors()) {
+                    LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={}",
+                            connector.regionA(), connector.regionB(), connector.cost());
+                }
+                loggedDump[0] = true;
+            }
+
+            check(regions.size() == 2,
+                    "expected the floating platform and the ground to scan as 2 regions, found " + regions.size());
+            check(!regionMap.getRegionGraph().getAllConnectors().isEmpty(),
+                    "expected at least one connector discovered bridging the platform down to the ground");
+        });
+    }
+
+    /**
+     * Task 12: the bedrock-buried-nexus half of the two named player-countermeasure scenarios (see
+     * {@link #testFloatingNexusGetsBridgedToGround}'s javadoc for the other half and the shared
+     * structure's own sizing rationale).
+     *
+     * <p><b>Why the brief's original snippet for this test could not be used as written:</b> its
+     * geometry (fill a 7-thick stone slab - template y=-1..5 - with the nexus embedded 4 layers
+     * down from open air, plus a redundant single-layer "pocket" carve that was already open air in
+     * the base structure) does not actually produce a MINE-based connector, for two independent
+     * reasons confirmed by reading the source directly rather than assumed:
+     *
+     * <ul>
+     * <li>{@code RegionScanner}'s flood fill ({@code getValidOrthogonalSteps}) only ever offers a
+     * MINE step at {@code dy == 0} (see that method's own comment: "at the current Y") - there is
+     * no vertical MINE in the per-cell connectivity evaluator at all, only horizontal. So
+     * {@code RegionScanner.MAX_CONSECUTIVE_MINE_DEPTH} (the constant the brief's Step 4 warns to
+     * check) governs horizontal tunneling between regions, not the vertical descent this scenario
+     * needs - it was the wrong constant to worry about.</li>
+     * <li>The vertical descent a buried nexus actually needs is a macro-level trace
+     * ({@code RegionGraph.tryTrace} calling {@code SiegeLineTracer.trace} with {@code dy=-1}), which
+     * enforces its OWN, separate cap: {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE = 5}. Exceeding
+     * it doesn't chain or fall back - {@code trace} returns {@code TraceResult.aborted()}, and
+     * {@code RegionGraph.tryTrace} treats an aborted result as a hard stop for that direction (no
+     * connector, no retry). A 7-thick plug needs at least 7 consecutive MINE actions to punch
+     * through - well past the cap - so the brief's own geometry can never find a connector this
+     * way, regardless of how long the test waits.</li>
+     * </ul>
+     *
+     * <p><b>The geometry actually used here, derived from tracing {@code determineMacroAction}
+     * directly:</b> a 2-thick stone plug (helper-y=5..6, template y=4..5) across the whole anchored
+     * chunk, sitting on top of a pocket left at its default open state from the base structure
+     * (template y=1..3, helper-y=2..4) - which is itself sitting on the structure's own original
+     * floor (template y=0, helper-y=1, already stone - this is also where the nexus marker is
+     * placed, an inert re-placement of the same stone already there, same convention as
+     * {@link #testParentRegionGetsRealInstructionsForSharedConnectorCells}). Two solid layers are
+     * already enough to make the pocket and the main region separate {@code Region}s - the per-step
+     * evaluator can only change Y by at most 1 per hop ({@code HORIZONTAL_OFFSETS} pairs a
+     * horizontal shift with {@code dy} in {-1,0,1}; there is no pure-vertical, same-column step at
+     * all), so any solid layer at all already blocks ordinary flood-fill connectivity between the
+     * two open pockets - the plug is exactly 2 thick for margin against
+     * {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE}, not because 1 wouldn't already separate them.
+     *
+     * <p>Tracing a downward {@code SiegeLineTracer} run from the main region's own boundary cell
+     * (template y=6, helper-y=7, resting on the plug's top) step by step against
+     * {@code determineMacroAction}: the 2 plug layers (template y=5, y=4) are both MINE
+     * (straightforwardly solid). The next two steps, INTO the pocket's own open interior (template
+     * y=3, then y=2), are ALSO classified MINE - not because those blocks are solid (they aren't),
+     * but because {@code determineMacroAction}'s first check
+     * (`dy != 0 && ceiling.blocksMotion()`, where {@code ceiling} is 2 blocks above the position
+     * under evaluation) still sees the plug 2 blocks above them and returns MINE before ever
+     * checking whether the position itself is open. Only on the 5th consecutive step (template
+     * y=1, resting on the structure's own solid floor at y=0, with both {@code ceiling} (y=3) and
+     * {@code head} (y=2) genuinely clear) does the action fall through to {@code WALK} and
+     * {@code isWalkableTerrain} finally return true, completing the trace. Total consecutive MINE
+     * count across the whole descent: 4 (2 real plug layers + 2 "phantom" mine steps still inside
+     * the pocket's own open space) - one full step of margin under the {@code MAX_CONSECUTIVE_MINE}
+     * = 5 cap, confirmed by this exact step-by-step trace rather than assumed. See
+     * task-12-report.md for the full derivation and the run output confirming it.
+     */
+    @GameTest(template = "pathing_test_tall", timeoutTicks = 800, skyAccess = true)
+    public static void testBedrockBuriedNexusGetsMinedTo(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        // Pocket location at the chunk's own edge (local x=0) - same boundary-cell convention as
+        // testLongConnectorCellsAreNeverOrphanedFromLookup's shaft, guaranteeing a boundary cell in
+        // both the pocket region and the main region sit directly above/below each other regardless
+        // of this run's own chunk-alignment offset.
+        int pocketLocalX = 0;
+        int pocketLocalZ = 8;
+
+        // 2-thick plug (helper-y=5..6, template y=4..5) across the WHOLE anchored chunk, sealing
+        // the pocket below (template y=1-3, left at its default open state from the base structure)
+        // from the main region above (template y=6+, also default open) - see method javadoc for
+        // the full step-by-step trace this depth is derived from.
+        for (int lx = 0; lx <= 15; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = 5; y <= 6; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.STONE.defaultBlockState());
+                }
+            }
+        }
+
+        // Nexus marker on the pocket's own floor block (helper-y=1/template y=0, already stone - an
+        // inert re-placement, same convention as every other nexus marker in this class) - buried
+        // in solid rock with no natural cavity of its own; the pocket's one walkable cell sits
+        // directly above it (helper-y=2), reachable only by mining down through the plug from the
+        // main region above.
+        BlockPos relativeNexusPos = new BlockPos(baseX + pocketLocalX, 1, baseZ + pocketLocalZ);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] loggedDump = {false};
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+
+            if (!loggedDump[0]) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount());
+                }
+                for (RegionConnector connector : regionMap.getRegionGraph().getAllConnectors()) {
+                    LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={}",
+                            connector.regionA(), connector.regionB(), connector.cost());
+                }
+                loggedDump[0] = true;
+            }
+
+            check(!regionMap.getRegionGraph().getAllConnectors().isEmpty(),
+                    "expected a MINE-based connector discovered down into the buried nexus pocket");
+        });
+    }
 }
