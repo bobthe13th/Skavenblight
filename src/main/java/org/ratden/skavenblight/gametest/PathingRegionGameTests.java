@@ -9,6 +9,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.region.Region;
@@ -977,6 +978,231 @@ public class PathingRegionGameTests {
                                 + "mob standing there would be orphaned");
             }
             loggedDump[0] = true;
+        });
+    }
+
+    // Task 9 characterization test constants - see the test method's own javadoc below for what
+    // each governs. Declared ABOVE the javadoc (rather than between it and the method, where a
+    // {@code @link}-to-self would silently attach the javadoc to the wrong element and leave the
+    // test method with none - javac won't flag this) so the javadoc block below documents the
+    // method it immediately precedes.
+    private static final int FILL_COLUMN_COUNT = 6;
+    // 100 ticks * ~2.9ms/tick (measured empirically in this environment - see method javadoc) =>
+    // ~290ms apart; comfortably more than RECALC_COOLDOWN_TICKS's 80-tick minimum. Total span for
+    // FILL_COLUMN_COUNT=6 placements = 500 ticks =~ 1450ms, comfortably under
+    // TOPOLOGY_REBUILD_COOLDOWN_MS's 2000ms, so once Step 4's debounce exists, all of them fall
+    // inside ONE debounce window.
+    private static final long FILL_COLUMN_SPACING_TICKS = 100L;
+    // How long (real ms) to wait after the LAST placement before reading final counts - must
+    // exceed TerritoryRegionMap.TOPOLOGY_REBUILD_COOLDOWN_MS (2000ms, not otherwise visible from
+    // this package) so any still-pending re-queued region gets its last chance to be picked up.
+    private static final long POST_FILL_SETTLE_MS = 2500L;
+
+    /**
+     * Task 9 Steps 1-4: characterizes how many full territory rebuilds a sustained siege's
+     * connector-completion traffic produces, then (Step 3 having confirmed the naive answer is
+     * bad) proves Step 4's debounce actually bounds it.
+     *
+     * <p>Geometry: {@link #testTwoDisconnectedRegionsGetOneConnector}'s trench-split layout,
+     * widened to {@link #FILL_COLUMN_COUNT} columns (see below for why) - a gap splitting the
+     * chunk into a near side and far side, joined by the one connector {@code RegionGraph.build}
+     * finds across it, with the nexus at local ({@code baseX+1}, helper y=2, {@code baseZ+8}).
+     * After the initial {@code rebuild()} is issued, this simulates a rat filling the trench in
+     * one column at a time - as {@code BuildFlowFieldGoal}'s real construction would, reporting
+     * each placement via {@code onBlockChanged} the same way
+     * {@code RegionFlowField.forceRecalculation} does (Task 3) - restoring the floor block
+     * (helper y=1) at local x=6, then 7, 8, ... up through {@code 6 + FILL_COLUMN_COUNT - 1}, all
+     * at the same z row (local z=8, the nexus/probe row from
+     * {@link #testTwoDisconnectedRegionsGetOneConnector}).
+     *
+     * <p><b>Why the brief's literal snippet for this test could not be used as written:</b> it (a)
+     * used fixed structure-relative coordinates spanning local z=0..31 as ONE territory chunk set
+     * ({@code Set.of(new ChunkPos(nexusPos))}) while carving/probing across more than 16 blocks of
+     * z - exactly the encasement-padding contamination the class javadoc's "territory wider than
+     * one chunk" bullet warns against; and (b) never called
+     * {@code regionMap.tick(helper.getLevel())} anywhere. Every other test in this class that
+     * drives {@code onBlockChanged} learned (see
+     * {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}'s javadoc) that this
+     * {@code TerritoryRegionMap} is a bare instance nobody else ticks - without an explicit,
+     * repeated {@code tick()} call, {@code recomputeDirtyRegions} never runs at all and
+     * {@code getTopologyRebuildCount()} would trivially stay 0 forever: a false pass for the wrong
+     * reason (a broken test), not the real characterization this task needs. Rewritten here using
+     * this class's established {@link #anchorChunkFor}/{@link #minRelY} single-chunk convention
+     * and a single {@code succeedWhen} that drives {@code tick()} every check, matching
+     * {@code testDirtyRegionBatchProducesOneCoherentFinalIndex}'s own pattern.
+     *
+     * <p><b>Sequencing: fixed real-time-calibrated tick spacing, not confirm-then-advance.</b> An
+     * earlier revision of this test placed each column only after confirming (via
+     * {@code getTopologyRebuildCount() + getBlockChangeRebuildCount()} increasing) that the
+     * PREVIOUS one's own dirty batch had been picked up and finished, to guard against several
+     * placements coalescing into one {@code recomputeDirtyRegions} batch under this GameTest
+     * server's concurrent-test thread contention (all 12 of this mod's GameTests run in one
+     * process sharing one background executor - the same pool {@code TerritoryRegionMap.tick()}
+     * dispatches every async recompute onto - so two fixed-tick placements could get queued before
+     * either one's async batch actually finished). That confirm-then-advance approach is
+     * fundamentally incompatible with testing Step 4's debounce: once the debounce exists, a
+     * DEBOUNCED placement's counters never increase until the full {@code
+     * TOPOLOGY_REBUILD_COOLDOWN_MS} (2000ms REAL time) window elapses, so confirm-then-advance just
+     * SERIALIZES each of the {@link #FILL_COLUMN_COUNT} placements against its own full debounce
+     * wait - reproducing the exact same total rebuild count, just spread out, never letting
+     * multiple pending changes coexist long enough for the debounce to actually COALESCE them
+     * (confirmed empirically: this failed with "waiting for column 1's dirty recompute to be
+     * picked up" once the debounce was added - see task-9-report.md). Fixed by using fixed-tick
+     * spacing after all, but CALIBRATED against this environment's actual measured tick rate
+     * (~2.9ms/tick empirically, i.e. this GameTest server runs roughly 17x faster than vanilla's
+     * 20 ticks/sec - see task-9-report.md's calibration measurement) rather than guessed: each
+     * placement is spaced {@link #FILL_COLUMN_SPACING_TICKS} ticks apart (comfortably more than
+     * {@code RECALC_COOLDOWN_TICKS}'s 80-tick minimum, so each still has a real chance at its own
+     * batch pre-debounce), with the FULL {@link #FILL_COLUMN_COUNT}-placement span calibrated to
+     * land comfortably UNDER {@code TOPOLOGY_REBUILD_COOLDOWN_MS} so that, once the debounce
+     * exists, all of them fall inside ONE debounce window and coalesce. The final assertion then
+     * waits, using {@code System.currentTimeMillis()} directly (matching the debounce's own real
+     * wall-clock unit, not a tick-count guess), until at least {@code TOPOLOGY_REBUILD_COOLDOWN_MS}
+     * plus a safety margin has elapsed since the LAST placement, guaranteeing any still-pending
+     * re-queued region has had its final chance to be picked up before the count is read.
+     *
+     * <p><b>{@code Config.minimumSettleDelayMs} is temporarily forced to 0</b> (restored once all
+     * placements have been issued, before this method's final wait/assertions run) so batch
+     * dispatch is gated purely by the deterministic, tick-based {@code RECALC_COOLDOWN_TICKS} (80
+     * ticks) instead of ALSO waiting out the real-time settle delay on top of everything else.
+     * This is the same plain mutable static {@code DebugPathingCommands} already adjusts at
+     * runtime, not a new pattern.
+     *
+     * <p>Per the Task 9 Step 0c parking note on {@code reclaimConnectorCells} (see
+     * task-9-report.md's Steps 0/0b/0c section): once the initial {@code rebuild()} registers the
+     * one connector across this trench, EVERY subsequent dirty rescan of either endpoint region -
+     * SO LONG AS THE GAP HASN'T FULLY CLOSED YET (a connector, however narrow, still exists) -
+     * always finds {@code rescanned.size() >= 2}, taking the topology-changed/full-rebuild branch.
+     *
+     * <p><b>Trench width discovered empirically to matter here, beyond the brief's original
+     * 4-wide figure:</b> {@code recomputeDirtyRegions}'s own check is {@code rescanned.size() !=
+     * 1} - which reliably flags a SPLIT (more than 1 piece found) but silently MISSES the specific
+     * dirty rescan that completes a MERGE, since from either old region's own perspective that
+     * rescan finds exactly 1 piece (itself, now spanning what used to be both sides) - satisfying
+     * "no change" by this check's own logic even though a genuine topology change (a merge) just
+     * happened. Confirmed empirically (see task-9-report.md): with only 4 columns (the brief's
+     * original width), the LAST placement - the one that actually finishes the crossing - always
+     * lands on this missed-merge case instead of the topology-changed branch, so only 3 of the 4
+     * placements produce a rebuild-count increment, landing EXACTLY AT the brief's own
+     * {@code <= 3} threshold rather than past it - a real result, but not a robust demonstration
+     * (a one-off timing quirk either way would flip the assertion). Widened to
+     * {@link #FILL_COLUMN_COUNT} columns so the {@code FILL_COLUMN_COUNT - 1} "still gapped,
+     * connector active" placements alone comfortably exceed the threshold regardless of how the
+     * final, structurally-different merge placement resolves.
+     *
+     * <p><b>Step 4's debounce is expected to be INERT at vanilla tick rate - see
+     * task-9-report.md.</b> {@code RECALC_COOLDOWN_TICKS} (80 ticks) already gates every dispatch
+     * of {@code recomputeDirtyRegions}, and that method increments {@code topologyRebuildCount} at
+     * most once per dispatch (it {@code return}s immediately after the first hit) - so two
+     * consecutive topology-changed hits are naturally at least 80 ticks apart, which at vanilla 20
+     * ticks/second is 4000ms, already stricter than {@code TOPOLOGY_REBUILD_COOLDOWN_MS}'s 2000ms.
+     * This test can only observe the debounce actually suppressing anything because this GameTest
+     * server ticks roughly 17x faster than vanilla (measured ~2.9ms/tick - see
+     * {@link #FILL_COLUMN_SPACING_TICKS}'s doc), compressing 80 ticks to ~230ms, well inside the
+     * 2000ms window. <b>This test is EXPECTED TO FAIL before Step 4's debounce exists, and to pass
+     * once it's added</b> - see task-9-report.md's Steps 1-5 section for the actual run output and
+     * the production-inertness finding in full.
+     */
+    // Generous relative to POST_FILL_SETTLE_MS (2500ms real time, the actual gate - see
+    // succeedWhen below): this GameTest server's tick-to-real-time ratio is NOT stable across runs
+    // (observed empirically - a calibration measurement of ~2.9ms/tick under light load produced
+    // real timeouts under heavier concurrent-test load, where ticks apparently run even faster
+    // relative to wall-clock time, needing far more of them to reach the same real-ms target -
+    // see task-9-report.md and testDirtyRegionBatchProducesOneCoherentFinalIndex's own similar
+    // timeoutTicks comment for the same class of issue). Set generously high so the tick BUDGET is
+    // never the bottleneck regardless of how fast/slow this particular run's ticks happen to pace
+    // against real time - the real gate is POST_FILL_SETTLE_MS itself, not this number.
+    @GameTest(template = "pathing_test", timeoutTicks = 40000, skyAccess = true)
+    public static void testRepeatedConnectorCompletionsDontExplodeRebuildCount(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+        int minRelY = minRelY(helper);
+        int fillLocalZ = 8;
+
+        // A FILL_COLUMN_COUNT-wide trench (local x 6..(6+FILL_COLUMN_COUNT-1), full local z 0-15) -
+        // wider than testTwoDisconnectedRegionsGetOneConnector's original 4-wide trench (see this
+        // method's own javadoc for why), carved full-depth (see class javadoc's underside-sliver
+        // note). The near side stays at local x 0-5 (6 wide); the far side is pushed out to
+        // whatever's left (local x (6+FILL_COLUMN_COUNT)..15), still comfortably wide enough for a
+        // real region.
+        for (int lx = 6; lx < 6 + FILL_COLUMN_COUNT; lx++) {
+            for (int lz = 0; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 1, 2, baseZ + fillLocalZ);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        int originalSettleDelayMs = Config.minimumSettleDelayMs;
+        Config.minimumSettleDelayMs = 0;
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        // Places each column's floor block (helper y=1) but reports onBlockChanged against the
+        // WALKABLE cell above it (helper y=2), not the block actually placed - matching the
+        // convention every other onBlockChanged call in this class already uses (see
+        // testConnectorCellsSurviveADirtyRegionRescan's unrelatedPos /
+        // testDirtyRegionBatchProducesOneCoherentFinalIndex's nearProbe/farProbe, all
+        // walkable-layer positions). tick()'s neighborsAndSelf only checks ORTHOGONAL neighbors of
+        // whatever position it's given, all at that SAME Y - for a same-level wall break this
+        // correctly lands on the flanking regions' own walkable cells, but for a FLOOR change the
+        // newly-walkable cell sits one Y ABOVE the block that actually changed, one diagonal step
+        // from the existing region's walkable edge, which no single orthogonal neighbor of the
+        // floor block itself reaches. Reporting the walkable cell directly sidesteps that gap: its
+        // own west/east neighbor lands exactly on the pre-existing near/far region's edge cell (the
+        // first/last column) or on the previous column's own now-claimed cell (every column in
+        // between, cascading once the prior column's own rebuild/recompute has absorbed it).
+        //
+        // See this method's own javadoc for why these are spaced by FILL_COLUMN_SPACING_TICKS
+        // fixed ticks rather than confirmed one-at-a-time.
+        long[] lastPlacementRealTimeMs = {-1L};
+        for (int i = 0; i < FILL_COLUMN_COUNT; i++) {
+            int lx = baseX + 6 + i;
+            boolean isLast = (i == FILL_COLUMN_COUNT - 1);
+            helper.runAfterDelay(FILL_COLUMN_SPACING_TICKS * (i + 1), () -> {
+                helper.setBlock(new BlockPos(lx, 1, baseZ + fillLocalZ), Blocks.STONE.defaultBlockState());
+                regionMap.onBlockChanged(helper.absolutePos(new BlockPos(lx, 2, baseZ + fillLocalZ)));
+                if (isLast) {
+                    // Restored here (right after the last placement is issued), not gated behind
+                    // the POST_FILL_SETTLE_MS wait below - Config is a JVM-wide static shared with
+                    // every other GameTest in this run, and the settle delay isn't needed for
+                    // anything past this point anyway, so restoring it as early as possible avoids
+                    // leaving 0 in place for the rest of the session if this test times out before
+                    // reaching its final assertions (a plain field write, not gated by
+                    // succeedWhen's retry loop, so it happens exactly once regardless of outcome).
+                    Config.minimumSettleDelayMs = originalSettleDelayMs;
+                    lastPlacementRealTimeMs[0] = System.currentTimeMillis();
+                }
+            });
+        }
+
+        helper.succeedWhen(() -> {
+            regionMap.tick(helper.getLevel());
+
+            check(lastPlacementRealTimeMs[0] > 0,
+                    "waiting for all " + FILL_COLUMN_COUNT + " column placements to be issued");
+
+            // Waits out TOPOLOGY_REBUILD_COOLDOWN_MS (plus margin) using REAL elapsed time,
+            // matching the debounce's own wall-clock unit - see method javadoc for why a tick-count
+            // guess isn't reliable here. tick() keeps being driven above on every retry, so any
+            // region re-queued by the debounce (Step 4) still gets picked up during this wait.
+            check(System.currentTimeMillis() - lastPlacementRealTimeMs[0] >= POST_FILL_SETTLE_MS,
+                    "waiting for the topology-rebuild cooldown window (if any) to fully elapse after the last placement");
+
+            check(!regionMap.isCalculating(), "region map still calculating");
+            LOGGER.info("[Skavenblight][test] final counts after {} column placements: topologyRebuildCount={} blockChangeRebuildCount={}",
+                    FILL_COLUMN_COUNT, regionMap.getTopologyRebuildCount(), regionMap.getBlockChangeRebuildCount());
+            check(regionMap.getTopologyRebuildCount() <= 3,
+                    "filling in one " + FILL_COLUMN_COUNT + "-block-wide connector triggered "
+                            + regionMap.getTopologyRebuildCount()
+                            + " full topology rebuilds - expected at most a handful, not one per block");
         });
     }
 }

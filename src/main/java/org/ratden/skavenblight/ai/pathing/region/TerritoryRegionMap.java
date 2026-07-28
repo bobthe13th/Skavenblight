@@ -52,6 +52,44 @@ public class TerritoryRegionMap {
     // FlowFieldState that this map no longer recomputes.
     private volatile long generation = 0;
 
+    // Task 9 Step 1: distinct counters for the two recomputeDirtyRegions outcomes, so a full
+    // rebuild triggered by a genuine (or, per the Task 9 Step 0c parking note, spuriously
+    // detected) topology change can be told apart from an ordinary single-region fast-path
+    // recompute - used by this task's characterization test and for manual observation via
+    // debug commands/logging later.
+    private volatile int topologyRebuildCount = 0;
+    private volatile int blockChangeRebuildCount = 0;
+
+    // Task 9 Step 4: debounces how often the topology-changed branch is actually ACTED on. Per
+    // the Step 3 characterization test (see task-9-report.md), a sustained siege's connector
+    // traffic drives this branch far more often than genuine split/merge frequency alone would
+    // suggest (see the Step 0c parking note on reclaimConnectorCells for the proven cause).
+    // Distinct from Config.minimumSettleDelayMs, which governs terrain CAPTURE (how long to wait
+    // after a block change before recomputing at all) rather than how often a DETECTED merge gets
+    // acted on. This bounds HOW OFTEN a full rebuild fires; it does NOT restore the fast path's
+    // original intended benefit (a cheap region-local recompute instead of a network-wide one) -
+    // that requires the architectural fix the parking note describes, still unaddressed.
+    //
+    // PARKING NOTE (Task 9, not yet resolved): this cooldown is expected to be INERT at vanilla
+    // tick rate, and possibly always. RECALC_COOLDOWN_TICKS (80 ticks, below) already gates every
+    // dispatch of recomputeDirtyRegions, and that method increments topologyRebuildCount at most
+    // once per dispatch (it returns immediately after the first topology-changed hit in a batch) -
+    // so two consecutive topology-changed hits are naturally at least 80 ticks apart, which at
+    // vanilla 20 ticks/second is 4000ms, already STRICTER than this field's 2000ms window (and
+    // only gets stricter under server lag, which lengthens real time per tick). The
+    // PathingRegionGameTests characterization test can only observe this cooldown suppressing
+    // anything because that GameTest server ticks roughly 17x faster than vanilla (measured
+    // empirically at ~2.9ms/tick - see task-9-report.md), compressing the 80-tick gate to ~230ms,
+    // well inside this 2000ms window. On a real, vanilla-or-slower-paced server this constant is
+    // therefore expected to never actually trigger the re-queue branch below - full-rebuild
+    // frequency stays bounded by RECALC_COOLDOWN_TICKS alone, exactly as before this Step existed.
+    // Confirming this against a real (non-GameTest, non-tick-compressed) server, and deciding
+    // whether a TICK-denominated cooldown (comparable to RECALC_COOLDOWN_TICKS, environment-speed-
+    // independent) would be the more meaningful fix if one is still wanted, is unresolved - see
+    // task-9-report.md's Steps 1-5 section for the full analysis.
+    private long lastTopologyRebuildTime = 0;
+    private static final long TOPOLOGY_REBUILD_COOLDOWN_MS = 2000;
+
     private volatile RegionIndex regionIndex = new RegionIndex(List.of());
     private volatile RegionGraph regionGraph = null;
     private volatile RegionRouteTree routeTree = null;
@@ -345,6 +383,28 @@ public class TerritoryRegionMap {
         return generation;
     }
 
+    /**
+     * Number of times {@code recomputeDirtyRegions} has taken its topology-changed branch (a
+     * dirty region's local rescan found other than exactly 1 sub-region, triggering a full
+     * {@code rebuildRegionsAndGraph} - see that method's call site). See the Task 9 Step 0c
+     * parking note on {@code reclaimConnectorCells} and task-9-report.md: this fires far more
+     * often than a genuine split/merge, for any region with an active connector.
+     */
+    public int getTopologyRebuildCount() {
+        return topologyRebuildCount;
+    }
+
+    /**
+     * Number of times {@code recomputeDirtyRegions} has taken its non-topology-changed ("fast
+     * path") branch - a dirty region's local rescan found exactly 1 sub-region, so only that
+     * region's membership/flow field were recomputed rather than the whole network. Distinct from
+     * {@link #getTopologyRebuildCount()} so the two outcomes can be told apart by manual
+     * observation (e.g. a debug command) as well as by tests.
+     */
+    public int getBlockChangeRebuildCount() {
+        return blockChangeRebuildCount;
+    }
+
     /** Network-wide siege project manager (shared by every region's calculation pass) - exposed for debug dumps. */
     public SiegeProjectManager getProjectManager() {
         return projectManager;
@@ -541,10 +601,31 @@ public class TerritoryRegionMap {
                     injectSharedConnectorProjects(regionGraph, routeTree, regionId);
                     calculator.calculateFully(snapshot, state);
                 }
+                // Task 9 Step 1: counts a completed fast-path pass for this region, distinct from
+                // topologyRebuildCount below - see getBlockChangeRebuildCount's doc.
+                this.blockChangeRebuildCount++;
                 continue;
             }
 
+            // Task 9 Step 4: debounces how often a DETECTED topology change is actually acted on -
+            // see the lastTopologyRebuildTime field doc for why this is a frequency bound, not a
+            // fix for the underlying over-detection (see the Step 0c parking note on
+            // reclaimConnectorCells). Deliberately checked BEFORE the "topology changed" log line
+            // below so a debounced pass doesn't claim a rebuild was triggered when it wasn't.
+            if (System.currentTimeMillis() - lastTopologyRebuildTime < TOPOLOGY_REBUILD_COOLDOWN_MS) {
+                // Still within cooldown - re-queue this region as dirty so it's picked up on the
+                // next eligible pass instead of silently dropping the detected change.
+                dirtyRegionIds.add(regionId);
+                continue;
+            }
+            lastTopologyRebuildTime = System.currentTimeMillis();
+
             LOGGER.info("[Skavenblight] Region {} topology changed ({} sub-regions found) - full territory rebuild triggered", regionId, rescanned.size());
+            // Task 9 Step 1: counts every time this branch fires, whether from a genuine
+            // split/merge or (per the Task 9 Step 0c parking note on reclaimConnectorCells) a
+            // spurious re-detection driven by a connector's bbox-inflated localBounds - see
+            // getTopologyRebuildCount's doc and task-9-report.md.
+            this.topologyRebuildCount++;
             // A genuine split/merge is rare and the region count for a typical base is small (see
             // RegionScanner's manual test notes) - falling back to a full rebuild here is simpler
             // and safer than hand-patching RegionGraph/RegionRouteTree, and still only runs when
