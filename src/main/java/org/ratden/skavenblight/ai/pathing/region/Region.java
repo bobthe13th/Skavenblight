@@ -73,6 +73,14 @@ public class Region {
         return id;
     }
 
+    public int getMinBuildHeight() {
+        return minBuildHeight;
+    }
+
+    public int getHeight() {
+        return height;
+    }
+
     public BlockPos getMin() {
         return min;
     }

@@ -12,6 +12,7 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionConnector;
+import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.slf4j.Logger;
 
@@ -430,6 +431,60 @@ public class PathingRegionGameTests {
             check(regionC != regionB && parentOfC == regionB,
                     "region C's route should hop through the cheaper region B, not the more expensive direct "
                             + "connector to A (found parent=" + parentOfC + ", regionB=" + regionB + ", regionA=" + regionA + ")");
+        });
+    }
+
+    /**
+     * Characterization test for {@link RegionIndex#regionAt}/{@code regionIdAt}, written BEFORE
+     * the task-6 refactor that replaces its linear scan-every-Region-and-call-contains()
+     * implementation with a real O(1) per-chunk flat-array lookup. Same assertions must hold
+     * both before and after that refactor - this test exists to prove behavior didn't change,
+     * not to test new functionality.
+     *
+     * <p>The task-6 brief's original snippet placed the nexus at fixed structure-relative (16, 1,
+     * 16) and probed fixed structure-relative (5, *, 5) with a raw {@code Set.of(new
+     * ChunkPos(nexusPos))} territory. That doesn't survive contact with the class javadoc's
+     * "territory wider than one chunk" bullet: the territory here is exactly the single chunk
+     * containing relative (16, *, 16) (per {@link #anchorChunkFor}'s alignment proof), but that
+     * chunk's own 16-wide window can land anywhere in [1, 31] depending on the run's chunk
+     * alignment - it is NOT guaranteed to contain a fixed point like relative x=5. A probe placed
+     * outside the actual territory chunk would non-deterministically resolve to null regardless
+     * of which RegionIndex implementation is under test, so - as this class's other multi-probe
+     * tests already do - every coordinate below is anchored via {@link #anchorChunkFor} and
+     * expressed as an offset from that chunk's own {@code baseX}/{@code baseZ} instead.
+     *
+     * <p>The walkable probe uses helper-Y=2 (template-Y=1, the actual open/standable layer - see
+     * the class javadoc's helper-Y-offset bullet), not the brief's helper-Y=1 (template-Y=0, the
+     * solid floor block itself): {@code RegionScanner} seeds/stores cells at the position a mob's
+     * feet occupy, i.e. the open cell above the solid floor, not the floor block. helper-Y=1 is
+     * solid stone there and was never a member of any region even under the old linear-scan code.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
+    public static void testRegionIndexLookupCorrectness(GameTestHelper helper) {
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 8, 1, baseZ + 8);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            RegionIndex index = regionMap.getRegionIndex();
+
+            BlockPos walkable = helper.absolutePos(new BlockPos(baseX + 5, 2, baseZ + 5));
+            check(index.regionIdAt(walkable) != null, "an open floor cell should resolve to a region");
+
+            BlockPos belowFloor = helper.absolutePos(new BlockPos(baseX + 5, -60, baseZ + 5));
+            check(index.regionIdAt(belowFloor) == null, "a position far below the floor shouldn't resolve to any region");
+
+            BlockPos aboveCeiling = helper.absolutePos(new BlockPos(baseX + 5, 300, baseZ + 5));
+            check(index.regionIdAt(aboveCeiling) == null, "a position far above the structure shouldn't resolve to any region");
         });
     }
 }
