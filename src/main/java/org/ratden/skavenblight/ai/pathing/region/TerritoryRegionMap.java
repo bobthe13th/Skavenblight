@@ -384,6 +384,17 @@ public class TerritoryRegionMap {
     }
 
     /**
+     * True if {@code capturedGeneration} (the value of {@link #getGeneration()} at the time some
+     * region id was captured/cached) still matches this map's current generation. Region ids are
+     * renumbered from 0 on every full rebuild, so any cached id is only meaningful paired with the
+     * generation it was captured under - use this instead of hand-rolling the comparison at each
+     * call site.
+     */
+    public boolean isCurrent(long capturedGeneration) {
+        return capturedGeneration == this.generation;
+    }
+
+    /**
      * Number of times {@code recomputeDirtyRegions} has taken its topology-changed branch (a
      * dirty region's local rescan found other than exactly 1 sub-region, triggering a full
      * {@code rebuildRegionsAndGraph} - see that method's call site). See the Task 9 Step 0c
