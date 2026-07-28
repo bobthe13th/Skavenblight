@@ -187,5 +187,13 @@
   "page.skavenblight.nexus_research.environmental_catalysts.title1": "Block & Biome Baselines",
   "page.skavenblight.nexus_research.environmental_catalysts.text1": "To make the ambient wind system truly dynamic, chunk wind baselines respond organically to their surroundings. This is driven by two key systems: Block-Level Baselines (local blocks) and Biome-Level Baselines (geographical multipliers).",
   "page.skavenblight.nexus_research.environmental_catalysts.title2": "Catalytic Resonance",
-  "page.skavenblight.nexus_research.environmental_catalysts.text2": "Aqshy (Fire) baselines are boosted by lava and blast furnaces; Ghyran (Life) by moss and fully grown crops; Shyish (Death) by soul sand and spawners. Biome modifiers apply multipliers (e.g. Oceans boost Ghyran/Azyr, Netheir heavily boosts Aqshy)."
+  "page.skavenblight.nexus_research.environmental_catalysts.text2": "Aqshy (Fire) baselines are boosted by lava and blast furnaces; Ghyran (Life) by moss and fully grown crops; Shyish (Death) by soul sand and spawners. Biome modifiers apply multipliers (e.g. Oceans boost Ghyran/Azyr, Netheir heavily boosts Aqshy).",
+
+  "block.skavenblight.alchemical_laboratory": "Alchemical Laboratory",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_brewing.title1": "Alchemical Laboratory",
+  "page.skavenblight.nexus_research.alchemy_brewing.text1": "Unlocking Chamon research grants access to the Alchemical Laboratory (Poor, Good, or Best quality). These laboratories allow mages to brew authentic Warhammer potions using local botanical and metallic ingredients.",
+  "page.skavenblight.nexus_research.alchemy_brewing.title2": "The Brewing Process",
+  "page.skavenblight.nexus_research.alchemy_brewing.text2": "Brewing is governed by potion Name, Effect, Lag Time, Volatility, Cost, Locale, Difficulty, Creation Number, and Time. A d100 skill check determines output potions: failure wastes ingredients, while a critical failure triggers a volatile Brewing Disaster!"
 }
