@@ -195,6 +195,15 @@ public class TerritoryRegionMap {
             // Safe with one shared manager because regions are processed strictly sequentially
             // here - setActiveConnectorProject clears and re-seeds immediately before the pass
             // that consumes it, so no region can see another's project.
+            // Cap this region's own reactive macro-project search to a short local-gap length once
+            // it already has a route-tree-assigned parent connector - long-range connectivity is
+            // that connector's job now (see SiegeProjectManager.setMaxCandidateProjectLength's
+            // doc), not another sunburst-style search from evaluateMacroProjects. A region with no
+            // parent connector yet (including the root) keeps the generous territory-scale default,
+            // since local discovery may still be the only way it connects to anything.
+            projectManager.setMaxCandidateProjectLength(
+                    parentConnector != null ? 6 : SiegeProjectManager.DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH);
+
             // projectFor(region.getId()) picks the orientation that leads OUT of this (child)
             // region: a connector's traced instructions are direction-locked, and this region can
             // be on either end of it (see RegionConnector).
@@ -471,6 +480,10 @@ public class TerritoryRegionMap {
                     // call in rebuildRegionsAndGraph). Uses the CURRENT route tree - this is the
                     // steady-state single-region path, not a full rebuild, so no new tree exists.
                     RegionConnector parentConnector = routeTree != null ? routeTree.getParentConnector(regionId) : null;
+                    // Same local-gap cap as rebuildRegionsAndGraph's matching call - see that
+                    // call's doc and SiegeProjectManager.setMaxCandidateProjectLength's own doc.
+                    projectManager.setMaxCandidateProjectLength(
+                            parentConnector != null ? 6 : SiegeProjectManager.DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH);
                     projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(regionId) : null);
                     calculator.calculateFully(snapshot, state);
                 }

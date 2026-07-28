@@ -66,6 +66,19 @@ public class SiegeLineTracer {
     public TraceResult trace(TerrainAccess terrain, BlockPos anchorPos, int dx, int dy, int dz,
                               BlockPos costBiasTarget, int startingCost, Predicate<BlockPos> outOfBounds,
                               ToIntFunction<BlockPos> costCeiling) {
+        return trace(terrain, anchorPos, dx, dy, dz, costBiasTarget, startingCost, outOfBounds, costCeiling, MAX_PROJECT_LENGTH);
+    }
+
+    /**
+     * Same as the 8-arg overload, but with the line's own length bound overridable instead of
+     * always using {@code MAX_PROJECT_LENGTH} - see SiegeProjectManager.setMaxCandidateProjectLength
+     * for why a region-scoped caller wants a shorter bound than RegionGraph's own territory-wide
+     * connector discovery (which always calls the 8-arg overload above, keeping its full 32-block
+     * reach regardless of this parameter).
+     */
+    public TraceResult trace(TerrainAccess terrain, BlockPos anchorPos, int dx, int dy, int dz,
+                              BlockPos costBiasTarget, int startingCost, Predicate<BlockPos> outOfBounds,
+                              ToIntFunction<BlockPos> costCeiling, int maxLength) {
         int projectCost = Config.buildingBasePenalty * COST_MULTIPLIER;
         int mineChainLength = 0;
         BlockPos currentTarget = anchorPos;
@@ -75,7 +88,7 @@ public class SiegeLineTracer {
         // determineMacroAction computed for that very position - see TraceResult's doc.
         List<SiegeNode> orderedSteps = new ArrayList<>();
 
-        for (int i = 1; i <= MAX_PROJECT_LENGTH; i++) {
+        for (int i = 1; i <= maxLength; i++) {
             BlockPos nextPos = currentTarget.offset(dx, dy, dz);
 
             if (outOfBounds.test(nextPos)) {
@@ -109,7 +122,7 @@ public class SiegeLineTracer {
                 return new TraceResult(instructions, List.copyOf(orderedSteps), nextPos, totalCost, true);
             }
 
-            if (i == MAX_PROJECT_LENGTH) {
+            if (i == maxLength) {
                 Map<BlockPos, SiegeNode> withLanding = new HashMap<>(instructions);
                 withLanding.put(nextPos, new SiegeNode(currentTarget, SiegeNode.SiegeAction.BUILD_LANDING));
                 // Mirror the substitution in the ordered form too, so every orientation derived
