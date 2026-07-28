@@ -594,28 +594,41 @@ public class PathingRegionGameTests {
      * instances unread before the batch finished. The fix moves the reconstruction out of the
      * loop to run exactly once per batch.
      *
-     * <p>This is purely a wasted-allocation fix, not a behavior change: the OLD code's
-     * per-iteration RegionIndex was already built from an up-to-date region list each time, so its
-     * final published value (whichever iteration ran last) was already correct. There is
-     * deliberately no failing-before/passing-after split for this one - see the report for why
-     * red-green doesn't apply here - this is a coherence check that a post-dirty-batch state still
-     * resolves correctly, which held before the fix and must keep holding after it.
+     * <p>This is primarily a wasted-allocation fix, and the final published {@code RegionIndex}'s
+     * CONTENT is the same either way (the OLD code's per-iteration index was already built from an
+     * up-to-date region list each time, so whichever iteration ran last already published the
+     * right answer) - so there is deliberately no failing-before/passing-after split on content.
+     * There IS a real, positive concurrency improvement though: {@code regionIndex} is a volatile
+     * field read by live mob-pathing queries from other threads at any time - the OLD code
+     * published a NEW index after EVERY region in the batch (region A's fresh index visible while
+     * region B was still stale/mid-recompute), whereas this fix publishes exactly once, after the
+     * WHOLE batch, so no external reader can ever observe a partially-updated batch. This test is a
+     * coherence check that a post-dirty-batch state still resolves correctly - true before the fix
+     * and after it - not a test of the atomicity improvement itself (which isn't independently
+     * observable from a single-threaded GameTest).
      *
-     * <p><b>Important caveat discovered while writing this test (see the report):</b> this
-     * geometry does NOT exercise {@code recomputeDirtyRegions}'s per-region loop / non-topology-
-     * changed fast path at all, despite the name. {@code RegionScanner.scan}'s dirty-rescan call
-     * always sweeps the FULL vertical build-height column for whichever (x,z) chunks
-     * {@code localBounds} covers, regardless of the dirtied region's own bounds - and both regions
-     * here (like every multi-region test in this class - see the class javadoc's "territory wider
-     * than one chunk" constraint) live in the SAME single chunk. Rescanning either one therefore
-     * always rediscovers BOTH as separate components ({@code rescanned.size() == 2}), which is
-     * {@code recomputeDirtyRegions}'s TOPOLOGY-CHANGED branch, not the fast path - it triggers a
-     * full {@code rebuildRegionsAndGraph}, confirmed below via the {@code getGeneration()} bump.
-     * What this test actually proves is that a real, {@code tick()}-driven 2-region dirty batch
-     * (as opposed to task-8/9's other tests, which only ever call {@code rebuild()} once) still
-     * lands on a coherent, correctly-resolving index either way - genuine coverage, just not of
-     * Step 0's specific code path. See the report for why the fast path is structurally
-     * unreachable from any GameTest confined to one chunk, and what that implies for future tests.
+     * <p><b>Important caveat discovered while writing this test, corrected after further review
+     * (see the report):</b> this geometry does NOT exercise {@code recomputeDirtyRegions}'s
+     * per-region loop / non-topology-changed fast path at all, despite the name - it always
+     * full-rebuilds instead. This is NOT merely because both regions here happen to live in the
+     * same single chunk (a GameTest-only convention - see the class javadoc's "territory wider
+     * than one chunk" bullet). It is a GENERAL property: this geometry's 2 regions are joined by a
+     * connector, and {@code RegionGraph.registerConnector}'s {@code addCell} calls (task-8)
+     * unconditionally expand each endpoint region's bounding box (via {@code Region.addCell}'s
+     * unconditional {@code expandBounds}) to include the chunk containing the OTHER endpoint's own
+     * natural landing cell - confirmed by tracing {@code SiegeLineTracer.trace}, whose
+     * {@code orderedSteps} always ends with the landing position itself. Since
+     * {@code recomputeDirtyRegions}'s {@code localBounds} is the full chunk-grid rectangle from a
+     * region's min to max bounds, and {@code RegionScanner.scan} always sweeps that rectangle's
+     * FULL height, this would hold even if the two regions lived in genuinely different chunks in a
+     * real production territory - rescanning either one always rediscovers the other's landing
+     * cell as a separate component ({@code rescanned.size() &gt;= 2}), the TOPOLOGY-CHANGED branch,
+     * not the fast path - confirmed below via the {@code getGeneration()} bump. What this test
+     * actually proves is that a real, {@code tick()}-driven 2-region dirty batch (as opposed to
+     * task-8/9's other tests, which only ever call {@code rebuild()} once) still lands on a
+     * coherent, correctly-resolving index either way - genuine coverage, just not of Step 0's
+     * specific code path. See the report for the full analysis and what it implies for
+     * characterizing rebuild frequency.
      *
      * <p>Geometry: {@link #testTwoDisconnectedRegionsGetOneConnector}'s exact trench split (2
      * regions). After the initial rebuild settles, BOTH regions are marked dirty via two
@@ -838,21 +851,34 @@ public class PathingRegionGameTests {
      * connector's {@code addCell}-claimed cells (they aren't flood-fill-reachable from the
      * region's interior - that's the whole reason task-8 needed {@code addCell} in the first
      * place). The fix (see {@code reclaimConnectorCells}) re-adds them right after the rescan.
-     * That fast path is exercised and verified separately (unit/inspection-level - see the
-     * report); THIS test verifies something adjacent but distinct, discovered while writing it.
+     * That fast path is NOT exercised by any GameTest in this class, and - per the report's
+     * corrected finding - is not reachable by ANY connector-bearing region in ANY territory shape,
+     * GameTest or production; the fix is verified by code inspection only. THIS test verifies
+     * something adjacent but distinct, discovered while writing it.
      *
      * <p><b>This geometry cannot reach the fast path at all - it always full-rebuilds instead,
-     * exactly like {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}, and for the SAME
-     * structural reason (see that method's javadoc): the shaft's main floor and elevated platform
-     * live in the same single chunk (mandatory per the class javadoc's territory constraint), and
-     * a dirty rescan always sweeps that chunk's FULL height regardless of which region triggered
-     * it - rediscovering BOTH regions as separate components every time
-     * ({@code rescanned.size() == 2}), which is the TOPOLOGY-CHANGED branch, not the fast path.
-     * The {@code getGeneration()} assertion below pins this down as an executable fact instead of
-     * an assumption. Step 0c's actual fix is therefore reviewed by inspection only, not proven by
-     * this (or any) GameTest in this class - see the report for why a fast-path-reaching geometry
-     * is not achievable while staying inside the single-chunk constraint this whole class already
-     * depends on.</b>
+     * exactly like {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}. The cause is NOT
+     * merely this class's single-chunk-territory convention (see the class javadoc's "territory
+     * wider than one chunk" bullet) - it is a general property of {@code Region.addCell} plus
+     * {@code recomputeDirtyRegions}'s {@code localBounds} construction, confirmed by tracing
+     * {@code SiegeLineTracer.trace}: a completed trace's {@code orderedSteps} always ends with
+     * {@code endPos} itself (added to {@code orderedSteps} BEFORE the walkable-terrain check that
+     * returns it), and {@code RegionGraph.registerConnector} calls
+     * {@code fromRegion.addCell(step.pos())} for every step including that last one - so
+     * {@code fromRegion}'s bounding box is UNCONDITIONALLY expanded (via {@code addCell}'s
+     * unconditional {@code expandBounds}) to include the exact chunk containing {@code toRegion}'s
+     * own pre-existing natural landing cell, for every connector, regardless of distance or which
+     * chunk either region's own natural footprint occupies. Since {@code localBounds} is the full
+     * rectangular hull from a region's min to max chunk (not just chunks its natural cells occupy)
+     * and {@code RegionScanner.scan} always sweeps that hull's FULL height, any dirty rescan of
+     * either endpoint region therefore always rediscovers the other endpoint's landing cell as a
+     * separate component ({@code rescanned.size() &gt;= 2}) - the TOPOLOGY-CHANGED branch, not the
+     * fast path. This applies symmetrically to the OTHER endpoint too (the first traced step is
+     * "the first position past the anchor," pulling that region's own bbox back toward THIS
+     * region's boundary cell). The {@code getGeneration()} assertion below pins this specific run's
+     * outcome down as an executable fact. See the report for why this means the fast path is
+     * effectively unreachable for any region with an active connector at all, not a GameTest-only
+     * limitation, and what that implies for characterizing rebuild frequency.</b>
      *
      * <p>What this test DOES prove, which is still new/genuine coverage: extends
      * {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s exact geometry (unmodified -

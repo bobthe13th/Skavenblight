@@ -564,6 +564,25 @@ public class TerritoryRegionMap {
      * Re-adds a connector's traced cells (see RegionGraph.registerConnector's addCell claim) back
      * into {@code freshRegion} - see Task 9 Step 0c's call site for why the plain rescan that
      * produced {@code freshRegion} can never include them on its own.
+     *
+     * <p><b>PARKING NOTE (Task 9, not yet resolved):</b> this method's own call site (the
+     * non-topology-changed branch above) is, as far as could be determined, unreachable for ANY
+     * region with an active connector, in GameTest or production. {@code addCell}'s unconditional
+     * {@code expandBounds} means a connector's endpoint region bounding boxes always grow to
+     * include each OTHER's landing chunk (confirmed via {@code SiegeLineTracer.trace}: a completed
+     * trace's {@code orderedSteps} always ends with the landing position itself, which
+     * {@code registerConnector} then {@code addCell}s into BOTH endpoints) - and since
+     * {@code localBounds} above is the full chunk-grid rectangle from a region's min to max bounds,
+     * a dirty rescan of either endpoint always re-sweeps the other's chunk too, always rediscovering
+     * it as a separate component ({@code rescanned.size() &gt;= 2}), always taking the
+     * topology-changed branch instead of reaching this method. Unlocking a test (or confirming a
+     * production fix is needed) requires either: (a) a code fix that stops connector-claimed cells
+     * from inflating the bbox {@code localBounds} is derived from (e.g. tracking a region's
+     * "natural" flood-fill bounds separately from its full addCell-inclusive bounds), or (b) proof
+     * that some other, as-yet-unidentified geometry avoids this. See task-9-report.md's Step 0c
+     * section for the full trace. Until one of those exists, this method is exercised only by full
+     * rebuilds (where it is never called) and is effectively dead code on the fast path it was
+     * written for.
      */
     private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
         if (graph == null) return;
