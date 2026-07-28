@@ -244,16 +244,19 @@ public class PathingRegionGameTests {
 
     /**
      * The literal headline requirement: with three regions in a line - C, then B, then A (the
-     * nexus region) - and NO connector geometrically possible directly between C and A, the route
-     * tree must route C through B (the intermediate region) rather than treat C as unreachable or
-     * invent some other path. {@code RegionRouteTree.compute} is a plain Dijkstra over whatever
-     * connectors {@code RegionGraph.build} actually discovered (see that method's own javadoc), so
-     * the only way to make "C's parent is B" a SAFE assertion - rather than one that merely
-     * happens to hold today - is to make a direct C-A connector geometrically impossible, not just
-     * more expensive. That's what forces the routing decision structurally instead of leaving it
-     * to a cost comparison against a connector that might or might not exist (see the class
-     * javadoc bullet on {@code RegionGraph}'s per-pair dedup NOT guaranteeing a connector exists at
-     * all for a given pair).
+     * nexus region) - a REAL direct C-A connector exists (so this is a genuine cost comparison
+     * between two actually-discovered routes, not merely "the only path that exists"), but it
+     * costs more than the two-hop C-B-A route, and the route tree must pick the cheaper two-hop
+     * route. This is deliberately the scenario that distinguishes a real Dijkstra
+     * ({@code RegionRouteTree.compute}, weighted by {@code RegionConnector.cost()}) from a plain
+     * unweighted BFS/hop-count search: BFS would prefer the direct 1-hop C-A connector purely for
+     * having fewer hops, even though it costs more; only cost-aware search picks the 2-hop route
+     * here. An earlier revision of this test made a direct C-A connector geometrically impossible
+     * instead of merely more expensive - that version passed under a plain-BFS-shaped
+     * {@code RegionRouteTree.compute} just as easily as under the real Dijkstra one (a 3-node
+     * chain with only one possible path can't tell the two apart), so it wasn't actually
+     * exercising the "cheaper," cost-aware part of the headline requirement. See the method body's
+     * assertions for the specific invariants this now checks instead of merely logging them.
      *
      * <p>Kept within a single {@link #anchorChunkFor} chunk (16x16) like
      * {@link #testTwoDisconnectedRegionsGetOneConnector}, for the same reason - see that test's
@@ -271,22 +274,36 @@ public class PathingRegionGameTests {
      * brief's "wide/expensive-looking" framing), the gap on B's near side to A is 2 blocks wide
      * ("short/cheap"). Both gaps are carved full-depth (down to {@link #minRelY}, not just the
      * floor layer) per the class javadoc's underside-sliver note, exactly like the two-region
-     * test's trench.
+     * test's trench - across the FULL local z range (0-15) EXCEPT that region B's own floor is
+     * only left intact for local z 0-7; for local z 8-15 it's carved away too (same full-depth
+     * treatment), merging the two gaps into one continuous 10-wide corridor (local x 3-12) at
+     * those z rows with nothing of B's in the way.
      *
-     * <p>A connector bridging C directly to A is expected to be geometrically unreachable, not
-     * merely more expensive than the B-adjacent route: {@code RegionGraph.tryTrace} traces a
-     * straight line (fixed direction per call - see that method's javadoc) from a boundary cell
-     * and returns as soon as it lands on ANY region's walkable ground, and since B's own floor
-     * spans the ENTIRE local-x range between the two gaps at every local z (this territory's full
-     * width), a ray cast from C toward A's side should land on B's floor first and register a C-B
-     * connector rather than reaching A in the same trace - it would need to clear OVER B's floor
-     * without ever touching it, which shouldn't be possible for a ray starting at the same
-     * coplanar floor height B itself sits at (a flat single-story platform). This is reasoning
-     * about {@code tryTrace}'s behavior, not a proven enumeration of all 14 trace directions
-     * through {@code TerrainEvaluator.determineMacroAction} - what actually confirms it is the
-     * connector list logged below: across two independent runs (different structure placement
-     * offsets each time, per {@link #anchorChunkFor}'s alignment proof), it contained only C-B and
-     * B-A connectors, never C-A - see task-5-report.md for both runs' full connector/hop-cost dumps.
+     * <p>This split is what makes both connectors real: {@code RegionGraph.tryTrace} traces a
+     * straight line (fixed direction per call - see that method's own javadoc) from a boundary
+     * cell and keeps chaining through mid-air landings, but returns the moment it lands on a
+     * DIFFERENT region's walkable ground (landing back in the SAME region, or in mid-air, doesn't
+     * end the trace - it keeps extending in the same direction instead). At local z 0-7, where
+     * B's floor is intact, a horizontal ray from C's boundary lands on B's floor after crossing
+     * the 5-wide gap and stops there, registering C-B (not reaching A in the same trace); B's own
+     * boundary similarly reaches A across the 2-wide gap. At local z 8-15, where B's floor has
+     * been removed, there is no walkable ground for a horizontal ray to land on until it clears
+     * the full 10-wide corridor and reaches A directly - registering a real C-A connector.
+     *
+     * <p>Why the direct connector still costs more despite being one hop instead of two:
+     * {@code SiegeLineTracer.trace} charges one {@code base} unit
+     * ({@code Config.buildingBasePenalty * 10}) per BUILD_BRIDGE step PLUS one more for the
+     * trace's initial offset, then doubles the total for a completed horizontal trace - so a
+     * straight run of {@code n} open columns costs {@code 2 * ((n+1) * base + 10)}. Crossing the
+     * two gaps as SEPARATE traces (n=5 then n=2) pays the {@code (n+1)} multiplier twice, for
+     * {@code 6 + 3 = 9} base-units total; crossing all 10 columns (the original 5+2 gap columns
+     * PLUS the 3 columns that used to be B's floor) as ONE trace pays it once, for
+     * {@code 11} base-units - MORE, even though it's a single hop instead of two. The actual
+     * logged connector costs (see task-5-report.md's fix-round entry) fit this exactly with
+     * {@code base=1500}: 18020 for C-B (n=5, 6 base-units), 9020 for B-A (n=2, 3 base-units,
+     * 27040 combined), against 33020 for the direct C-A connector (n=10, 11 base-units) - the two
+     * assertions on {@code hopCostC} below check this arithmetic directly rather than leaving it
+     * as something only visible in the log.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
     public static void testThreeRegionsRouteThroughCheaperIntermediateHop(GameTestHelper helper) {
@@ -297,8 +314,8 @@ public class PathingRegionGameTests {
         int minRelY = minRelY(helper);
 
         // Gap C|B: local x 3-7 (5 wide, "long/expensive"). Gap B|A: local x 11-12 (2 wide,
-        // "short/cheap"). Both carved full-depth (see method javadoc) so no walkable sliver
-        // survives underneath either one.
+        // "short/cheap"). Both carved full-depth (see method javadoc) across the FULL local z
+        // range (0-15) so no walkable sliver survives underneath either one.
         for (int lx = 3; lx <= 7; lx++) {
             for (int lz = 0; lz <= 15; lz++) {
                 for (int y = minRelY; y <= 1; y++) {
@@ -313,6 +330,19 @@ public class PathingRegionGameTests {
                 }
             }
         }
+        // Also remove region B's own floor for local z 8-15 (full depth, same as above) - this
+        // opens ONE continuous 10-wide corridor (local x 3-12) at those z rows with no B floor to
+        // land on, letting a straight horizontal trace from C reach A directly. B survives only at
+        // local z 0-7, where both surrounding gaps stay their original width and the cheaper
+        // C-B/B-A connectors are found instead. See method javadoc for why this makes the direct
+        // C-A connector real (not just geometrically absent) while still costing more overall.
+        for (int lx = 8; lx <= 10; lx++) {
+            for (int lz = 8; lz <= 15; lz++) {
+                for (int y = minRelY; y <= 1; y++) {
+                    helper.setBlock(new BlockPos(baseX + lx, y, baseZ + lz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
 
         // Nexus marker inside region A (local x 13-15), helper-Y=2 (the walkable layer) - same
         // convention as testTwoDisconnectedRegionsGetOneConnector's nexus placement.
@@ -320,44 +350,86 @@ public class PathingRegionGameTests {
         helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
         BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
 
-        // Probes into region C (local x 0-2) and region B (local x 8-10), untouched walkable
-        // cells (helper-Y=2) well clear of either trench edge.
+        // Probe into region C (local x 0-2, any z - it spans the full local z range). Probe into
+        // region B at local z 4 (inside B's surviving z 0-7 band, well clear of the z=8 edge where
+        // its floor was removed) rather than z 8, which is now part of the direct corridor.
         BlockPos probeC = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ + 8));
-        BlockPos probeB = helper.absolutePos(new BlockPos(baseX + 9, 2, baseZ + 8));
+        BlockPos probeB = helper.absolutePos(new BlockPos(baseX + 9, 2, baseZ + 4));
 
         TerritoryRegionMap regionMap = new TerritoryRegionMap();
         regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] loggedDump = {false};
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
             List<Region> regions = regionMap.getRegionIndex().getRegions();
             check(regions.size() == 3, "expected 3 regions (A/B/C), found " + regions.size());
 
-            Integer regionC = regionMap.getRegionIndex().regionIdAt(probeC);
-            check(regionC != null, "region C probe position isn't in any region - adjust the probe");
-            Integer regionB = regionMap.getRegionIndex().regionIdAt(probeB);
-            check(regionB != null, "region B probe position isn't in any region - adjust the probe");
+            // Resolved to primitive ints (after the null checks) and used as primitives
+            // throughout below - deliberately, so every comparison against them is an unambiguous
+            // value comparison rather than the boxed-Integer reference-equality trap the class
+            // javadoc/testTwoDisconnectedRegionsGetOneConnector already warns about.
+            Integer regionCBoxed = regionMap.getRegionIndex().regionIdAt(probeC);
+            check(regionCBoxed != null, "region C probe position isn't in any region - adjust the probe");
+            Integer regionBBoxed = regionMap.getRegionIndex().regionIdAt(probeB);
+            check(regionBBoxed != null, "region B probe position isn't in any region - adjust the probe");
+            int regionC = regionCBoxed;
+            int regionB = regionBBoxed;
+            int regionA = regionMap.getRouteTree().getRootRegionId();
 
             // Evidence dump: every region's bounds/cell count plus the route tree's hop cost and
             // parent for it, and every connector RegionGraph actually built (with cost) - so the
-            // C->B->A routing decision is visible in the log, not just asserted.
-            for (Region region : regions) {
-                LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={} hopCost={} parent={}",
-                        region.getId(), region.getMin(), region.getMax(), region.cellCount(),
-                        regionMap.getRouteTree().getHopCost(region.getId()),
-                        regionMap.getRouteTree().getParentRegion(region.getId()));
+            // C->B->A routing decision (and the more expensive direct C-A connector it's passing
+            // up) is visible in the log, not just asserted. Logged once (not on every succeedWhen
+            // retry tick) via loggedDump.
+            if (!loggedDump[0]) {
+                for (Region region : regions) {
+                    LOGGER.info("[Skavenblight][test] region {}: min={} max={} cells={} hopCost={} parent={}",
+                            region.getId(), region.getMin(), region.getMax(), region.cellCount(),
+                            regionMap.getRouteTree().getHopCost(region.getId()),
+                            regionMap.getRouteTree().getParentRegion(region.getId()));
+                }
+                for (RegionConnector connector : regionMap.getRegionGraph().getAllConnectors()) {
+                    LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={}",
+                            connector.regionA(), connector.regionB(), connector.cost());
+                }
+                LOGGER.info("[Skavenblight][test] regionC={} regionB={} regionA(root)={}",
+                        regionC, regionB, regionA);
+                loggedDump[0] = true;
             }
-            for (RegionConnector connector : regionMap.getRegionGraph().getAllConnectors()) {
-                LOGGER.info("[Skavenblight][test] connector region{}<->region{} cost={}",
-                        connector.regionA(), connector.regionB(), connector.cost());
-            }
-            LOGGER.info("[Skavenblight][test] regionC={} regionB={} rootRegion={}",
-                    regionC, regionB, regionMap.getRouteTree().getRootRegionId());
 
-            Integer parentOfC = regionMap.getRouteTree().getParentRegion(regionC);
-            check(parentOfC != null, "region C should be reachable through some parent hop");
-            check(regionC != regionB && java.util.Objects.equals(parentOfC, regionB),
-                    "region C's route should hop through region B (found parent=" + parentOfC + ", regionB=" + regionB + ")");
+            // A real direct C-A connector must exist - otherwise "C's parent is B" is only true
+            // because no other path exists at all, which can't distinguish cost-aware routing from
+            // plain hop-count BFS (see method javadoc).
+            RegionConnector directCA = regionMap.getRegionGraph().getAllConnectors().stream()
+                    .filter(c -> (c.regionA() == regionC && c.regionB() == regionA)
+                            || (c.regionA() == regionA && c.regionB() == regionC))
+                    .findFirst().orElse(null);
+            check(directCA != null,
+                    "expected a real direct C-A connector (more expensive than the via-B route) - "
+                            + "without one, this test can't distinguish cost-aware routing from plain hop-count BFS");
+
+            RegionConnector parentConnectorOfC = regionMap.getRouteTree().getParentConnector(regionC);
+            check(parentConnectorOfC != null, "region C should have a parent connector");
+
+            int hopCostC = regionMap.getRouteTree().getHopCost(regionC);
+            int hopCostB = regionMap.getRouteTree().getHopCost(regionB);
+            check(hopCostC == hopCostB + parentConnectorOfC.cost(),
+                    "region C's hop cost should equal region B's hop cost plus C's parent-connector cost (found C="
+                            + hopCostC + ", B=" + hopCostB + ", connector=" + parentConnectorOfC.cost() + ")");
+
+            check(hopCostC < directCA.cost(),
+                    "the via-B route's total cost should be cheaper than the direct C-A connector's cost (found via-B="
+                            + hopCostC + ", direct=" + directCA.cost() + ") - otherwise picking B over the direct "
+                            + "connector wouldn't actually demonstrate cost-aware routing");
+
+            Integer parentOfCBoxed = regionMap.getRouteTree().getParentRegion(regionC);
+            check(parentOfCBoxed != null, "region C should be reachable through some parent hop");
+            int parentOfC = parentOfCBoxed;
+            check(regionC != regionB && parentOfC == regionB,
+                    "region C's route should hop through the cheaper region B, not the more expensive direct "
+                            + "connector to A (found parent=" + parentOfC + ", regionB=" + regionB + ", regionA=" + regionA + ")");
         });
     }
 }
