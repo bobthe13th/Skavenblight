@@ -1357,12 +1357,15 @@ public class PathingRegionGameTests {
      * needs - it was the wrong constant to worry about.</li>
      * <li>The vertical descent a buried nexus actually needs is a macro-level trace
      * ({@code RegionGraph.tryTrace} calling {@code SiegeLineTracer.trace} with {@code dy=-1}), which
-     * enforces its OWN, separate cap: {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE = 5}. Exceeding
-     * it doesn't chain or fall back - {@code trace} returns {@code TraceResult.aborted()}, and
-     * {@code RegionGraph.tryTrace} treats an aborted result as a hard stop for that direction (no
-     * connector, no retry). A 7-thick plug needs at least 7 consecutive MINE actions to punch
-     * through - well past the cap - so the brief's own geometry can never find a connector this
-     * way, regardless of how long the test waits.</li>
+     * enforces its OWN, separate cap: {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE = 5}, checked as
+     * {@code if (mineChainLength > MAX_CONSECUTIVE_MINE) return TraceResult.aborted();} - i.e. a
+     * chain of EXACTLY 5 consecutive MINE steps does NOT abort; the abort fires on the 6th
+     * consecutive step. Once it does fire there's no chaining or fallback - {@code trace} returns
+     * {@code TraceResult.aborted()}, and {@code RegionGraph.tryTrace} treats an aborted result as a
+     * hard stop for that direction (no connector, no retry). A 7-thick plug needs at least 7
+     * consecutive MINE actions to punch through - past even the 6th-step abort point - so the
+     * brief's own geometry can never find a connector this way, regardless of how long the test
+     * waits.</li>
      * </ul>
      *
      * <p><b>The geometry actually used here, derived from tracing {@code determineMacroAction}
@@ -1376,25 +1379,30 @@ public class PathingRegionGameTests {
      * evaluator can only change Y by at most 1 per hop ({@code HORIZONTAL_OFFSETS} pairs a
      * horizontal shift with {@code dy} in {-1,0,1}; there is no pure-vertical, same-column step at
      * all), so any solid layer at all already blocks ordinary flood-fill connectivity between the
-     * two open pockets - the plug is exactly 2 thick for margin against
-     * {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE}, not because 1 wouldn't already separate them.
+     * two open pockets. A 3-thick plug (chain of 5, see the trace below) would also have stayed
+     * under the abort threshold and worked just as well - the 2-thick plug used here was chosen for
+     * extra conservative margin against {@code SiegeLineTracer.MAX_CONSECUTIVE_MINE}, not because a
+     * thicker plug would have failed.
      *
      * <p>Tracing a downward {@code SiegeLineTracer} run from the main region's own boundary cell
      * (template y=6, helper-y=7, resting on the plug's top) step by step against
-     * {@code determineMacroAction}: the 2 plug layers (template y=5, y=4) are both MINE
-     * (straightforwardly solid). The next two steps, INTO the pocket's own open interior (template
-     * y=3, then y=2), are ALSO classified MINE - not because those blocks are solid (they aren't),
-     * but because {@code determineMacroAction}'s first check
-     * (`dy != 0 && ceiling.blocksMotion()`, where {@code ceiling} is 2 blocks above the position
-     * under evaluation) still sees the plug 2 blocks above them and returns MINE before ever
-     * checking whether the position itself is open. Only on the 5th consecutive step (template
-     * y=1, resting on the structure's own solid floor at y=0, with both {@code ceiling} (y=3) and
-     * {@code head} (y=2) genuinely clear) does the action fall through to {@code WALK} and
-     * {@code isWalkableTerrain} finally return true, completing the trace. Total consecutive MINE
-     * count across the whole descent: 4 (2 real plug layers + 2 "phantom" mine steps still inside
-     * the pocket's own open space) - one full step of margin under the {@code MAX_CONSECUTIVE_MINE}
-     * = 5 cap, confirmed by this exact step-by-step trace rather than assumed. See
-     * task-12-report.md for the full derivation and the run output confirming it.
+     * {@code determineMacroAction} (checks run in this order: {@code ceiling} = 2 blocks above,
+     * {@code head} = 1 block above, {@code foot} = the position itself - first match wins):
+     * step 1 (template y=5, plug top) is MINE via the {@code foot} check (the position itself is
+     * solid). Step 2 (template y=4, plug bottom) is ALSO solid, but is classified MINE via the
+     * earlier-checked {@code head} branch (template y=5, one above it, is still solid) before the
+     * {@code foot} check is ever reached. Steps 3 and 4 (template y=3, then y=2 - the pocket's own
+     * open interior) are classified MINE via the {@code ceiling} check (2 blocks above): even
+     * though these cells are open, {@code ceiling} for step 3 is template y=5 (plug top, solid) and
+     * for step 4 is template y=4 (plug bottom, solid) - {@code determineMacroAction} returns MINE
+     * before ever checking whether the position itself is open. Only on step 5 (template y=1,
+     * resting on the structure's own solid floor at y=0, with {@code ceiling} at y=3 and
+     * {@code head} at y=2 both genuinely open) does the action fall through to {@code WALK}, and
+     * {@code isWalkableTerrain} returns true, completing the trace. Total consecutive MINE count
+     * across the whole descent: 4 (steps 1-4) - 2 steps of headroom under the abort threshold (a
+     * 5th consecutive MINE step would still be fine; a 6th is what aborts), confirmed by this exact
+     * step-by-step trace rather than assumed. See task-12-report.md for the full derivation, the
+     * fix-round correcting an earlier off-by-one in this margin claim, and the run output confirming it.
      */
     @GameTest(template = "pathing_test_tall", timeoutTicks = 800, skyAccess = true)
     public static void testBedrockBuriedNexusGetsMinedTo(GameTestHelper helper) {
