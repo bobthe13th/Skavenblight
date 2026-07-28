@@ -29,6 +29,7 @@ import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.event.GameOverHandler;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.magic.wind.WindGridManager;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.screen.ModMenus;
 import org.ratden.skavenblight.sound.ModSounds;
@@ -186,12 +187,28 @@ public class Skavenblight {
         );
     }
 
+    @net.neoforged.bus.api.SubscribeEvent
+    public void onChunkLoad(net.neoforged.neoforge.event.level.ChunkEvent.Load event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            WindGridManager.get(serverLevel).markLoaded(event.getChunk().getPos());
+        }
+    }
+
+    @net.neoforged.bus.api.SubscribeEvent
+    public void onChunkUnload(net.neoforged.neoforge.event.level.ChunkEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            WindGridManager.get(serverLevel).markUnloaded(event.getChunk().getPos());
+        }
+    }
+
     //Warp flux network
     @net.neoforged.bus.api.SubscribeEvent
     public void onLevelTick(net.neoforged.neoforge.event.tick.LevelTickEvent.Post event) {
         if (event.getLevel() instanceof ServerLevel serverLevel) {
             WarpFluxGridManager manager = WarpFluxGridManager.get(serverLevel);
             manager.tickNetworks(serverLevel);
+
+            WindGridManager.get(serverLevel).tick(serverLevel);
         }
     }
 
