@@ -19,8 +19,10 @@ import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
@@ -159,6 +161,106 @@ public class PathingGoalRecalculationGameTests {
 
         check(!owner.changes.isEmpty(),
                 "region map was never told about the widened stair - onChainComplete's default never fired");
+
+        helper.succeed();
+    }
+
+    /**
+     * Task 7 (region-pathing-hardening): mechanical proof that
+     * {@code SiegeProjectManager.setMaxCandidateProjectLength} actually bounds how far a candidate
+     * line traced by {@code evaluateMacroProjects}/{@code SiegeLineTracer.trace} can reach - see
+     * task-7-report.md for why this can't be shown through any {@code TerritoryRegionMap}/region-graph
+     * scenario: every region-scoped {@code FlowFieldState} is built with a {@code cellFilter}
+     * ({@code region::contains}), and {@code SiegeLineTracer.trace} checks that filter on EVERY step,
+     * not just the endpoint, so a candidate line can never reach further than whatever
+     * {@code RegionScanner} already put in the SAME region - which is itself capped at ~6 by the
+     * pre-existing {@code MAX_CONSECUTIVE_MINE_DEPTH}/{@code MAX_CONSECUTIVE_MINE} = 5. That makes
+     * the new cap of 6 a no-op against an already-lower ceiling in every region-graph GameTest, even
+     * though the parameter itself works correctly.
+     *
+     * <p>This test proves the parameter itself, using the SAME hand-built-pathing-objects pattern
+     * this file already established for {@link #testDeployClimbableGoalMarksRegionDirty}: a real
+     * {@code FlowFieldState}, but constructed via the 2-arg constructor so {@code cellFilter} is
+     * {@code null} and {@code territoryChunks} is empty ("Global scope" per
+     * {@code FlowFieldState#isOutOfBounds}) - deliberately bypassing the region-scoping machinery
+     * that makes the cap unobservable elsewhere. What's under test here is purely "does
+     * {@code SiegeLineTracer.trace}'s line length actually respect the {@code maxLength} argument
+     * {@code SiegeProjectManager} now forwards to it," independent of whether any current
+     * region-graph scenario can trigger the difference.
+     *
+     * <p>Geometry: the anchor sits on ordinary open floor (helper-Y=2, template-Y=1 - see
+     * {@code PathingRegionGameTests}' class javadoc for the +1 helper-Y offset), untouched. Directly
+     * east, the floor (helper-Y=1) is removed for 10 consecutive columns (x+1..x+10) - open air with
+     * no support, so {@code determineMacroAction} returns {@code BUILD_BRIDGE} for every one of
+     * those positions (see that method's "Horizontal Bridge" branch: {@code dy==0}, some horizontal
+     * offset, support not solid). The floor is left intact (untouched) starting at x+11, a REAL
+     * walkable landing - far enough out that only an uncapped (default 32) trace can reach it, but
+     * well within reach if the cap weren't working at all.
+     *
+     * <p>Two independent {@code SiegeProjectManager} instances (avoiding any
+     * {@code isNearExistingProject} cross-talk) fire {@code evaluateMacroProjects} from the same
+     * anchor against the same terrain: one left at the default cap, one set to
+     * {@code setMaxCandidateProjectLength(6)}. The default-cap run must reach the real landing at
+     * x+11 with a {@code WALK} action (the real ground {@code determineMacroAction} computes once
+     * support is solid again). The capped run must NOT reach x+11 at all, and must instead terminate
+     * exactly at x+6 with a synthetic {@code BUILD_LANDING} - the same substitution
+     * {@code SiegeLineTracer.trace} makes at any {@code maxLength} boundary it hits before finding
+     * real ground (mirroring {@code RegionGraph}'s own {@code MAX_CHAIN_HOPS} cap on its own, longer
+     * chains). Only the east-bound, same-Y (dy=0) line reaches these exact positions - the other 13
+     * directions {@code evaluateMacroProjects} also fires (2 pure-vertical, plus the same east
+     * direction's own dy=-1/+1 variants, plus north/south/west/up/down) all move off this Y or X
+     * axis and can never collide with the two checked keys.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    public static void testMaxCandidateProjectLengthCapsMacroProjectReach(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(4, 2, 4);
+        BlockPos anchorPos = helper.absolutePos(relativeAnchor);
+
+        // Remove the floor (helper-Y=1) for the 10 columns directly east of the anchor, forcing
+        // BUILD_BRIDGE the whole way - see method javadoc. Floor at x+11 onward is left untouched
+        // (the default solid stone floor), the real landing.
+        for (int i = 1; i <= 10; i++) {
+            helper.setBlock(relativeAnchor.offset(i, -1, 0), Blocks.AIR.defaultBlockState());
+        }
+        BlockPos realLanding = helper.absolutePos(relativeAnchor.offset(11, 0, 0));
+        BlockPos cappedLanding = helper.absolutePos(relativeAnchor.offset(6, 0, 0));
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        LiveTerrainAccess terrain = new LiveTerrainAccess(helper.getLevel());
+        // Unconstrained FlowFieldState (2-arg constructor: no cellFilter, empty territoryChunks =
+        // "Global scope") - see method javadoc for why this is deliberate.
+        FlowFieldState state = new FlowFieldState(anchorPos, Set.of());
+
+        Map<BlockPos, Integer> uncappedCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> uncappedInstructionMap = new HashMap<>();
+        PriorityQueue<FlowFieldCalculator.QueueNode> uncappedQueue = new PriorityQueue<>();
+
+        SiegeProjectManager uncapped = new SiegeProjectManager(evaluator);
+        uncapped.evaluateMacroProjects(terrain, anchorPos, state, 0, uncappedQueue, uncappedCostMap, uncappedInstructionMap);
+
+        check(uncappedInstructionMap.containsKey(realLanding),
+                "uncapped (default 32) macro-project search should have reached the real landing 11 blocks east at "
+                        + realLanding + " - found instructions at: " + uncappedInstructionMap.keySet());
+        check(uncappedInstructionMap.get(realLanding).action() == SiegeNode.SiegeAction.WALK,
+                "the far landing should be the REAL walkable ground the trace found (action WALK), not a synthetic "
+                        + "one - found: " + uncappedInstructionMap.get(realLanding));
+
+        Map<BlockPos, Integer> cappedCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> cappedInstructionMap = new HashMap<>();
+        PriorityQueue<FlowFieldCalculator.QueueNode> cappedQueue = new PriorityQueue<>();
+
+        // A fresh SiegeProjectManager - setMaxCandidateProjectLength is the one thing under test.
+        SiegeProjectManager capped = new SiegeProjectManager(evaluator);
+        capped.setMaxCandidateProjectLength(6);
+        capped.evaluateMacroProjects(terrain, anchorPos, state, 0, cappedQueue, cappedCostMap, cappedInstructionMap);
+
+        check(!cappedInstructionMap.containsKey(realLanding),
+                "setMaxCandidateProjectLength(6) should have stopped the east-bound trace before reaching the real "
+                        + "landing 11 blocks east - found instructions at: " + cappedInstructionMap.keySet());
+        SiegeNode cappedNode = cappedInstructionMap.get(cappedLanding);
+        check(cappedNode != null && cappedNode.action() == SiegeNode.SiegeAction.BUILD_LANDING,
+                "setMaxCandidateProjectLength(6) should have terminated the east-bound trace with a synthetic "
+                        + "BUILD_LANDING exactly 6 blocks out at " + cappedLanding + " (found: " + cappedNode + ")");
 
         helper.succeed();
     }
