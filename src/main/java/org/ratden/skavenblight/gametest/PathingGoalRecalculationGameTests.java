@@ -167,6 +167,52 @@ public class PathingGoalRecalculationGameTests {
     }
 
     /**
+     * Reported production bug: a group of clanrats converges on a build site, places one
+     * staircase step, and the whole group then stops - the step ends up floating with nothing
+     * solid beneath it, so no mob can reach its top to continue the chain. This test simulates a
+     * different clanrat's concurrent MINE/headroom-clear action pulling the support out from
+     * under an already-claimed target mid-action.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    public static void testWidenStairsGoalDoesNotPlaceFloatingStairWhenSupportRemovedMidAction(GameTestHelper helper) {
+        BlockPos relativeStairPos = new BlockPos(4, 2, 4);
+        BlockPos relativeMobPos = relativeStairPos.relative(Direction.EAST);
+        helper.setBlock(relativeStairPos, Blocks.COBBLESTONE_STAIRS.defaultBlockState()
+                .setValue(StairBlock.FACING, Direction.NORTH));
+
+        BlockPos mobPos = helper.absolutePos(relativeMobPos);
+
+        RecordingRegionMap owner = new RecordingRegionMap();
+        FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
+        state.updateInstructions(Map.of());
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(mob);
+
+        WidenStairsGoal goal = new WidenStairsGoal(mob);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), "goal should trigger: off-path, replaceable, adjacent to an existing stair");
+        goal.start();
+
+        helper.setBlock(relativeMobPos.below(), Blocks.AIR.defaultBlockState());
+
+        for (int i = 0; i < 16; i++) goal.tick();
+
+        helper.assertBlockState(relativeMobPos, s -> !s.is(Blocks.COBBLESTONE_STAIRS),
+                () -> "stair should NOT have been placed once its support was removed mid-action - "
+                        + "a placement here would float with nothing beneath it");
+
+        helper.succeed();
+    }
+
+    /**
      * Task 7 (region-pathing-hardening): mechanical proof that
      * {@code SiegeProjectManager.setMaxCandidateProjectLength} actually bounds how far a candidate
      * line traced by {@code evaluateMacroProjects}/{@code SiegeLineTracer.trace} can reach - see
