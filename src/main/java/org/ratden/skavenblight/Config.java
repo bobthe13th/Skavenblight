@@ -77,8 +77,12 @@ public class Config {
     // --- Research Table Configs ---
     private static final ModConfigSpec.IntValue RESEARCH_TICKS_BASE = BUILDER.comment("Base number of ticks required to complete spell research at the Research Table.")
             .defineInRange("researchTicksBase", 200, 20, 72000);
-    private static final ModConfigSpec.IntValue RESEARCH_WIND_THRESHOLD = BUILDER.comment("Minimum local Wind level (of the spell's Wind) required to research a spell at the Research Table.")
+    private static final ModConfigSpec.IntValue RESEARCH_WIND_THRESHOLD = BUILDER.comment("Base minimum local Wind level required to research a tier-0 spell at the Research Table; each additional tier requires this much more (tier 2 needs 3x this value).")
             .defineInRange("researchWindThreshold", 200, 0, 10000);
+    private static final ModConfigSpec.IntValue RESEARCH_WIND_BONUS_REFERENCE = BUILDER.comment("Extra local Wind (above the research requirement) needed to add +1.0x to research speed.")
+            .defineInRange("researchWindBonusReference", 300, 1, 100000);
+    private static final ModConfigSpec.DoubleValue RESEARCH_WIND_MAX_BONUS_MULTIPLIER = BUILDER.comment("Cap on the speed bonus from abundant Wind - e.g. 2.0 means research can run up to 3x base speed (1x base + up to 2x bonus).")
+            .defineInRange("researchWindMaxBonusMultiplier", 2.0, 0.0, 50.0);
 
     // --- Wind Influence Configs ---
     private static final ModConfigSpec.IntValue WIND_SOURCE_BLOCK_BONUS = BUILDER.comment("Baseline bonus per tagged wind_source block placed in a chunk (see TaggedBlockInfluence).")
@@ -115,6 +119,8 @@ public class Config {
     // --- Research Table Public Variables ---
     public static int researchTicksBase;
     public static int researchWindThreshold;
+    public static int researchWindBonusReference;
+    public static double researchWindMaxBonusMultiplier;
 
     // --- Wind Influence Public Variables ---
     public static int windSourceBlockBonus;
@@ -150,6 +156,8 @@ public class Config {
         // Load Research Table Configs
         researchTicksBase = RESEARCH_TICKS_BASE.get();
         researchWindThreshold = RESEARCH_WIND_THRESHOLD.get();
+        researchWindBonusReference = RESEARCH_WIND_BONUS_REFERENCE.get();
+        researchWindMaxBonusMultiplier = RESEARCH_WIND_MAX_BONUS_MULTIPLIER.get();
 
         // Load Wind Influence Configs
         windSourceBlockBonus = WIND_SOURCE_BLOCK_BONUS.get();

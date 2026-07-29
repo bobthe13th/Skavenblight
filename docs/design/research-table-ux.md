@@ -194,3 +194,21 @@ sprinkling it on every line would read as noise, not personality).
 - Real spell icons (spells have no dedicated icon field yet) — list rows use a Wind-colored
   generic icon for now; a per-spell icon is a natural follow-up once spell JSON grows an `icon`
   field, mirroring how Modonomicon entries already carry one.
+
+## Addendum: v2 — per-school tables, tier-scaled requirement, continuous wind bonus
+
+See `docs/superpowers/plans/2026-07-28-wizard-towers-research.md` for the full plan. Summary of
+what changed from the v1 design above:
+
+- One Research Table per Wind (8 total) instead of one generic table — each is permanently locked
+  to its own Wind's spell list; `ResearchTableBlock` gained a `Wind wind` field.
+- The Wind-level requirement to research a spell now scales with the spell's tier
+  (`ResearchFormulas.requiredWindLevel`): tier 0 needs `researchWindThreshold`, tier 2 needs 3x
+  that. Higher-tier spells demand a stronger local presence of their Wind, not just the same flat
+  bar every tier used before.
+- Research speed is no longer a binary gate — once the requirement is met, *excess* Wind above it
+  grants a continuous speed multiplier (`ResearchFormulas.speedMultiplier`), capped by
+  `researchWindMaxBonusMultiplier`. This is the direct mechanical payoff for building a "wizard
+  tower": decorating the chunk with `#skavenblight:wind_source/<wind>`-tagged blocks
+  (`TaggedBlockInfluence`) raises the local Wind, which both unlocks higher-tier research and makes
+  all research in that tower faster.

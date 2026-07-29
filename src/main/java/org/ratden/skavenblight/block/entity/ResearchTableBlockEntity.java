@@ -64,13 +64,6 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
         return ids;
     }
 
-    /** Flat Wind-level threshold a spell's Wind must meet locally to be researched. Phase 1 keeps
-     *  this the same for every spell; per-spell scaling (e.g. by casting number) is a natural
-     *  later refinement once there's more than one duration/difficulty worth distinguishing. */
-    public static float requiredWindLevel(Spell spell) {
-        return Config.researchWindThreshold;
-    }
-
     public static void tick(Level level, BlockPos pos, BlockState state, ResearchTableBlockEntity be) {
         if (level.isClientSide || !(level instanceof ServerLevel serverLevel)) {
             return;
@@ -82,12 +75,21 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
                     ? serverLevel.getServer().getPlayerList().getPlayer(be.researchingPlayer)
                     : null;
 
-            boolean shouldProgress = spell != null && researcher != null
-                    && WindGridManager.get(serverLevel).getOrCreate(new ChunkPos(pos)).getCurrent(spell.wind())
-                    >= requiredWindLevel(spell);
+            boolean shouldProgress = false;
+            int increment = 1;
+            if (spell != null && researcher != null) {
+                float current = WindGridManager.get(serverLevel).getOrCreate(new ChunkPos(pos)).getCurrent(spell.wind());
+                float required = ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold);
+                shouldProgress = current >= required;
+                if (shouldProgress) {
+                    float multiplier = ResearchFormulas.speedMultiplier(current, required,
+                            Config.researchWindBonusReference, Config.researchWindMaxBonusMultiplier);
+                    increment = Math.max(1, Math.round(multiplier));
+                }
+            }
 
             if (shouldProgress) {
-                be.progress++;
+                be.progress += increment;
                 if (be.progress >= Config.researchTicksBase) {
                     be.completeResearch(researcher, spell);
                 }
@@ -133,7 +135,7 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
             return false;
         }
         ChunkWindState windState = WindGridManager.get(serverLevel).getOrCreate(new ChunkPos(worldPosition));
-        if (windState.getCurrent(spell.wind()) < requiredWindLevel(spell)) {
+        if (windState.getCurrent(spell.wind()) < ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold)) {
             return false;
         }
 
