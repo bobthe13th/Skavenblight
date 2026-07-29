@@ -25,8 +25,8 @@ import java.util.Set;
  * GameTest scaffolding for the region/graph-level pathing subsystem. Every later task in the
  * region-pathing-hardening plan (4, 5, 6, 7, 8, 9, 12) adds a {@code @GameTest} method to this
  * same file, reusing {@code skavenblight:pathing_test} (a flat 32x8x32 platform: solid stone
- * floor, open air above - see the structure's own generation note in task-2-report.md for how it
- * was produced without a dev client).
+ * floor, open air above - see docs/pathing/region-pathing-hardening-findings.md's Finding C
+ * ("Task 2") for how it was produced without a dev client).
  *
  * <p>Two non-obvious things every method added here MUST account for, discovered the hard way
  * while writing {@link #testSingleConnectedRegion}:
@@ -122,7 +122,8 @@ public class PathingRegionGameTests {
      * wider than one chunk" bullet for what that padding contaminates). The same proof applies to
      * z. Confirmed empirically across multiple {@code runGameTestServer} invocations, each
      * placing the structure at a different world position/chunk-alignment offset (see
-     * task-4-report.md) - this always produced a single clean chunk fully inside the structure's
+     * docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 4") - this always
+     * produced a single clean chunk fully inside the structure's
      * own footprint. This is also why {@link #testSingleConnectedRegion}'s nexus at relative
      * (16,1,16) was never contaminated by the padding despite nobody having diagnosed why at the
      * time it was written.
@@ -162,6 +163,11 @@ public class PathingRegionGameTests {
             check(regions.get(0).cellCount() > 100,
                     "expected the single region to cover most of the open floor, found only "
                             + regions.get(0).cellCount() + " cells");
+            // Only reached once every check above has passed (an earlier throw retries next tick
+            // without releasing anything) - releases this map's forced chunk tickets now that the
+            // test is done with them, so this and every other test in the class don't leak tickets
+            // into the shared per-level forced-chunk set for the rest of this GameTestServer run.
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -192,7 +198,7 @@ public class PathingRegionGameTests {
      * {@code tryTrace} actually finds a connector at all depends on the trench's width/depth
      * being within {@code SiegeLineTracer}'s reach and {@code RegionGraph.MAX_CHAIN_HOPS}, a
      * property of this test's geometry, not of the dedup map. That it comes out to exactly 1 here
-     * is confirmed empirically (see task-4-report.md's two independent runs), not derived from
+     * is confirmed empirically (two independent runs), not derived from
      * the dedup guarantee alone.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
@@ -242,6 +248,7 @@ public class PathingRegionGameTests {
                     .findFirst().orElseThrow();
             check(regionMap.getRouteTree().isReachable(farRegionId),
                     "far region should be reachable via the planned connector");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -302,7 +309,8 @@ public class PathingRegionGameTests {
      * {@code 6 + 3 = 9} base-units total; crossing all 10 columns (the original 5+2 gap columns
      * PLUS the 3 columns that used to be B's floor) as ONE trace pays it once, for
      * {@code 11} base-units - MORE, even though it's a single hop instead of two. The actual
-     * logged connector costs (see task-5-report.md's fix-round entry) fit this exactly with
+     * logged connector costs (see docs/pathing/region-pathing-hardening-findings.md's Finding C,
+     * "Task 5") fit this exactly with
      * {@code base=1500}: 18020 for C-B (n=5, 6 base-units), 9020 for B-A (n=2, 3 base-units,
      * 27040 combined), against 33020 for the direct C-A connector (n=10, 11 base-units) - the two
      * assertions on {@code hopCostC} below check this arithmetic directly rather than leaving it
@@ -433,6 +441,7 @@ public class PathingRegionGameTests {
             check(regionC != regionB && parentOfC == regionB,
                     "region C's route should hop through the cheaper region B, not the more expensive direct "
                             + "connector to A (found parent=" + parentOfC + ", regionB=" + regionB + ", regionA=" + regionA + ")");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -487,6 +496,7 @@ public class PathingRegionGameTests {
 
             BlockPos aboveCeiling = helper.absolutePos(new BlockPos(baseX + 5, 300, baseZ + 5));
             check(index.regionIdAt(aboveCeiling) == null, "a position far above the structure shouldn't resolve to any region");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -570,7 +580,9 @@ public class PathingRegionGameTests {
 
             // Every position either orientation's instruction map touches is a cell a mob can be
             // standing on mid-crossing - none of them should fail a region lookup, regardless of
-            // which endpoint region ends up resolving it (see task-8-report.md's tie-break note).
+            // which endpoint region ends up resolving it (see
+            // docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 8", for the
+            // tie-break note).
             for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
                 Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
                 check(resolvedRegion != null,
@@ -584,6 +596,7 @@ public class PathingRegionGameTests {
                         "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
             }
             loggedDump[0] = true;
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -646,7 +659,16 @@ public class PathingRegionGameTests {
     // tight a budget under this GameTest server's real (non-1:1) tick pacing and occasionally
     // timed out before 1000ms of wall-clock time had actually elapsed since the block changes were
     // reported, even though the batch was otherwise handled correctly once given enough time.
-    @GameTest(template = "pathing_test", timeoutTicks = 1600, skyAccess = true)
+    // Raised again from 1600 to 8000 after fixing testRepeatedConnectorCompletionsDontExplodeRebuildCount's
+    // own settle-delay restore bug (that test used to force Config.minimumSettleDelayMs to 0 for
+    // its ENTIRE run, not just around its own regionMap.tick() call - a JVM-wide static shared by
+    // every concurrently-running GameTest, including this one - which had been ACCIDENTALLY giving
+    // this test a free pass on the real 1000ms settle delay too, whenever the two tests happened to
+    // overlap in real time under this GameTestServer's shared background-executor concurrency).
+    // Correctly scoping that fix removed the accidental assist and exposed this test's own
+    // already-marginal timeoutTicks budget under heavier concurrent-test load - this is a real,
+    // pre-existing timing tightness this test always had, not a new regression.
+    @GameTest(template = "pathing_test", timeoutTicks = 8000, skyAccess = true)
     public static void testDirtyRegionBatchProducesOneCoherentFinalIndex(GameTestHelper helper) {
         ChunkAnchor anchor = anchorChunkFor(helper);
         Set<ChunkPos> territory = Set.of(anchor.chunk());
@@ -726,6 +748,7 @@ public class PathingRegionGameTests {
             check(!nearIdAfter.equals(farIdAfter),
                     "the two probes collapsed into the same region after the batch recompute - the batch's "
                             + "final index isn't coherent");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -842,6 +865,7 @@ public class PathingRegionGameTests {
                     "no connector cell resolved to the parent region (id " + rootId + ") - the "
                             + "tie-break/geometry didn't actually land on the parent, so this test isn't "
                             + "exercising the bug it targets");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -855,8 +879,9 @@ public class PathingRegionGameTests {
      * That fast path is NOT exercised by any GameTest in this class - this test's own geometry
      * (a single unrelated block change, never closing any connector's gap) cannot reach it, for
      * the general reason traced below; the fix is verified by code inspection only for THIS
-     * geometry. **Narrowed per a later finding (Task 9 Steps 1-5 - see task-9-report.md's
-     * fix-round and {@code reclaimConnectorCells}'s own updated javadoc): the fast path IS
+     * geometry. **Narrowed per a later finding (Task 9 Steps 1-5 - see
+     * docs/pathing/region-pathing-hardening-findings.md's Finding B and
+     * {@code reclaimConnectorCells}'s own updated javadoc): the fast path IS
      * reachable, and reaches a real, distinct, unfixed bug (duplicate overlapping Region objects,
      * a stale connector graph, one region silently orphaned) at the exact moment a connector's
      * gap fully closes, if that closing dirty batch contains both endpoint region ids - which
@@ -890,8 +915,8 @@ public class PathingRegionGameTests {
      * dirty rescan finds exactly 1 piece and takes the fast path instead, which - when the closing
      * batch contains both endpoint ids, as {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount}
      * confirms it deterministically does for that test's geometry - exposes a real, distinct,
-     * unfixed bug. See task-9-report.md's Steps 1-5 fix-round and {@code reclaimConnectorCells}'s
-     * own updated javadoc for the full trace and evidence.</b>
+     * unfixed bug. See docs/pathing/region-pathing-hardening-findings.md's Finding B and
+     * {@code reclaimConnectorCells}'s own updated javadoc for the full trace and evidence.</b>
      *
      * <p>What this test DOES prove, which is still new/genuine coverage: extends
      * {@link #testLongConnectorCellsAreNeverOrphanedFromLookup}'s exact geometry (unmodified -
@@ -902,7 +927,17 @@ public class PathingRegionGameTests {
      * the very first rebuild. That's real regression coverage against the topology-changed path
      * regressing, even though it says nothing about the fast path Step 0c actually targets.
      */
-    @GameTest(template = "pathing_test", timeoutTicks = 1200, skyAccess = true)
+    // timeoutTicks raised from 1200 to 8000 for the same reason as
+    // testDirtyRegionBatchProducesOneCoherentFinalIndex's own comment: this test's real gate is
+    // Config.minimumSettleDelayMs (1000ms real time via tick()'s terrainSettled check), and fixing
+    // testRepeatedConnectorCompletionsDontExplodeRebuildCount's settle-delay restore bug (it used
+    // to force the JVM-wide static Config.minimumSettleDelayMs to 0 for its entire run, not just
+    // around its own tick() call) removed an accidental cross-test assist this test had been
+    // silently relying on whenever the two tests overlapped in real time under this GameTestServer's
+    // shared background-executor concurrency. A real, pre-existing timing tightness, not a new
+    // regression - costs nothing in the success case, since this test still succeeds as soon as its
+    // real condition is met.
+    @GameTest(template = "pathing_test", timeoutTicks = 8000, skyAccess = true)
     public static void testConnectorCellsSurviveADirtyRegionRescan(GameTestHelper helper) {
         ChunkAnchor anchor = anchorChunkFor(helper);
         Set<ChunkPos> territory = Set.of(anchor.chunk());
@@ -990,6 +1025,7 @@ public class PathingRegionGameTests {
                                 + "mob standing there would be orphaned");
             }
             loggedDump[0] = true;
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -1059,10 +1095,10 @@ public class PathingRegionGameTests {
      * wait - reproducing the exact same total rebuild count, just spread out, never letting
      * multiple pending changes coexist long enough for the debounce to actually COALESCE them
      * (confirmed empirically: this failed with "waiting for column 1's dirty recompute to be
-     * picked up" once the debounce was added - see task-9-report.md). Fixed by using fixed-tick
+     * picked up" once the debounce was added). Fixed by using fixed-tick
      * spacing after all, but CALIBRATED against this environment's actual measured tick rate
      * (~2.9ms/tick empirically, i.e. this GameTest server runs roughly 17x faster than vanilla's
-     * 20 ticks/sec - see task-9-report.md's calibration measurement) rather than guessed: each
+     * 20 ticks/sec - see docs/pathing/region-pathing-hardening-findings.md's Finding A) rather than guessed: each
      * placement is spaced {@link #FILL_COLUMN_SPACING_TICKS} ticks apart (comfortably more than
      * {@code RECALC_COOLDOWN_TICKS}'s 80-tick minimum, so each still has a real chance at its own
      * batch pre-debounce), with the FULL {@link #FILL_COLUMN_COUNT}-placement span calibrated to
@@ -1073,15 +1109,27 @@ public class PathingRegionGameTests {
      * plus a safety margin has elapsed since the LAST placement, guaranteeing any still-pending
      * re-queued region has had its final chance to be picked up before the count is read.
      *
-     * <p><b>{@code Config.minimumSettleDelayMs} is temporarily forced to 0</b> (restored once all
-     * placements have been issued, before this method's final wait/assertions run) so batch
-     * dispatch is gated purely by the deterministic, tick-based {@code RECALC_COOLDOWN_TICKS} (80
-     * ticks) instead of ALSO waiting out the real-time settle delay on top of everything else.
-     * This is the same plain mutable static {@code DebugPathingCommands} already adjusts at
-     * runtime, not a new pattern.
+     * <p><b>{@code Config.minimumSettleDelayMs} is temporarily forced to 0</b> so batch dispatch is
+     * gated purely by the deterministic, tick-based {@code RECALC_COOLDOWN_TICKS} (80 ticks)
+     * instead of ALSO waiting out the real-time settle delay on top of everything else. This is
+     * the same plain mutable static {@code DebugPathingCommands} already adjusts at runtime, not a
+     * new pattern - but unlike an earlier revision of this test, the 0/restore pair is scoped with
+     * a plain {@code try}/{@code finally} around the single {@code regionMap.tick(...)} call inside
+     * {@code succeedWhen} below, not "set once at the top, restore once inside the LAST scheduled
+     * placement callback." That earlier approach relied on {@code helper.runAfterDelay}'s callback
+     * for the final column actually running to restore the value - but per
+     * {@code GameTestInfo.tick()}'s own scheduling (a {@code runAfterDelay} entry only fires if the
+     * test is still alive when its tick arrives; once the test is done - pass, fail, or timeout -
+     * every not-yet-reached scheduled entry is simply dropped, never run), any failure or early
+     * abort BEFORE that specific late tick left this JVM-wide static stuck at 0 for the rest of
+     * this shared {@code GameTestServer} process, silently corrupting every OTHER test's timing
+     * assumptions (see {@link #testDirtyRegionBatchProducesOneCoherentFinalIndex}'s own javadoc,
+     * which names this same field as its actual gate). The try/finally below cannot leak: the
+     * window where the static reads 0 is exactly the duration of one {@code tick()} call,
+     * regardless of whether this test goes on to pass, fail, or time out afterward.
      *
      * <p>Per the Task 9 Step 0c parking note on {@code reclaimConnectorCells} (see
-     * task-9-report.md's Steps 0/0b/0c section): once the initial {@code rebuild()} registers the
+     * docs/pathing/region-pathing-hardening-findings.md's Finding A): once the initial {@code rebuild()} registers the
      * one connector across this trench, EVERY subsequent dirty rescan of either endpoint region -
      * SO LONG AS THE GAP HASN'T FULLY CLOSED YET (a connector, however narrow, still exists) -
      * always finds {@code rescanned.size() >= 2}, taking the topology-changed/full-rebuild branch.
@@ -1092,7 +1140,8 @@ public class PathingRegionGameTests {
      * dirty rescan that completes a MERGE, since from either old region's own perspective that
      * rescan finds exactly 1 piece (itself, now spanning what used to be both sides) - satisfying
      * "no change" by this check's own logic even though a genuine topology change (a merge) just
-     * happened. Confirmed empirically (see task-9-report.md): with only 4 columns (the brief's
+     * happened. Confirmed empirically (see docs/pathing/region-pathing-hardening-findings.md's
+     * Finding B): with only 4 columns (the brief's
      * original width), the LAST placement - the one that actually finishes the crossing - always
      * lands on this missed-merge case instead of the topology-changed branch, so only 3 of the 4
      * placements produce a rebuild-count increment, landing EXACTLY AT the brief's own
@@ -1103,7 +1152,7 @@ public class PathingRegionGameTests {
      * final, structurally-different merge placement resolves.
      *
      * <p><b>Step 4's debounce is expected to be INERT at vanilla tick rate - see
-     * task-9-report.md.</b> {@code RECALC_COOLDOWN_TICKS} (80 ticks) already gates every dispatch
+     * docs/pathing/region-pathing-hardening-findings.md's Finding A.</b> {@code RECALC_COOLDOWN_TICKS} (80 ticks) already gates every dispatch
      * of {@code recomputeDirtyRegions}, and that method increments {@code topologyRebuildCount} at
      * most once per dispatch (it {@code return}s immediately after the first hit) - so two
      * consecutive topology-changed hits are naturally at least 80 ticks apart, which at vanilla 20
@@ -1112,7 +1161,7 @@ public class PathingRegionGameTests {
      * server ticks roughly 17x faster than vanilla (measured ~2.9ms/tick - see
      * {@link #FILL_COLUMN_SPACING_TICKS}'s doc), compressing 80 ticks to ~230ms, well inside the
      * 2000ms window. <b>This test is EXPECTED TO FAIL before Step 4's debounce exists, and to pass
-     * once it's added</b> - see task-9-report.md's Steps 1-5 section for the actual run output and
+     * once it's added</b> - see docs/pathing/region-pathing-hardening-findings.md's Finding A for
      * the production-inertness finding in full.
      */
     // Generous relative to POST_FILL_SETTLE_MS (2500ms real time, the actual gate - see
@@ -1120,7 +1169,7 @@ public class PathingRegionGameTests {
     // (observed empirically - a calibration measurement of ~2.9ms/tick under light load produced
     // real timeouts under heavier concurrent-test load, where ticks apparently run even faster
     // relative to wall-clock time, needing far more of them to reach the same real-ms target -
-    // see task-9-report.md and testDirtyRegionBatchProducesOneCoherentFinalIndex's own similar
+    // see testDirtyRegionBatchProducesOneCoherentFinalIndex's own similar
     // timeoutTicks comment for the same class of issue). Set generously high so the tick BUDGET is
     // never the bottleneck regardless of how fast/slow this particular run's ticks happen to pace
     // against real time - the real gate is POST_FILL_SETTLE_MS itself, not this number.
@@ -1151,9 +1200,6 @@ public class PathingRegionGameTests {
         helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
         BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
 
-        int originalSettleDelayMs = Config.minimumSettleDelayMs;
-        Config.minimumSettleDelayMs = 0;
-
         TerritoryRegionMap regionMap = new TerritoryRegionMap();
         regionMap.rebuild(helper.getLevel(), territory, nexusPos);
 
@@ -1182,21 +1228,23 @@ public class PathingRegionGameTests {
                 helper.setBlock(new BlockPos(lx, 1, baseZ + fillLocalZ), Blocks.STONE.defaultBlockState());
                 regionMap.onBlockChanged(helper.absolutePos(new BlockPos(lx, 2, baseZ + fillLocalZ)));
                 if (isLast) {
-                    // Restored here (right after the last placement is issued), not gated behind
-                    // the POST_FILL_SETTLE_MS wait below - Config is a JVM-wide static shared with
-                    // every other GameTest in this run, and the settle delay isn't needed for
-                    // anything past this point anyway, so restoring it as early as possible avoids
-                    // leaving 0 in place for the rest of the session if this test times out before
-                    // reaching its final assertions (a plain field write, not gated by
-                    // succeedWhen's retry loop, so it happens exactly once regardless of outcome).
-                    Config.minimumSettleDelayMs = originalSettleDelayMs;
                     lastPlacementRealTimeMs[0] = System.currentTimeMillis();
                 }
             });
         }
 
         helper.succeedWhen(() -> {
-            regionMap.tick(helper.getLevel());
+            // Forced to 0 for the duration of this ONE call only - see method javadoc for why a
+            // scheduled (runAfterDelay-tied-to-a-late-tick) restore isn't safe to rely on instead.
+            // This local try/finally can never leak the static past this statement, regardless of
+            // whether this test goes on to pass, fail, or time out afterward.
+            int originalSettleDelayMs = Config.minimumSettleDelayMs;
+            Config.minimumSettleDelayMs = 0;
+            try {
+                regionMap.tick(helper.getLevel());
+            } finally {
+                Config.minimumSettleDelayMs = originalSettleDelayMs;
+            }
 
             check(lastPlacementRealTimeMs[0] > 0,
                     "waiting for all " + FILL_COLUMN_COUNT + " column placements to be issued");
@@ -1214,7 +1262,8 @@ public class PathingRegionGameTests {
 
             // Post-review diagnostic: a review of this test's blockChangeRebuildCount=2 result
             // (instead of the 1 the "6th placement completes the merge via the fast path" prose
-            // implied) raised a real, distinct hypothesis - see task-9-report.md's fix-round for
+            // implied) raised a real, distinct hypothesis - see
+            // docs/pathing/region-pathing-hardening-findings.md's Finding B for
             // the full write-up - that the merge-completing batch can carry BOTH the near and far
             // region ids as dirty simultaneously (the closing placement's west neighbor resolves
             // to the already-absorbed near id, its east neighbor to the far region's own native
@@ -1254,10 +1303,20 @@ public class PathingRegionGameTests {
                             + "region count={}, blockChangeRebuildCount={}",
                     nearProbeId, farProbeId, finalRegions.size(), regionMap.getBlockChangeRebuildCount());
 
+            // NOTE: this bound partly holds BECAUSE of the parked duplicate-region bug (Finding B,
+            // docs/pathing/region-pathing-hardening-findings.md) - the merge-completing placement
+            // takes the fast path (blockChangeRebuildCount above), not the topology-changed branch,
+            // so it does NOT increment topologyRebuildCount. If that bug is ever fixed in a way
+            // that makes the merge-completing placement correctly register as a topology change
+            // (e.g. Option C, fixing rescanned.size() != 1's own merge-blindness), this count would
+            // go up by 1 and this assertion's margin would shrink accordingly - a future fix
+            // changing this number is expected, not a regression, and should not be "fixed" by
+            // just raising the threshold without re-reading why it moved.
             check(regionMap.getTopologyRebuildCount() <= 3,
                     "filling in one " + FILL_COLUMN_COUNT + "-block-wide connector triggered "
                             + regionMap.getTopologyRebuildCount()
                             + " full topology rebuilds - expected at most a handful, not one per block");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -1266,7 +1325,7 @@ public class PathingRegionGameTests {
      * requirements ("players will put their nexus at build height or bury it in bedrock") - a
      * floating nexus (this test) and a bedrock-buried nexus ({@link #testBedrockBuriedNexusGetsMinedTo}).
      * Both reuse a taller structure ({@code pathing_test_tall}, 32x24x32 - see this method's own
-     * "why 32 wide" note below and task-12-report.md) instead of {@code pathing_test} (32x8x32,
+     * "why 32 wide" note below) instead of {@code pathing_test} (32x8x32,
      * whose 8-block height doesn't leave enough room for a real "bridge down to the ground" case).
      *
      * <p><b>Why 32 wide, not the task brief's original 16 wide:</b> a footprint exactly 16 wide
@@ -1277,7 +1336,8 @@ public class PathingRegionGameTests {
      * NOT place structures at 16-aligned world positions. A 32-wide footprint is what makes
      * {@link #anchorChunkFor}'s proof (the chunk containing structure-relative (16,*,16) is always
      * fully inside 0..31) hold at all; reusing it here is far lower-risk than deriving a fresh
-     * alignment proof for a 16-wide structure. See task-12-report.md for the full reasoning.
+     * alignment proof for a 16-wide structure (see also
+     * docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 12").
      *
      * <p>Geometry (kept as close to the brief's original figures as the anchoring rewrite allows -
      * only X/Z are rebased onto {@link #anchorChunkFor}'s baseX/baseZ, every Y is unchanged): an
@@ -1334,6 +1394,7 @@ public class PathingRegionGameTests {
                     "expected the floating platform and the ground to scan as 2 regions, found " + regions.size());
             check(!regionMap.getRegionGraph().getAllConnectors().isEmpty(),
                     "expected at least one connector discovered bridging the platform down to the ground");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 
@@ -1401,8 +1462,9 @@ public class PathingRegionGameTests {
      * {@code isWalkableTerrain} returns true, completing the trace. Total consecutive MINE count
      * across the whole descent: 4 (steps 1-4) - 2 steps of headroom under the abort threshold (a
      * 5th consecutive MINE step would still be fine; a 6th is what aborts), confirmed by this exact
-     * step-by-step trace rather than assumed. See task-12-report.md for the full derivation, the
-     * fix-round correcting an earlier off-by-one in this margin claim, and the run output confirming it.
+     * step-by-step trace rather than assumed (see also
+     * docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 12", for the
+     * MAX_CONSECUTIVE_MINE margin note).
      */
     @GameTest(template = "pathing_test_tall", timeoutTicks = 800, skyAccess = true)
     public static void testBedrockBuriedNexusGetsMinedTo(GameTestHelper helper) {
@@ -1463,6 +1525,7 @@ public class PathingRegionGameTests {
 
             check(!regionMap.getRegionGraph().getAllConnectors().isEmpty(),
                     "expected a MINE-based connector discovered down into the buried nexus pocket");
+            regionMap.cleanup(helper.getLevel());
         });
     }
 }

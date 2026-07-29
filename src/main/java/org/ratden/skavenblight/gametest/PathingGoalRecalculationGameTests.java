@@ -34,7 +34,8 @@ import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
  * after mutating the world, or the region they just changed can never be told about its own
  * construction (the same bug the branch's history already fixed once for {@code BuildFlowFieldGoal}).
  *
- * <p><b>Deviation from the task-3 brief's proposed assertion (see task-3-report.md for the full
+ * <p><b>Deviation from the task-3 brief's proposed assertion (see
+ * docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 3", for the full
  * writeup):</b> the brief's original {@code succeedWhen} checked
  * {@code owner.getRegionIndex().regionIdAt(...) != null || owner.getGeneration() > 0} after driving
  * {@code TerritoryRegionMap#tick}. That can never pass here: a freshly-constructed
@@ -169,7 +170,8 @@ public class PathingGoalRecalculationGameTests {
      * Task 7 (region-pathing-hardening): mechanical proof that
      * {@code SiegeProjectManager.setMaxCandidateProjectLength} actually bounds how far a candidate
      * line traced by {@code evaluateMacroProjects}/{@code SiegeLineTracer.trace} can reach - see
-     * task-7-report.md for why this can't be shown through any {@code TerritoryRegionMap}/region-graph
+     * docs/pathing/region-pathing-hardening-findings.md's Finding C ("Task 7") for why this can't
+     * be shown through any {@code TerritoryRegionMap}/region-graph
      * scenario: every region-scoped {@code FlowFieldState} is built with a {@code cellFilter}
      * ({@code region::contains}), and {@code SiegeLineTracer.trace} checks that filter on EVERY step,
      * not just the endpoint, so a candidate line can never reach further than whatever

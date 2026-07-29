@@ -26,23 +26,30 @@ public class RegionGraph {
     private static final int MAX_CHAIN_HOPS = 12; // 12 * MAX_PROJECT_LENGTH(32) = 384 blocks, comfortably more than Minecraft's full build-height range
     private static final int VERTICAL_CHAIN_SLACK = 32; // one hop's worth of margin past the known region Y-range, so a landing exactly at a region's edge isn't cut off early
 
-    private final RegionIndex regionIndex;
     private final Map<Integer, List<RegionConnector>> connectorsByRegion = new HashMap<>();
     private final List<RegionConnector> allConnectors = new ArrayList<>();
 
-    private RegionGraph(RegionIndex regionIndex) {
-        this.regionIndex = regionIndex;
+    private RegionGraph() {
     }
 
     public static RegionGraph build(TerrainSnapshot snapshot, RegionIndex regionIndex, Set<ChunkPos> bounds,
                                      BlockPos boundsAnchor, TerrainEvaluator evaluator, SiegeLineTracer lineTracer) {
-        RegionGraph graph = new RegionGraph(regionIndex);
+        RegionGraph graph = new RegionGraph();
         FlowFieldState boundsState = new FlowFieldState(boundsAnchor, bounds);
 
         // regionId pair -> cheapest connector found so far for that pair
         Map<Long, RegionConnector> bestPerPair = new HashMap<>();
         // regionId pair -> hop count the winning connector in bestPerPair took to discover
         Map<Long, Integer> hopsPerPair = new HashMap<>();
+        // Every chunk any registerConnector call actually addCell'd a cell into, across the WHOLE
+        // build - including chunks belonging to a candidate that was later superseded by a
+        // cheaper one for the same region pair (registerConnector's addCell loop runs before the
+        // "is this better than the existing candidate" short-circuit could matter - see that
+        // method's own doc - so a superseded candidate's cells stay claimed and this set must
+        // still include its chunks, or refreshChunks below would silently miss them). Accumulated
+        // here, not re-derived from bestPerPair/allConnectors afterward, precisely so superseded
+        // candidates aren't lost.
+        Set<ChunkPos> touchedChunks = new HashSet<>();
 
         int minKnownY = regionIndex.getRegions().stream().mapToInt(r -> r.getMin().getY()).min().orElse(Integer.MIN_VALUE);
         int maxKnownY = regionIndex.getRegions().stream().mapToInt(r -> r.getMax().getY()).max().orElse(Integer.MAX_VALUE);
@@ -50,11 +57,11 @@ public class RegionGraph {
         for (Region region : regionIndex.getRegions()) {
             for (BlockPos boundaryCell : region.getBoundaryCells()) {
                 for (int dy : new int[]{-1, 1}) {
-                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, minKnownY, maxKnownY, bestPerPair, hopsPerPair);
+                    tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, 0, dy, 0, minKnownY, maxKnownY, bestPerPair, hopsPerPair, touchedChunks);
                 }
                 for (int[] dir : CARDINAL_OFFSETS) {
                     for (int dy : new int[]{-1, 0, 1}) {
-                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], minKnownY, maxKnownY, bestPerPair, hopsPerPair);
+                        tryTrace(snapshot, evaluator, lineTracer, regionIndex, boundsState, region, boundaryCell, dir[0], dy, dir[1], minKnownY, maxKnownY, bestPerPair, hopsPerPair, touchedChunks);
                     }
                 }
             }
@@ -73,6 +80,16 @@ public class RegionGraph {
             maxHops = Math.max(maxHops, hops);
         }
 
+        // Task 8 claims a connector's traced cells into both endpoint regions via Region.addCell
+        // (see registerConnector), mutating the SAME Region objects `regionIndex` was built from -
+        // but RegionIndex takes no live view of a Region's BitSet (its constructor copies bits
+        // once). Re-stamping just the touched chunks here keeps `regionIndex` current for its
+        // caller (TerritoryRegionMap.rebuildRegionsAndGraph) WITHOUT a second full
+        // `new RegionIndex(regions)` construction across the whole territory - see refreshChunks's
+        // own doc for why this preserves the exact same shared-cell tie-break the original
+        // from-scratch reconstruction produced.
+        regionIndex.refreshChunks(touchedChunks);
+
         LOGGER.info("[Skavenblight] RegionGraph built: {} regions, {} connectors ({} chained, max {} hops)",
                 regionIndex.getRegions().size(), graph.allConnectors.size(), chainedCount, maxHops);
         return graph;
@@ -81,7 +98,8 @@ public class RegionGraph {
     private static void tryTrace(TerrainSnapshot snapshot, TerrainEvaluator evaluator, SiegeLineTracer lineTracer,
                                   RegionIndex regionIndex, FlowFieldState boundsState, Region fromRegion,
                                   BlockPos boundaryCell, int dx, int dy, int dz, int minKnownY, int maxKnownY,
-                                  Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair) {
+                                  Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair,
+                                  Set<ChunkPos> touchedChunks) {
 
         List<SiegeNode> combinedOrderedSteps = new ArrayList<>();
         BlockPos currentAnchor = boundaryCell;
@@ -98,7 +116,7 @@ public class RegionGraph {
 
             Region toRegion = regionIndex.regionAt(result.endPos());
             if (toRegion != null && toRegion.getId() != fromRegion.getId()) {
-                registerConnector(fromRegion, toRegion, boundaryCell, result.endPos(), cost, combinedOrderedSteps, hop, bestPerPair, hopsPerPair);
+                registerConnector(fromRegion, toRegion, boundaryCell, result.endPos(), cost, combinedOrderedSteps, hop, bestPerPair, hopsPerPair, touchedChunks);
                 return;
             }
 
@@ -114,7 +132,8 @@ public class RegionGraph {
 
     private static void registerConnector(Region fromRegion, Region toRegion, BlockPos boundaryCell, BlockPos endPos, int cost,
                                            List<SiegeNode> orderedSteps, int hops,
-                                           Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair) {
+                                           Map<Long, RegionConnector> bestPerPair, Map<Long, Integer> hopsPerPair,
+                                           Set<ChunkPos> touchedChunks) {
         if (orderedSteps.isEmpty()) return;
 
         long pairKey = pairKey(fromRegion.getId(), toRegion.getId());
@@ -142,6 +161,7 @@ public class RegionGraph {
         for (SiegeNode step : orderedSteps) {
             fromRegion.addCell(step.pos());
             toRegion.addCell(step.pos());
+            touchedChunks.add(new ChunkPos(step.pos()));
         }
 
         RegionConnector connector = new RegionConnector(fromRegion.getId(), toRegion.getId(), boundaryCell, endPos, cost, towardA, towardB);
@@ -203,9 +223,5 @@ public class RegionGraph {
 
     public List<RegionConnector> getAllConnectors() {
         return List.copyOf(allConnectors);
-    }
-
-    public RegionIndex getRegionIndex() {
-        return regionIndex;
     }
 }

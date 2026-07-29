@@ -64,4 +64,36 @@ public class RegionIndex {
     public List<Region> getRegions() {
         return regions;
     }
+
+    /**
+     * Re-stamps this index's flat per-chunk arrays for exactly {@code changedChunks}, using the
+     * SAME "iterate {@link #regions} in list order, last matching region wins" semantics the
+     * constructor above uses - not a per-cell overwrite in whatever order the caller happens to
+     * process cells in, which would silently change which region wins a shared-cell tie-break
+     * (see {@code RegionGraph.registerConnector}: both a connector's endpoint regions legitimately
+     * claim the SAME cells, and {@code TerritoryRegionMap}'s parent/child connector-instruction
+     * injection - see {@code injectSharedConnectorProjects} - was built assuming this index's
+     * existing scan-order tie-break, not some other one).
+     *
+     * <p>Package-private: the one caller is {@code RegionGraph.build}, immediately after its own
+     * {@code registerConnector} calls have finished mutating {@link Region#addCell} on this same
+     * {@link #regions} list - see that method's doc for why this exists (avoiding a second full
+     * {@code new RegionIndex(regions)} construction, which for a territory with many occupied
+     * chunks is a real, avoidable per-chunk {@code int[16*16*height]} allocation repeated a second
+     * time for chunks a connector never even touched).
+     */
+    void refreshChunks(Collection<ChunkPos> changedChunks) {
+        if (height == 0 || changedChunks.isEmpty()) return;
+        for (ChunkPos chunk : changedChunks) {
+            int[] ids = regionIdByCell.computeIfAbsent(chunk, c -> new int[16 * 16 * height]);
+            Arrays.fill(ids, -1);
+            for (Region region : regions) {
+                BitSet bits = region.getChunkCells().get(chunk);
+                if (bits == null) continue;
+                for (int i = bits.nextSetBit(0); i >= 0; i = bits.nextSetBit(i + 1)) {
+                    ids[i] = region.getId();
+                }
+            }
+        }
+    }
 }

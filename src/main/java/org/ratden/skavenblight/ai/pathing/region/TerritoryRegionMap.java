@@ -61,7 +61,8 @@ public class TerritoryRegionMap {
     private volatile int blockChangeRebuildCount = 0;
 
     // Task 9 Step 4: debounces how often the topology-changed branch is actually ACTED on. Per
-    // the Step 3 characterization test (see task-9-report.md), a sustained siege's connector
+    // the Step 3 characterization test (see docs/pathing/region-pathing-hardening-findings.md's
+    // Finding A), a sustained siege's connector
     // traffic drives this branch far more often than genuine split/merge frequency alone would
     // suggest (see the Step 0c parking note on reclaimConnectorCells for the proven cause).
     // Distinct from Config.minimumSettleDelayMs, which governs terrain CAPTURE (how long to wait
@@ -79,14 +80,14 @@ public class TerritoryRegionMap {
     // only gets stricter under server lag, which lengthens real time per tick). The
     // PathingRegionGameTests characterization test can only observe this cooldown suppressing
     // anything because that GameTest server ticks roughly 17x faster than vanilla (measured
-    // empirically at ~2.9ms/tick - see task-9-report.md), compressing the 80-tick gate to ~230ms,
+    // empirically at ~2.9ms/tick), compressing the 80-tick gate to ~230ms,
     // well inside this 2000ms window. On a real, vanilla-or-slower-paced server this constant is
     // therefore expected to never actually trigger the re-queue branch below - full-rebuild
     // frequency stays bounded by RECALC_COOLDOWN_TICKS alone, exactly as before this Step existed.
     // Confirming this against a real (non-GameTest, non-tick-compressed) server, and deciding
     // whether a TICK-denominated cooldown (comparable to RECALC_COOLDOWN_TICKS, environment-speed-
     // independent) would be the more meaningful fix if one is still wanted, is unresolved - see
-    // task-9-report.md's Steps 1-5 section for the full analysis.
+    // docs/pathing/region-pathing-hardening-findings.md's Finding A for the full analysis.
     private long lastTopologyRebuildTime = 0;
     private static final long TOPOLOGY_REBUILD_COOLDOWN_MS = 2000;
 
@@ -207,16 +208,18 @@ public class TerritoryRegionMap {
 
         // RegionGraph.build's registerConnector (see task-8) calls Region.addCell on both of a
         // connector's endpoint regions for every cell it traced, mutating the SAME Region objects
-        // this method's own `regions` list holds. RegionIndex takes no live view of a Region's
-        // BitSet, though - its constructor copies each region's currently-set bits into its own
-        // flat per-chunk int[] arrays once, at construction time - so preGraphIndex above, built
-        // BEFORE those addCell calls happened, is now stale for exactly the connector cells this
-        // task exists to stop orphaning. Rebuild once more from the same (mutated-in-place)
-        // `regions` list now that every connector has been registered, and use THIS index for
-        // rootRegion resolution and everything published below - getRegionFlowFieldFor and every
-        // other real caller of getRegionIndex() only ever sees this field, never RegionGraph's own
-        // (unused-elsewhere) copy, so this is the one index that actually needs to be current.
-        RegionIndex newIndex = new RegionIndex(regions);
+        // this method's own `regions` list holds - which would leave preGraphIndex (built BEFORE
+        // those addCell calls) stale for exactly the connector cells task-8 exists to stop
+        // orphaning. RegionGraph.build's LAST step re-stamps preGraphIndex in place for exactly the
+        // chunks its own connector claims touched (see RegionIndex.refreshChunks), so by the time
+        // build() returns, preGraphIndex already reflects every addCell mutation - a second,
+        // whole-territory `new RegionIndex(regions)` construction here would be redundant (this
+        // index's per-chunk arrays are a real `int[16*16*height]` allocation per occupied chunk -
+        // doing that twice per full rebuild was a real, avoidable cost). Reuse the SAME index
+        // object for rootRegion resolution and everything published below - getRegionFlowFieldFor
+        // and every other real caller of getRegionIndex() only ever sees this field, so this is the
+        // one index that actually needs to be current, and now it already is.
+        RegionIndex newIndex = preGraphIndex;
 
         // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS in
         // ModBlocks - plain full-collision blocks, no shape override), so RegionScanner never
@@ -398,7 +401,8 @@ public class TerritoryRegionMap {
      * Number of times {@code recomputeDirtyRegions} has taken its topology-changed branch (a
      * dirty region's local rescan found other than exactly 1 sub-region, triggering a full
      * {@code rebuildRegionsAndGraph} - see that method's call site). See the Task 9 Step 0c
-     * parking note on {@code reclaimConnectorCells} and task-9-report.md: this fires far more
+     * parking note on {@code reclaimConnectorCells} and
+     * docs/pathing/region-pathing-hardening-findings.md's Finding A: this fires far more
      * often than a genuine split/merge, for any region with an active connector.
      */
     public int getTopologyRebuildCount() {
@@ -553,8 +557,9 @@ public class TerritoryRegionMap {
             // see reclaimConnectorCells's own parking note) now finds exactly 1 piece: itself,
             // having absorbed what used to be the other region. rescanned.size() != 1 reads that
             // as "no topology change" even though a merge - the most dramatic topology change
-            // possible - just happened. Confirmed empirically (see task-9-report.md's Steps 1-5
-            // fix-round): when the closing dirty batch contains BOTH endpoint region ids (which it
+            // possible - just happened. Confirmed empirically (see
+            // docs/pathing/region-pathing-hardening-findings.md's Finding B): when the closing
+            // dirty batch contains BOTH endpoint region ids (which it
             // does, deterministically, for the specific FLOOR-support-type geometry that test
             // exercises - via a deliberate, non-production onBlockChanged convention; see below),
             // BOTH take the non-topology-changed branch below IN THE SAME BATCH, each independently
@@ -579,9 +584,9 @@ public class TerritoryRegionMap {
             // terrain before this exact change (the floor block itself, and the newly-walkable
             // cell its above() lands on, which only just became walkable because of this same
             // change), so a production-faithful floor-support change produces zero dirty regions
-            // and never reaches this method at all for that case. See task-9-report.md's narrowed
-            // "Is this reproducible in production, or just this test's geometry?" section for the
-            // full reconciliation.
+            // and never reaches this method at all for that case. See
+            // docs/pathing/region-pathing-hardening-findings.md's Finding B ("Production
+            // reachability is scenario-dependent") for the full reconciliation.
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
@@ -671,7 +676,8 @@ public class TerritoryRegionMap {
             // Task 9 Step 1: counts every time this branch fires, whether from a genuine
             // split/merge or (per the Task 9 Step 0c parking note on reclaimConnectorCells) a
             // spurious re-detection driven by a connector's bbox-inflated localBounds - see
-            // getTopologyRebuildCount's doc and task-9-report.md.
+            // getTopologyRebuildCount's doc and docs/pathing/region-pathing-hardening-findings.md's
+            // Finding A.
             this.topologyRebuildCount++;
             // A genuine split/merge is rare and the region count for a typical base is small (see
             // RegionScanner's manual test notes) - falling back to a full rebuild here is simpler
@@ -725,7 +731,8 @@ public class TerritoryRegionMap {
      * {@code PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: two
      * regions with byte-identical {@code min}/{@code max}/{@code cellCount}, a connector still
      * listed between them, and two probes on opposite original sides of the trench both resolving
-     * to the same winning region id. See task-9-report.md's Steps 1-5 fix-round for the full
+     * to the same winning region id. See docs/pathing/region-pathing-hardening-findings.md's
+     * Finding B for the full
      * empirical evidence and trace. THIS IS AN UNFIXED, DISTINCT BUG, not merely a documentation
      * correction - it was not fixed in this pass because a correct fix likely requires either
      * mirroring the topology-changed branch's early-return/single-winner semantics onto the fast
@@ -756,9 +763,8 @@ public class TerritoryRegionMap {
      * reproducible in GameTest for a floor-support merge (via a non-production reporting
      * convention), confirmed-plausible for a production wall-break merge, NOT yet confirmed
      * reachable via production's actual event path for a floor-support merge specifically. See
-     * task-9-report.md's narrowed "Is this reproducible in production, or just this test's
-     * geometry?" section for the full reconciliation against the separately-documented
-     * floor-support dirty-detection gap.
+     * docs/pathing/region-pathing-hardening-findings.md's Finding B for the full reconciliation
+     * against the separately-documented floor-support dirty-detection gap.
      */
     private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
         if (graph == null) return;
