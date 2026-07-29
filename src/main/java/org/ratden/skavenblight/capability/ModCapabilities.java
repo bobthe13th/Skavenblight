@@ -6,11 +6,24 @@ import net.neoforged.neoforge.capabilities.BlockCapability;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
 
-public class ModCapabilities {
+/**
+ * Declares the custom capability types used by Skavenblight.
+ *
+ * Capability providers are attached to game objects separately in
+ * ModCapabilityProviders.
+ */
+public final class ModCapabilities {
 
-    public static final BlockCapability<IWarpFluxStorage, Direction> WARP_FLUX =
+    public static final BlockCapability<IWarpFluxStorage, Direction>
+            WARP_FLUX =
             BlockCapability.createSided(
-                    ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "warp_flux"),
+                    ResourceLocation.fromNamespaceAndPath(
+                            Skavenblight.MODID,
+                            "warp_flux"
+                    ),
                     IWarpFluxStorage.class
             );
+
+    private ModCapabilities() {
+    }
 }

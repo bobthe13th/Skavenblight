@@ -9,7 +9,7 @@ import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWol
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SetSourceState;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SourcePlacement;
-import org.ratden.skavenblight.event.skavenIncursion.budget.IncursionCosts;
+import org.ratden.skavenblight.event.skavenIncursion.planning.budget.IncursionBudgetCosts;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.director.OverlapType;
 import org.ratden.skavenblight.event.skavenIncursion.director.PressureProfile;
@@ -17,34 +17,49 @@ import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.planning.composition.IncursionMobCatalogue;
+import org.ratden.skavenblight.event.skavenIncursion.planning.stratagem.StratagemCatalogue;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioDefinition;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioGoal;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.ScenarioPattern;
 import org.ratden.skavenblight.event.skavenIncursion.scenario.SkavenScenario;
 import org.ratden.skavenblight.world.SkavenblightWorldData;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceDistanceProfile;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class WolfRatAssault implements SkavenScenario {
-    public static final ScenarioDefinition DEFINITION = new ScenarioDefinition(
-            "wolf_rat_assault",
-            ScenarioPattern.ASSAULT,
-            ScenarioGoal.PRESSURE,
-            OverlapType.MAJOR,
-            PressureProfile.COMBAT,
-            EnumSet.of(
-                    IncursionTargetType.PLAYER,
-                    IncursionTargetType.NEXUS
-            ),
-            0,
-            -1,
-            100,
-            24000L,
-            true,
-            true,
-            false
-    );
+    public static final ScenarioDefinition DEFINITION =
+            new ScenarioDefinition(
+                    "wolf_rat_assault",
+                    ScenarioPattern.ASSAULT,
+                    SourceDistanceProfile.CLOSE,
+                    ScenarioGoal.PRESSURE,
+                    OverlapType.MAJOR,
+                    PressureProfile.COMBAT,
+                    EnumSet.of(
+                            IncursionTargetType.PLAYER,
+                            IncursionTargetType.NEXUS
+                    ),
+                    List.of(
+                            new ScenarioDefinition.MobRosterEntry(
+                                    IncursionMobCatalogue.WOLF_RAT,
+                                    1.0D
+                            )
+                    ),
+                    List.of(
+                            StratagemCatalogue.STEADY_1
+                    ),
+                    0,
+                    -1,
+                    100,
+                    24000L,
+                    true,
+                    true,
+                    false
+            );
 
     private final UUID instanceId;
     private final LeadershipRegistry leadershipRegistry;
@@ -130,7 +145,7 @@ public class WolfRatAssault implements SkavenScenario {
     public static int calculateWolfRatCount(ServerLevel level, IncursionTargetType targetType) {
         int threatBudget = calculateThreatBudget(level, targetType);
 
-        return Math.max(1, threatBudget / IncursionCosts.WOLF_RAT);
+        return Math.max(1, threatBudget / IncursionBudgetCosts.WOLF_RAT.threatCost());
     }
 
     public static int getComplexityBudgetMultiplier() {
@@ -157,7 +172,7 @@ public class WolfRatAssault implements SkavenScenario {
         return "Wolf Rat Assault"
                 + "\nTarget type: " + targetType
                 + "\nThreat budget: " + calculateThreatBudget(level, targetType)
-                + "\nWolf rat cost: " + IncursionCosts.WOLF_RAT
+                + "\nWolf rat cost: " + IncursionBudgetCosts.WOLF_RAT.threatCost()
                 + "\nWolf rats: " + calculateWolfRatCount(level, targetType)
                 + "\nComplexity budget: " + calculateComplexityBudget(level)
                 + "\nPoison attack chance: " + calculatePoisonAttackChancePercent(level) + "%"

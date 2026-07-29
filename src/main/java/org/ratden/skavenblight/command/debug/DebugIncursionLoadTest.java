@@ -8,23 +8,26 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.ratden.skavenblight.block.entity.state.SourceState;
+import org.ratden.skavenblight.entity.custom.wolfCat.WolfCat;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnClanrats;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfCats;
 import org.ratden.skavenblight.event.skavenIncursion.action.mob.generic.SpawnWolfRats;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.BasePlacementContext;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SourceGroupPlacement;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.SourceGroupPlan;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.SourcePlacementPattern;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.SourcePlan;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.SourceRole;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.SourceSize;
-import org.ratden.skavenblight.event.skavenIncursion.action.source.SourceType;
 import org.ratden.skavenblight.event.skavenIncursion.action.source.generic.CreateTunnelSource;
 import org.ratden.skavenblight.event.skavenIncursion.director.IncursionTargetType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroup;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderGroupType;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeaderRank;
+import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipContext;
 import org.ratden.skavenblight.event.skavenIncursion.leadership.LeadershipRegistry;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.BasePlacementContext;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceGroupPlan;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourcePlacementPattern;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceRole;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceSize;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.SourceType;
+import org.ratden.skavenblight.event.skavenIncursion.action.mob.modifier.TestPackLeader;
 import org.ratden.skavenblight.world.NexusTracker;
 
 import java.util.List;
@@ -61,6 +64,12 @@ public class DebugIncursionLoadTest {
                                 loadTestSize,
                                 LoadTestMobType.WOLF_CAT
                         )))
+                .then(Commands.literal("wolf_cat_test_pack")
+                        .executes(context -> runLoadTest(
+                                context.getSource(),
+                                loadTestSize,
+                                LoadTestMobType.WOLF_CAT_TEST_PACK
+                        )))
                 .then(Commands.literal("clanrat")
                         .executes(context -> runLoadTest(
                                 context.getSource(),
@@ -79,6 +88,7 @@ public class DebugIncursionLoadTest {
             ServerLevel level = player.serverLevel();
 
             IncursionTargetType targetType = chooseDebugTargetType(level);
+
             BlockPos targetPos = chooseDebugTargetPos(
                     level,
                     player.blockPosition(),
@@ -91,15 +101,16 @@ public class DebugIncursionLoadTest {
                     loadTestSize.baseRadius
             );
 
-            List<SourceGroupPlan> sourceGroups = SourceGroupPlacement.createPlannedSources(
-                    level,
-                    placementContext,
-                    loadTestSize.placementPattern,
-                    SourceRole.COMBAT,
-                    SourceType.SKAVEN_TUNNEL,
-                    SourceSize.NORMAL,
-                    loadTestSize.sourceCount
-            );
+            List<SourceGroupPlan> sourceGroups =
+                    SourceGroupPlacement.createPlannedSources(
+                            level,
+                            placementContext,
+                            loadTestSize.placementPattern,
+                            SourceRole.COMBAT,
+                            SourceType.SKAVEN_TUNNEL,
+                            SourceSize.NORMAL,
+                            loadTestSize.sourceCount
+                    );
 
             int plannedSources = countPlannedSources(sourceGroups);
 
@@ -128,6 +139,7 @@ public class DebugIncursionLoadTest {
             int createdSources = 0;
             int spawnedMobs = 0;
             int sourceNumber = 0;
+            int testPackLeadersApplied = 0;
 
             int[] mobsPerSource = distributeCount(
                     loadTestSize.mobCount,
@@ -175,6 +187,14 @@ public class DebugIncursionLoadTest {
                                     LeaderRank.NONE
                             );
 
+                    LeadershipContext leadershipContext =
+                            leadershipRegistry.createContext(
+                                    vermintideGroup,
+                                    fangGroup,
+                                    clawGroup,
+                                    packGroup
+                            );
+
                     BlockPos placementPos = sourcePlan.hasPlacedPos()
                             ? sourcePlan.getPlacedPos()
                             : sourcePlan.getAnchorPos();
@@ -183,12 +203,7 @@ public class DebugIncursionLoadTest {
                             level,
                             placementPos,
                             SourceState.ACTIVE,
-                            leadershipRegistry.createContext(
-                                    vermintideGroup,
-                                    fangGroup,
-                                    clawGroup,
-                                    packGroup
-                            )
+                            leadershipContext
                     );
 
                     if (createdSourceId == null) {
@@ -205,20 +220,19 @@ public class DebugIncursionLoadTest {
                     int mobsForThisSource =
                             mobsPerSource[sourceNumber - 1];
 
-                    int spawnedFromThisSource = spawnMobsForLoadTest(
+                    SpawnResult spawnResult = spawnMobsForLoadTest(
                             level,
                             placementPos,
                             mobsForThisSource,
-                            leadershipRegistry,
-                            vermintideGroup,
-                            fangGroup,
-                            clawGroup,
-                            packGroup,
+                            leadershipContext,
+                            packGroup.getId(),
                             createdSourceId,
                             mobType
                     );
 
-                    spawnedMobs += spawnedFromThisSource;
+                    spawnedMobs += spawnResult.spawnedMobCount();
+                    testPackLeadersApplied +=
+                            spawnResult.testPackLeaderCount();
 
                     message.append("\n\nSource ")
                             .append(sourceNumber)
@@ -231,6 +245,8 @@ public class DebugIncursionLoadTest {
                             .append(formatBlockPos(placementPos))
                             .append("\nSource ID: ")
                             .append(createdSourceId)
+                            .append("\nPack ID: ")
+                            .append(formatUuid(packGroup.getId()))
                             .append("\nRequested ")
                             .append(mobType.displayName)
                             .append(": ")
@@ -238,25 +254,47 @@ public class DebugIncursionLoadTest {
                             .append("\nSpawned ")
                             .append(mobType.displayName)
                             .append(": ")
-                            .append(spawnedFromThisSource);
+                            .append(spawnResult.spawnedMobCount());
+
+                    if (spawnResult.testPackLeaderCount() > 0) {
+                        message.append("\nTest Pack Leaders: ")
+                                .append(spawnResult.testPackLeaderCount());
+                    }
                 }
             }
 
             int finalCreatedSources = createdSources;
             int finalSpawnedMobs = spawnedMobs;
+            int finalTestPackLeadersApplied =
+                    testPackLeadersApplied;
 
             source.sendSuccess(
-                    () -> Component.literal(
-                            message
-                                    + "\n\nCreated sources: "
-                                    + finalCreatedSources
-                                    + " / "
-                                    + plannedSources
-                                    + "\nSpawned mobs: "
-                                    + finalSpawnedMobs
-                                    + " / "
-                                    + loadTestSize.mobCount
-                    ),
+                    () -> {
+                        StringBuilder finalMessage =
+                                new StringBuilder(message);
+
+                        finalMessage.append("\n\nCreated sources: ")
+                                .append(finalCreatedSources)
+                                .append(" / ")
+                                .append(plannedSources)
+                                .append("\nSpawned mobs: ")
+                                .append(finalSpawnedMobs)
+                                .append(" / ")
+                                .append(loadTestSize.mobCount);
+
+                        if (mobType == LoadTestMobType.WOLF_CAT_TEST_PACK) {
+                            finalMessage.append(
+                                            "\nTest Pack Leaders applied: "
+                                    )
+                                    .append(finalTestPackLeadersApplied)
+                                    .append(" / ")
+                                    .append(finalCreatedSources);
+                        }
+
+                        return Component.literal(
+                                finalMessage.toString()
+                        );
+                    },
                     false
             );
 
@@ -270,58 +308,97 @@ public class DebugIncursionLoadTest {
         }
     }
 
-    private static int spawnMobsForLoadTest(
+    private static SpawnResult spawnMobsForLoadTest(
             ServerLevel level,
             BlockPos placementPos,
             int count,
-            LeadershipRegistry leadershipRegistry,
-            LeaderGroup vermintideGroup,
-            LeaderGroup fangGroup,
-            LeaderGroup clawGroup,
-            LeaderGroup packGroup,
+            LeadershipContext leadershipContext,
+            UUID packId,
             UUID createdSourceId,
             LoadTestMobType mobType
     ) {
         return switch (mobType) {
-            case WOLF_RAT -> SpawnWolfRats.execute(
-                    level,
-                    placementPos,
-                    count,
-                    leadershipRegistry.createContext(
-                            vermintideGroup,
-                            fangGroup,
-                            clawGroup,
-                            packGroup
-                    ),
-                    createdSourceId
-            ).size();
+            case WOLF_RAT -> new SpawnResult(
+                    SpawnWolfRats.execute(
+                            level,
+                            placementPos,
+                            count,
+                            leadershipContext,
+                            createdSourceId
+                    ).size(),
+                    0
+            );
 
-            case WOLF_CAT -> SpawnWolfCats.execute(
-                    level,
-                    placementPos,
-                    count,
-                    leadershipRegistry.createContext(
-                            vermintideGroup,
-                            fangGroup,
-                            clawGroup,
-                            packGroup
-                    ),
-                    createdSourceId
-            ).size();
+            case WOLF_CAT -> new SpawnResult(
+                    SpawnWolfCats.execute(
+                            level,
+                            placementPos,
+                            count,
+                            leadershipContext,
+                            createdSourceId
+                    ).size(),
+                    0
+            );
 
-            case CLANRAT -> SpawnClanrats.execute(
+            case WOLF_CAT_TEST_PACK -> spawnWolfCatTestPack(
                     level,
                     placementPos,
                     count,
-                    leadershipRegistry.createContext(
-                            vermintideGroup,
-                            fangGroup,
-                            clawGroup,
-                            packGroup
-                    ),
+                    leadershipContext,
+                    packId,
                     createdSourceId
-            ).size();
+            );
+
+            case CLANRAT -> new SpawnResult(
+                    SpawnClanrats.execute(
+                            level,
+                            placementPos,
+                            count,
+                            leadershipContext,
+                            createdSourceId
+                    ).size(),
+                    0
+            );
         };
+    }
+
+    private static SpawnResult spawnWolfCatTestPack(
+            ServerLevel level,
+            BlockPos placementPos,
+            int count,
+            LeadershipContext leadershipContext,
+            UUID packId,
+            UUID createdSourceId
+    ) {
+        List<WolfCat> spawnedWolfCats = SpawnWolfCats.execute(
+                level,
+                placementPos,
+                count,
+                leadershipContext,
+                createdSourceId
+        );
+
+        if (spawnedWolfCats.isEmpty()) {
+            return new SpawnResult(0, 0);
+        }
+
+        if (packId == null) {
+            throw new IllegalStateException(
+                    "Wolf Cat test pack was created without a Pack ID"
+            );
+        }
+
+        WolfCat selectedLeader = spawnedWolfCats.get(0);
+
+        TestPackLeader.apply(
+                selectedLeader,
+                packId
+        );
+
+        return new SpawnResult(
+                spawnedWolfCats.size(),
+                1
+        );
     }
 
     private static IncursionTargetType chooseDebugTargetType(
@@ -374,7 +451,25 @@ public class DebugIncursionLoadTest {
     }
 
     private static String formatBlockPos(BlockPos pos) {
-        return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
+        return pos.getX()
+                + ", "
+                + pos.getY()
+                + ", "
+                + pos.getZ();
+    }
+
+    private static String formatUuid(UUID uuid) {
+        if (uuid == null) {
+            return "none";
+        }
+
+        return uuid.toString();
+    }
+
+    private record SpawnResult(
+            int spawnedMobCount,
+            int testPackLeaderCount
+    ) {
     }
 
     private enum LoadTestSize {
@@ -424,6 +519,10 @@ public class DebugIncursionLoadTest {
                 "wolf_cat",
                 "wolf cats"
         ),
+        WOLF_CAT_TEST_PACK(
+                "wolf_cat_test_pack",
+                "wolf cats"
+        ),
         CLANRAT(
                 "clanrat",
                 "clanrats"
@@ -444,4 +543,3 @@ public class DebugIncursionLoadTest {
     private DebugIncursionLoadTest() {
     }
 }
-

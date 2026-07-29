@@ -11,7 +11,6 @@ import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
 import org.ratden.skavenblight.capability.ModCapabilities;
 import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
-import net.minecraft.core.BlockPos;
 import java.util.*;
 
 public class WarpFluxNetwork {

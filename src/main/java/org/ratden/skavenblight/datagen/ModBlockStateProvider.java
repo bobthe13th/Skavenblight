@@ -191,7 +191,13 @@ public class ModBlockStateProvider extends BlockStateProvider {
      * Creates standard blockstates and models for a horizontal-directional machine that can be turned on and off.
      * Future machines can call this method with their respective textures to completely generate all models instantly.
      */
-    private void standardMachineBlock(DeferredBlock<Block> block, String sideTex, String topTex, String frontInactiveTex, String frontActiveTex) {
+    private <T extends Block> void standardMachineBlock(
+            DeferredBlock<T> block,
+            String sideTex,
+            String topTex,
+            String frontInactiveTex,
+            String frontActiveTex
+    ) {
         // 1. Create the 3D model for the INACTIVE state
         ModelFile inactiveModel = models().cube("block/" + block.getId().getPath(),
                 modLoc("block/" + sideTex),    // Bottom
