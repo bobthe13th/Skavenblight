@@ -80,6 +80,10 @@ public class Config {
     private static final ModConfigSpec.IntValue RESEARCH_WIND_THRESHOLD = BUILDER.comment("Minimum local Wind level (of the spell's Wind) required to research a spell at the Research Table.")
             .defineInRange("researchWindThreshold", 200, 0, 10000);
 
+    // --- Wind Influence Configs ---
+    private static final ModConfigSpec.IntValue WIND_SOURCE_BLOCK_BONUS = BUILDER.comment("Baseline bonus per tagged wind_source block placed in a chunk (see TaggedBlockInfluence).")
+            .defineInRange("windSourceBlockBonus", 15, 0, 1000);
+
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
 
@@ -112,6 +116,9 @@ public class Config {
     public static int researchTicksBase;
     public static int researchWindThreshold;
 
+    // --- Wind Influence Public Variables ---
+    public static int windSourceBlockBonus;
+
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
     public static int wlCoilCostPerShot;
@@ -143,6 +150,9 @@ public class Config {
         // Load Research Table Configs
         researchTicksBase = RESEARCH_TICKS_BASE.get();
         researchWindThreshold = RESEARCH_WIND_THRESHOLD.get();
+
+        // Load Wind Influence Configs
+        windSourceBlockBonus = WIND_SOURCE_BLOCK_BONUS.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();
