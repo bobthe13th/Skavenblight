@@ -140,7 +140,8 @@ public class WidenStairsGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected boolean isTargetStillValid(ServerLevel level, BlockPos pos) {
-        return level.getBlockState(pos).canBeReplaced();
+        return level.getBlockState(pos).canBeReplaced()
+                && level.getBlockState(pos.below()).blocksMotion();
     }
 
     @Override

@@ -59,7 +59,11 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected boolean isTargetStillValid(ServerLevel level, BlockPos pos) {
-        return level.getBlockState(pos).canBeReplaced();
+        boolean climbDependent = this.targetAction == SiegeNode.SiegeAction.BUILD_STAIR
+                || this.targetAction == SiegeNode.SiegeAction.BUILD_PILLAR
+                || this.targetAction == SiegeNode.SiegeAction.BUILD_SPIRAL;
+        return level.getBlockState(pos).canBeReplaced()
+                && (!climbDependent || level.getBlockState(pos.below()).blocksMotion());
     }
 
     @Override

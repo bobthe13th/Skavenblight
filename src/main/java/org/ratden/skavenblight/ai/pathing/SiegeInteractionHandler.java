@@ -49,6 +49,25 @@ public class SiegeInteractionHandler {
             return;
         }
 
+        if ((action == SiegeNode.SiegeAction.BUILD_STAIR
+                || action == SiegeNode.SiegeAction.BUILD_PILLAR
+                || action == SiegeNode.SiegeAction.BUILD_SPIRAL)
+                && !level.getBlockState(pos.below()).blocksMotion()) {
+            // The support below was solid when this node was selected (see
+            // WidenStairsGoal.findTarget()/canHostStair, TerrainEvaluator.findGroundBelow), but
+            // placement happens getActionDurationTicks() + up to getMaxStalledTicks() ticks
+            // later - a different clanrat's concurrent MINE/headroom-clear action nearby can
+            // remove that support in the meantime. Placing anyway produces an unreachable
+            // floating step that nothing can climb to continue the chain, silently stalling the
+            // whole build (the reported "group places one floating stair and stops" bug).
+            // BUILD_BRIDGE/BUILD_LANDING are deliberately excluded - they're expected to have no
+            // support below at placement time (that's what they're for).
+            SiegeActivityLog.record(level.getGameTime(), actor, pos, action,
+                    "aborted placement - support at " + pos.below().toShortString() + " no longer solid, would float",
+                    regionIdOf(flowField));
+            return;
+        }
+
         // A mob's own hitbox can overlap the block it's about to place into - isSpaceClear()
         // deliberately excludes the builder from ITS check (a rat must be able to stand where
         // its own pillar/stair target is to reach it), so nothing else was verifying this.

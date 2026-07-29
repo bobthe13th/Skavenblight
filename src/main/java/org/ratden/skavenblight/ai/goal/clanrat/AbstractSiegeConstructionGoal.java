@@ -42,7 +42,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
 
     protected BlockPos targetPos;
     protected Direction facing;
-    private SiegeNode.SiegeAction targetAction;
+    protected SiegeNode.SiegeAction targetAction;
 
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
