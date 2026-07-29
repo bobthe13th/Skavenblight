@@ -16,7 +16,11 @@ import org.ratden.skavenblight.block.custom.*;
 
 import org.ratden.skavenblight.block.custom.WarpLightningCoilDummyBlock;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.magic.Wind;
 
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.function.Supplier;
 
 public class ModBlocks {
@@ -124,12 +128,21 @@ public class ModBlocks {
                     .noOcclusion() // Highly recommended for GeckoLib animated blocks!
             ));
 
-    public static final DeferredBlock<Block> RESEARCH_TABLE = registerBlock("research_table",
-            () -> new ResearchTableBlock(BlockBehaviour.Properties.of()
-                    .strength(2.5f)
-                    .sound(SoundType.STONE)
-                    .lightLevel(state -> state.getValue(ResearchTableBlock.LIT) ? 10 : 0)
-            ));
+    public static final Map<Wind, DeferredBlock<Block>> RESEARCH_TABLES = registerResearchTables();
+
+    private static Map<Wind, DeferredBlock<Block>> registerResearchTables() {
+        Map<Wind, DeferredBlock<Block>> map = new EnumMap<>(Wind.class);
+        for (Wind wind : Wind.values()) {
+            DeferredBlock<Block> table = registerBlock("research_table_" + wind.getSerializedName(),
+                    () -> new ResearchTableBlock(wind, BlockBehaviour.Properties.of()
+                            .strength(2.5f)
+                            .sound(SoundType.STONE)
+                            .lightLevel(state -> state.getValue(ResearchTableBlock.LIT) ? 10 : 0)
+                    ));
+            map.put(wind, table);
+        }
+        return Collections.unmodifiableMap(map);
+    }
 
     public static final DeferredBlock<Block> WARP_LIGHTNING_COIL = registerBlock("warp_lightning_coil",
             () -> new WarpLightningCoilBlock(BlockBehaviour.Properties.of()

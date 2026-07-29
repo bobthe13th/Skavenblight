@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 import org.ratden.skavenblight.block.entity.ResearchTableBlockEntity;
+import org.ratden.skavenblight.magic.Wind;
 
 /**
  * A "Foundation/Tutorial" magic-research workbench: the player selects a spell they don't yet
@@ -33,8 +34,11 @@ public class ResearchTableBlock extends Block implements EntityBlock {
      *  same as WarpFluxFurnaceBlock, even though "lit" isn't literally what this block does. */
     public static final BooleanProperty LIT = BlockStateProperties.LIT;
 
-    public ResearchTableBlock(Properties properties) {
+    public final Wind wind;
+
+    public ResearchTableBlock(Wind wind, Properties properties) {
         super(properties);
+        this.wind = wind;
         this.registerDefaultState(this.stateDefinition.any()
                 .setValue(FACING, Direction.NORTH)
                 .setValue(LIT, false));

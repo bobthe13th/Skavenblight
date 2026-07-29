@@ -51,8 +51,14 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
     private UUID researchingPlayer;
     private int progress;
 
+    public final Wind wind;
+
     public ResearchTableBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.RESEARCH_TABLE.get(), pos, state);
+        if (!(state.getBlock() instanceof ResearchTableBlock table)) {
+            throw new IllegalStateException("ResearchTableBlockEntity created for a non-ResearchTableBlock state: " + state);
+        }
+        this.wind = table.wind;
     }
 
     /** All researchable spell ids, in a stable order the client and server can each compute
@@ -114,7 +120,7 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
         }
 
         Spell spell = SpellManager.get(spellId);
-        if (spell == null) {
+        if (spell == null || spell.wind() != wind) {
             return false;
         }
 
@@ -224,7 +230,7 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
 
     @Override
     public Component getDisplayName() {
-        return Component.translatable("block.skavenblight.research_table");
+        return Component.translatable("block.skavenblight.research_table_" + wind.getSerializedName());
     }
 
     @Nullable
