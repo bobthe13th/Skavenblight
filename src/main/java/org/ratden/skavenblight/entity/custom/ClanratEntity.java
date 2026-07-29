@@ -126,13 +126,17 @@ public class ClanratEntity extends Monster implements GeoEntity {
         Region region = regionIndex.regionAt(this.blockPosition());
 
         if (region == null) {
-            // True wilderness - handled by FollowFlowFieldGoal's own null-flowField fallback
-            // path (getWildernessHeadingTarget). Clear any stale assignment.
+            // True wilderness (e.g. debug-spawned before any region was scanned nearby, or
+            // simply outside every mapped region). FollowFlowFieldGoal.canUse() requires a
+            // non-null flowField just to start, so it can never engage from here - only
+            // StrandedGoal can move the mob, the same way it does for an in-territory but
+            // unreachable region below. Clear any stale flow-field assignment and hand
+            // StrandedGoal a heading toward the nearest reachable region.
             if (this.currentRegionId != -1) {
                 this.assignFlowField(null);
                 this.currentRegionId = -1;
             }
-            this.strandedHeading = null;
+            this.strandedHeading = closestNetwork.getRegionMap().getWildernessHeadingTarget(this.blockPosition());
             return;
         }
 
