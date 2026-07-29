@@ -16,7 +16,8 @@
 - **Explicitly out of scope:** the region/connector-graph bugs documented in `docs/pathing/region-pathing-hardening-findings.md` (Finding A: fast-path unreachable/perf; Finding B: duplicate-Region-at-merge-completion, a real but *separate* unfixed bug). Those manifest as bad pathing *after* a project completes, or excessive rebuild frequency — not as a floating block appearing during construction. Confirmed against the user's actual reported symptom (see Task 0 below); do not fold them into this work. Finding B in particular requires a design decision between 3 documented options and should be its own plan if pursued.
 - **Compile baseline:** verified clean before this plan was written — `./gradlew compileJava` → `BUILD SUCCESSFUL` on the current tree (including the pre-existing unstaged `ModBlockEntities.java` fix, which this plan does not touch).
 - **`runGameTestServer` has no per-test filter.** It's a NeoForge run-config (`type = "gameTestServer"`), not a Gradle `Test` task — `--tests "..."` is silently ignored/rejected, it does not select a single test. Every "run just this test" step below actually means: run `./gradlew runGameTestServer` (the whole suite) and read the named test's PASS/FAIL out of the console output. To isolate a single test's timing/behavior the way earlier work on this subsystem did, temporarily comment out the other `@GameTest` methods' annotations, run, then restore them (see `docs/pathing/region-pathing-hardening-findings.md` Finding C "Task 2" / Finding D for this exact workaround) — don't spend time hunting for a filter flag that doesn't exist here.
-- **Requires a full JDK, not just a JRE, to compile.** This plan's own verification hit `Java compiler is not available... contains a valid JDK installation` in a sandbox that only had Eclipse Adoptium *JRE* 8/11/17/21 installed (no `javac`) — `./gradlew compileJava` had previously reported `BUILD SUCCESSFUL` only because it was `UP-TO-DATE` (cached, no real compilation triggered). Whoever executes this plan needs to confirm their environment has a real JDK 21 before trusting any green `compileJava`/`runGameTestServer` result. The Task 3 test below was hand-traced against the source for correctness (documented inline) but has **not** been machine-verified to actually fail pre-fix / pass post-fix — do that first, per Task 3 Step 2, before relying on it.
+- **Requires a full JDK, not just a JRE, to compile.** A JDK 21 was installed mid-execution of this plan (`C:\Program Files\Java\jdk-21.0.12`) after an initial verification pass hit `Java compiler is not available... contains a valid JDK installation` in a sandbox that only had Eclipse Adoptium *JRE* 8/11/17/21 (no `javac`). With the real JDK, `./gradlew runGameTestServer` was actually run end-to-end — see "Verification results (actually executed)" below.
+- **A separate, unrelated bug blocked `runGameTestServer` from booting at all, and was fixed as a prerequisite.** `ChainLightningPayload.handleChainLightning` (`src/main/java/org/ratden/skavenblight/network/payload/ChainLightningPayload.java`) referenced `net.minecraft.client.Minecraft`/`ClientLevel` directly inside a handler registered via `registrar.playToClient(...)` in `ModNetwork.registerPayloads` — a common (both-dist) entrypoint. Because `ChainLightningPayload` gets loaded on both sides regardless (it's needed for its `TYPE`/`STREAM_CODEC`), NeoForge's `RuntimeDistCleaner` refused to load the whole class - and with it the whole mod - under `DEDICATED_SERVER`, which crashed mod loading before any GameTest could run (and would crash a real dedicated server the same way). Fixed by moving the client-only particle logic into a new `org.ratden.skavenblight.client.ClientChainLightningHandler`, mirroring the exact pattern the codebase already used for `SyncFlowFieldDebugPayload` → `ClientDebugData` (that file has its own "--- FIX: ---" comment recording the same lesson learned once already). This fix is independent of the siege-construction fix below but was required to run any of the verification steps in this plan.
 
 ---
 
@@ -43,9 +44,9 @@ Traced directly against source, not inferred:
 - Consumes: `SiegeNode.SiegeAction` enum (existing), `SiegeActivityLog.record(long, LivingEntity, BlockPos, SiegeNode.SiegeAction, String, Integer)` (existing, already used elsewhere in this file), `regionIdOf(RegionFlowField)` (existing private helper, same file, line 178).
 - Produces: `constructSiegeBlock` now silently no-ops (with a log entry) instead of placing, when a stair/pillar/spiral target has lost its support. No other task depends on new symbols from this one.
 
-- [ ] **Step 1: Add a failing GameTest first** (see Task 3, Step 1 below — write and run that test now, confirm it fails against the current code, before touching this file). This proves the bug reproduces and that the fix step actually closes it.
+- [x] **Step 1: Add a failing GameTest first** (see Task 3, Step 1 below — write and run that test now, confirm it fails against the current code, before touching this file). This proves the bug reproduces and that the fix step actually closes it.
 
-- [ ] **Step 2: Add the execution-time support guard**
+- [x] **Step 2: Add the execution-time support guard**
 
 In `SiegeInteractionHandler.java`, immediately after the existing `canBeReplaced()` early-return (currently lines 48-50) and before the self-entombment diagnostic block, insert:
 
@@ -71,16 +72,16 @@ In `SiegeInteractionHandler.java`, immediately after the existing `canBeReplaced
 
 ```
 
-- [ ] **Step 3: Run the full GameTest suite and confirm the Task 3 test now passes**
+- [x] **Step 3: Run the full GameTest suite and confirm the Task 3 test now passes**
 
 Run: `./gradlew runGameTestServer` (no per-test filter exists — see Global Constraints — read the named test's result out of the console output)
-Expected: `testWidenStairsGoalDoesNotPlaceFloatingStairWhenSupportRemovedMidAction` PASS (it failed before this step; see Task 3 Step 2).
+Expected: `testWidenStairsGoalDoesNotPlaceFloatingStairWhenSupportRemovedMidAction` PASS (it failed before this step; see Task 3 Step 2). **Actually executed — see "Verification results" below: confirmed PASS.**
 
-- [ ] **Step 4: Confirm the rest of the suite has no regression** (same run as Step 3 — check the other tests' results in the same output)
+- [x] **Step 4: Confirm the rest of the suite has no regression** (same run as Step 3 — check the other tests' results in the same output)
 
-Expected: all tests pass except possibly `testThreeRegionsRouteThroughCheaperIntermediateHop` (known flake — rerun the full suite once more if it fails; see Global Constraints). In particular `testWidenStairsGoalMarksRegionDirty` and `testDeployClimbableGoalMarksRegionDirty` (both in `PathingGoalRecalculationGameTests.java`) must still pass unchanged — they exercise the happy path where support is never removed, so this guard must not fire for them.
+Expected: all tests pass except possibly `testThreeRegionsRouteThroughCheaperIntermediateHop` (known flake — rerun the full suite once more if it fails; see Global Constraints). In particular `testWidenStairsGoalMarksRegionDirty` and `testDeployClimbableGoalMarksRegionDirty` (both in `PathingGoalRecalculationGameTests.java`) must still pass unchanged — they exercise the happy path where support is never removed, so this guard must not fire for them. **Actually executed: all 15/15 tests passed, no flake hit.**
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit** — not yet done; this checkout had unrelated concurrent commit activity mid-execution (see "Verification results" below), so committing was deliberately held pending user confirmation.
 
 ```bash
 git add src/main/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandler.java
@@ -102,7 +103,7 @@ Task 1 alone makes a floating block impossible. This task is a responsiveness im
 - Consumes: `this.targetAction` (currently `private` in `AbstractSiegeConstructionGoal`, set in `start()`).
 - Produces: `this.targetAction` becomes `protected`, readable by subclasses' `isTargetStillValid()` overrides. No other task depends on this.
 
-- [ ] **Step 1: Widen `targetAction`'s visibility**
+- [x] **Step 1: Widen `targetAction`'s visibility**
 
 In `AbstractSiegeConstructionGoal.java`, change line 45 from:
 
@@ -116,7 +117,7 @@ to:
     protected SiegeNode.SiegeAction targetAction;
 ```
 
-- [ ] **Step 2: Re-check support in `WidenStairsGoal.isTargetStillValid`**
+- [x] **Step 2: Re-check support in `WidenStairsGoal.isTargetStillValid`**
 
 `WidenStairsGoal` only ever proposes `BUILD_STAIR` targets, so this one is unconditional. Change `WidenStairsGoal.java:142-144` from:
 
@@ -137,7 +138,7 @@ to:
     }
 ```
 
-- [ ] **Step 3: Re-check support in `BuildFlowFieldGoal.isTargetStillValid`, conditional on action type**
+- [x] **Step 3: Re-check support in `BuildFlowFieldGoal.isTargetStillValid`, conditional on action type**
 
 `BuildFlowFieldGoal` also executes `BUILD_BRIDGE` (and other non-climb-dependent actions), which must NOT require support below — a bridge target is expected to be over open air until built. Note this re-check is a pure optimization, not required for correctness: `this.targetAction` is set in `start()` right after `targetPos`, so it's non-null for every `isTargetStillValid()` call made while a target is actually held; if `start()`'s own `if (target == null) return;` path fires instead, `targetPos` itself stays null too and `canContinueToUse()` already fails on that check before `isTargetStillValid()` would matter. Task 1's guard in `constructSiegeBlock` is what actually prevents the floating placement regardless of what this method returns. Change `BuildFlowFieldGoal.java:61-63` from:
 
@@ -159,12 +160,12 @@ to:
     }
 ```
 
-- [ ] **Step 4: Run the full GameTest suite**
+- [x] **Step 4: Run the full GameTest suite**
 
 Run: `./gradlew runGameTestServer`
-Expected: same result as Task 1 Step 4 (all pass, known flake aside). This step is a pure refinement of Task 1's fix — it must not change any test outcome, only how quickly a doomed target gets abandoned.
+Expected: same result as Task 1 Step 4 (all pass, known flake aside). This step is a pure refinement of Task 1's fix — it must not change any test outcome, only how quickly a doomed target gets abandoned. **Actually executed together with Task 1's Step 3/4 run (both fixes were applied before the post-fix run) — 15/15 passed.**
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit** — held pending user confirmation, see Task 1 Step 5.
 
 ```bash
 git add src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeConstructionGoal.java src/main/java/org/ratden/skavenblight/ai/goal/clanrat/WidenStairsGoal.java src/main/java/org/ratden/skavenblight/ai/goal/clanrat/BuildFlowFieldGoal.java
@@ -184,7 +185,7 @@ Add this to the existing `PathingGoalRecalculationGameTests.java`, which already
 - Consumes: `WidenStairsGoal`, `RegionFlowField`, `ClanratEntity`, `RecordingRegionMap` (all already imported/defined in this file).
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Add this method to `PathingGoalRecalculationGameTests`, alongside `testWidenStairsGoalMarksRegionDirty`:
 
@@ -244,14 +245,16 @@ Add this method to `PathingGoalRecalculationGameTests`, alongside `testWidenStai
     }
 ```
 
-- [ ] **Step 2: Run it and confirm it FAILS against the current (pre-fix) code**
+- [x] **Step 2: Run it and confirm it FAILS against the current (pre-fix) code**
 
 Run: `./gradlew runGameTestServer` (whole suite — no per-test filter here, see Global Constraints) and check `testWidenStairsGoalDoesNotPlaceFloatingStairWhenSupportRemovedMidAction`'s result in the console output.
 Expected: FAIL — the assertion trips because the current code places the stair unconditionally once `canBeReplaced()` on the target cell is true, regardless of `pos.below()`.
 
-Note on this test's geometry: the mob's claimed `targetPos` is captured once in `start()` (the mob's own standing cell) and does not change even if the mob's entity later falls after its floor is removed — `execute()` always builds against the captured `targetPos`, not the mob's live position — and `isSpaceClear()`'s entity check is scoped to `targetPos`'s AABB, so a fallen-away mob doesn't block execution either. This was verified by manual trace against `AbstractSiegeConstructionGoal.tick()`/`SiegeInteractionHandler.isSpaceClear()`, not by running the test (see the JDK caveat in Global Constraints) — re-confirm empirically here before trusting the rest of this task.
+**Actually executed — confirmed FAIL, exactly as predicted.** Console output: `testwidenstairsgoaldoesnotplacefloatingstairwhensupportremovedmidaction failed ... stair should NOT have been placed once its support was removed mid-action - a placement here would float with nothing beneath it`. 1 of 15 tests failed (this one); the other 14 passed, confirming the manual trace below and ruling out the "mob falls and the assertion passes vacuously" concern that was raised during review — the test genuinely reaches `constructSiegeBlock` and genuinely places the stair pre-fix.
 
-- [ ] **Step 3: Commit the test on its own** (before Task 1's fix, so the failing-then-passing history is visible)
+Note on this test's geometry: the mob's claimed `targetPos` is captured once in `start()` (the mob's own standing cell) and does not change even if the mob's entity later falls after its floor is removed — `execute()` always builds against the captured `targetPos`, not the mob's live position — and `isSpaceClear()`'s entity check is scoped to `targetPos`'s AABB, so a fallen-away mob doesn't block execution either. This was verified by manual trace, and now also confirmed empirically (see above).
+
+- [x] **Step 3: Commit the test on its own** (before Task 1's fix, so the failing-then-passing history is visible) — **the code change was made (and later confirmed against a live GameTest run), but the actual `git commit` has not been run** — see Task 1 Step 5.
 
 ```bash
 git add src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java
@@ -261,6 +264,16 @@ git commit -m "test(pathing): reproduce floating-stair bug when support is remov
 Then proceed to Task 1 (its Step 1 already told you to write this test first — if you're executing tasks in order, Task 1 Steps 1-3 and this task's Steps 1-3 are the same actions; do them once, in this task, then reference back).
 
 ---
+
+## Verification results (actually executed, not projected)
+
+All three tasks' code changes were applied and machine-verified end-to-end once a real JDK became available in the execution environment:
+
+1. **Baseline (pre-fix), `ChainLightningPayload` bug already fixed, siege fix not yet applied:** `./gradlew runGameTestServer` → `15 tests are now running` → **1 required test failed: `testwidenstairsgoaldoesnotplacefloatingstairwhensupportremovedmidaction`**, with the exact predicted assertion message. All other 14 tests passed — no regressions, and confirms the new test genuinely reproduces the bug rather than passing vacuously.
+2. **Post-fix (Tasks 1 and 2 both applied):** `./gradlew compileJava` → `BUILD SUCCESSFUL`. `./gradlew runGameTestServer` → `15 tests are now running` → **`All 15 required tests passed :)`** — the target test now passes, and every pre-existing test (including `testWidenStairsGoalMarksRegionDirty`/`testDeployClimbableGoalMarksRegionDirty`, the happy-path regression guards) still passes. `testThreeRegionsRouteThroughCheaperIntermediateHop`'s known flake (Finding D) did not occur on this run.
+3. **Prerequisite fix verified separately:** the `ChainLightningPayload`/`ClientChainLightningHandler` split was required before step 1 could even boot the test server (it previously crashed mod loading with `Attempted to load class net/minecraft/client/multiplayer/ClientLevel for invalid dist DEDICATED_SERVER`); confirmed fixed once the server booted and ran all 15 tests in both runs above.
+
+**Not yet done: any `git commit`.** This checkout is the user's own active branch (`dev-jimmy-creativemode+housekeeping`), not an isolated worktree — mid-execution, an unrelated commit (`33397c0`, authored by the repo owner, message "docs") landed on this same branch containing unrelated content (WFRP reference docs, an unrelated `shadow_step_relay_impl.md` plan) alongside this plan's doc file and the Task 3 test addition, confirming another process/session is concurrently active in this exact checkout. Per instructions for working in a shared, non-isolated checkout, committing the remaining changes (the Task 1/2 fix + the `ChainLightningPayload` fix) was held pending explicit user confirmation rather than done automatically.
 
 ## Self-review notes (per superpowers:writing-plans)
 
