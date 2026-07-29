@@ -3,19 +3,19 @@
   "id": "skavenblight:alchemy_brewing",
   "name": "entry.skavenblight.nexus_research.alchemy_brewing.name",
   "icon": "minecraft:brewing_stand",
-  "x": 2,
-  "y": 0,
+  "x": 0,
+  "y": 2,
   "parents": [ { "entry": "winds_of_magic_chamon/overview" } ],
   "pages": [
     {
       "type": "modonomicon:text",
-      "title": "page.skavenblight.nexus_research.alchemy_lab.title",
-      "text": "page.skavenblight.nexus_research.alchemy_lab.text"
+      "title": "page.skavenblight.nexus_research.alchemy_brewing.title1",
+      "text": "page.skavenblight.nexus_research.alchemy_brewing.text1"
     },
     {
       "type": "modonomicon:text",
-      "title": "page.skavenblight.nexus_research.brewing_process.title",
-      "text": "page.skavenblight.nexus_research.brewing_process.text"
+      "title": "page.skavenblight.nexus_research.alchemy_brewing.title2",
+      "text": "page.skavenblight.nexus_research.alchemy_brewing.text2"
     }
   ]
 }

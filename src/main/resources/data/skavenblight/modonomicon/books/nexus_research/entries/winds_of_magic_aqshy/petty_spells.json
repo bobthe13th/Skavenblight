@@ -16,6 +16,21 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.shield_of_aqshy.name",
       "text": "spell.skavenblight.shield_of_aqshy.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.flaming_sword_of_rhuin.name",
+      "text": "spell.skavenblight.flaming_sword_of_rhuin.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.bolts_of_aqshy.name",
+      "text": "spell.skavenblight.bolts_of_aqshy.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.breath_of_aqshy.name",
+      "text": "spell.skavenblight.breath_of_aqshy.description"
     }
   ]
 }

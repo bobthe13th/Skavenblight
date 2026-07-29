@@ -16,6 +16,16 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.armour_of_lead.name",
       "text": "spell.skavenblight.armour_of_lead.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.silver_arrows_of_arha.name",
+      "text": "spell.skavenblight.silver_arrows_of_arha.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.mantle_of_chamon.name",
+      "text": "spell.skavenblight.mantle_of_chamon.description"
     }
   ]
 }

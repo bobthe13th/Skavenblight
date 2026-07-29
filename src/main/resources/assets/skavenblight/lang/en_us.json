@@ -169,6 +169,90 @@
   "spell.skavenblight.steal_life.name": "Steal Life",
   "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
   "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
-  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl."
+  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl.",
 
+  "entry.skavenblight.nexus_research.tzeentch_curse.name": "The Curse of Tzeentch",
+  "page.skavenblight.nexus_research.tzeentch_curse.title1": "Aethyrical Resonance",
+  "page.skavenblight.nexus_research.tzeentch_curse.text1": "Casting spells in Warhammer is never completely safe. The Aethyr is a roiling ocean of chaotic energy; drawing too much of it, or losing focus for a microsecond, allows the fabric of reality to buckle. This is represented by 'The Curse of Tzeentch' (Miscasts).",
+  "page.skavenblight.nexus_research.tzeentch_curse.title2": "Miscast Severities",
+  "page.skavenblight.nexus_research.tzeentch_curse.text2": "When matching digits (doubles) are rolled on a d100 casting check, a miscast occurs! Depending on the spell tier and failure margin, this can range from a Minor Miscast (causing whispers and nausea), to a Major Miscast (draining local winds), to a Catastrophic Miscast (localized chaos explosion).",
+
+  "entry.skavenblight.nexus_research.witchsight.name": "Witchsight",
+  "page.skavenblight.nexus_research.witchsight.title1": "The Third Eye",
+  "page.skavenblight.nexus_research.witchsight.text1": "Magisters possess the 'Third Eye', allowing them to perceive the ambient flows of the Aethyr. To an untrained peasant, a magical leyline looks like an empty field. To a wizard with Witchsight, it is a glowing, turbulent river of color reflecting the dominant Wind.",
+  "page.skavenblight.nexus_research.witchsight.title2": "Perceiving the Winds",
+  "page.skavenblight.nexus_research.witchsight.text2": "By wearing specialized Witchsight Goggles or drinking an Aethyr Elixir, the player gains Witchsight. This renders ambient particles matching the dominant Wind of each chunk. In highly saturated chunks, a subtle visual distortion wreathes the atmosphere.",
+
+  "entry.skavenblight.nexus_research.power_stones.name": "Power Stones",
+  "page.skavenblight.nexus_research.power_stones.title1": "Arcane Batteries",
+  "page.skavenblight.nexus_research.power_stones.text1": "Only master wizards can craft Power Stones—dense crystal matrixes attuned to a single wind. They act as magical sponges, soaking up ambient energy to release it in times of need. The 8 canonical stones range from Lumen Stones to Fire Rubies.",
+  "page.skavenblight.nexus_research.power_stones.title2": "Dual-State Mechanics",
+  "page.skavenblight.nexus_research.power_stones.text2": "When in high-wind areas, the stone passively absorbs local wind. In low-wind areas, it leaks charge, acting as a portable baseline anchor. While held in the off-hand, it can be actively consumed to grant a Catalytic Bonus (+1 to +25) to casting checks.",
+
+  "entry.skavenblight.nexus_research.grimoires_scribing.name": "Grimoires & Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.title1": "Scroll Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.text1": "Spells are not naturally retained in the human mind forever—they must be meticulously cataloged in massive Grimoires or prepared on single-use Scrolls. At a Scribing Desk, players use ink catalysts (like Goldstone dust) to scribe spells onto parchment.",
+  "page.skavenblight.nexus_research.grimoires_scribing.title2": "Grimoires of Power",
+  "page.skavenblight.nexus_research.grimoires_scribing.text2": "Scrolls are single-use items that bypass spell knowledge checks but still consume local winds. Grimoires are multi-use books that increase aptitude for a specific wind by +10, but elevate Tzeentch's Curse severity by one tier if a double is rolled.",
+
+  "entry.skavenblight.nexus_research.environmental_catalysts.name": "Environmental Catalysts",
+  "page.skavenblight.nexus_research.environmental_catalysts.title1": "Block & Biome Baselines",
+  "page.skavenblight.nexus_research.environmental_catalysts.text1": "To make the ambient wind system truly dynamic, chunk wind baselines respond organically to their surroundings. This is driven by two key systems: Block-Level Baselines (local blocks) and Biome-Level Baselines (geographical multipliers).",
+  "page.skavenblight.nexus_research.environmental_catalysts.title2": "Catalytic Resonance",
+  "page.skavenblight.nexus_research.environmental_catalysts.text2": "Aqshy (Fire) baselines are boosted by lava and blast furnaces; Ghyran (Life) by moss and fully grown crops; Shyish (Death) by soul sand and spawners. Biome modifiers apply multipliers (e.g. Oceans boost Ghyran/Azyr, Netheir heavily boosts Aqshy).",
+
+  "block.skavenblight.alchemical_laboratory": "Alchemical Laboratory",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_brewing.title1": "Alchemical Laboratory",
+  "page.skavenblight.nexus_research.alchemy_brewing.text1": "Unlocking Chamon research grants access to the Alchemical Laboratory (Poor, Good, or Best quality). These laboratories allow mages to brew authentic Warhammer potions using local botanical and metallic ingredients.",
+  "page.skavenblight.nexus_research.alchemy_brewing.title2": "The Brewing Process",
+  "page.skavenblight.nexus_research.alchemy_brewing.text2": "Brewing is governed by potion Name, Effect, Lag Time, Volatility, Cost, Locale, Difficulty, Creation Number, and Time. A d100 skill check determines output potions: failure wastes ingredients, while a critical failure triggers a volatile Brewing Disaster!",
+
+  "spell.skavenblight.flaming_sword_of_rhuin.name": "Flaming Sword of Rhuin",
+  "spell.skavenblight.flaming_sword_of_rhuin.description": "Wreathes the caster's weapon in brilliant, searing flames that guide their strikes and increase physical damage.",
+  "spell.skavenblight.bolts_of_aqshy.name": "Bolts of Aqshy",
+  "spell.skavenblight.bolts_of_aqshy.description": "Launches a volley of small, crackling fire-darts from the caster's fingertips to ignite foes.",
+
+  "spell.skavenblight.fleet_foot_of_ghur.name": "Fleet Foot of Ghur",
+  "spell.skavenblight.fleet_foot_of_ghur.description": "Channels the spirit of the running stag, imbuing limbs with tireless speed and jump height.",
+
+  "spell.skavenblight.phas_protection.name": "Pha’s Protection",
+  "spell.skavenblight.phas_protection.description": "Surrounds the target in a shimmering golden aura of Hysh that dampens incoming blows.",
+  "spell.skavenblight.eyes_of_truth.name": "Eyes of Truth",
+  "spell.skavenblight.eyes_of_truth.description": "Illuminates the surrounding environment with white light, stripping away shadows to grant night sight.",
+  "spell.skavenblight.banishment.name": "Banishment",
+  "spell.skavenblight.banishment.description": "Directs a beam of pure, burning light that deals devastating damage to undead and nether monsters.",
+
+  "spell.skavenblight.father_of_the_thorn.name": "Father of the Thorn",
+  "spell.skavenblight.father_of_the_thorn.description": "The caster’s skin hardens into tough, thorny bark, increasing defense and turning aside attacks.",
+
+  "spell.skavenblight.creeping_dread.name": "Creeping Dread",
+  "spell.skavenblight.creeping_dread.description": "Projects a chilling aura of absolute, dark shadow-terror into the minds of surrounding foes, slowing their movements.",
+
+  "spell.skavenblight.silver_arrows_of_arha.name": "Silver Arrows of Arha",
+  "spell.skavenblight.silver_arrows_of_arha.description": "Summons gleaming, heat-seeking darts of transmuted quicksilver that slice through targets.",
+
+  "spell.skavenblight.scythe_of_shyish.name": "Scythe of Shyish",
+  "spell.skavenblight.scythe_of_shyish.description": "Sweeps a spectral, purple scythe through the air, reaping the lifeforce of all enemies immediately in front of the wizard.",
+  "spell.skavenblight.reap_soul.name": "Reap Soul",
+  "spell.skavenblight.reap_soul.description": "Commands the target's spirit to depart, dealing devastating instant damage if they are already weakened.",
+
+  "spell.skavenblight.wind_blast.name": "Wind Blast",
+  "spell.skavenblight.wind_blast.description": "Unleashes a sudden, powerful gale that blows away enemies and pushes them back.",
+
+  "spell.skavenblight.mantle_of_chamon.name": "Mantle of Chamon",
+  "spell.skavenblight.mantle_of_chamon.description": "Wreathes the caster in a metallic sheen of Chamon, granting standard defense and resistance.",
+  "spell.skavenblight.swift_ghyran.name": "Swift Ghyran",
+  "spell.skavenblight.swift_ghyran.description": "Infuses the caster with botanical speed, allowing rapid land movement.",
+  "spell.skavenblight.breath_of_life.name": "Breath of Life",
+  "spell.skavenblight.breath_of_life.description": "Gently touches the target, closing wounds and instantly restoring vital health.",
+  "spell.skavenblight.breath_of_aqshy.name": "Breath of Aqshy",
+  "spell.skavenblight.breath_of_aqshy.description": "Exhales a sweeping cone of bright fire that scorches all enemies in front of the caster.",
+  "spell.skavenblight.dazzling_brightness.name": "Dazzling Brightness",
+  "spell.skavenblight.dazzling_brightness.description": "Emits a sudden, blinding flash of Hysh light that temporarily deprives the target of sight.",
+  "spell.skavenblight.chilling_grave.name": "Chilling Grave",
+  "spell.skavenblight.chilling_grave.description": "Channels the deep freeze of the tomb, slowing the target to a crawl.",
+  "spell.skavenblight.primal_snarl.name": "Primal Snarl",
+  "spell.skavenblight.primal_snarl.description": "Emits a territorial beast roar that strikes weakness and fear into the target."
 }

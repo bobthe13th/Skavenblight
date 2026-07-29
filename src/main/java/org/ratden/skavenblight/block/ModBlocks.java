@@ -140,7 +140,12 @@ public class ModBlocks {
                     .noOcclusion() // Essential for invisible blocks
             ));
 
-
+    public static final DeferredBlock<Block> ALCHEMICAL_LABORATORY = registerBlock("alchemical_laboratory",
+            () -> new AlchemicalLaboratoryBlock(BlockBehaviour.Properties.of()
+                    .strength(3.0f)
+                    .sound(SoundType.GLASS)
+                    .noOcclusion()
+            ));
 
     // A specialized helper function just for your expandable storage block tiers
     private static <T extends Block> DeferredBlock<T> registerStorageBlock(String name, java.util.function.Supplier<T> block) {

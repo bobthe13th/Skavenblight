@@ -62,6 +62,12 @@ public class ModBlockEntities {
                             ModBlocks.WARP_LIGHTNING_COIL.get()).build(null)
             );
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AlchemicalLaboratoryBlockEntity>> ALCHEMICAL_LABORATORY =
+            BLOCK_ENTITIES.register("alchemical_laboratory", () ->
+                    BlockEntityType.Builder.of(AlchemicalLaboratoryBlockEntity::new,
+                            ModBlocks.ALCHEMICAL_LABORATORY.get()).build(null)
+            );
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }
