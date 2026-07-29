@@ -16,6 +16,11 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.shroud_of_invisibility.name",
       "text": "spell.skavenblight.shroud_of_invisibility.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.creeping_dread.name",
+      "text": "spell.skavenblight.creeping_dread.description"
     }
   ]
 }

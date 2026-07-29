@@ -16,6 +16,11 @@
       "type": "modonomicon:text",
       "title": "spell.skavenblight.starshine.name",
       "text": "spell.skavenblight.starshine.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.wind_blast.name",
+      "text": "spell.skavenblight.wind_blast.description"
     }
   ]
 }

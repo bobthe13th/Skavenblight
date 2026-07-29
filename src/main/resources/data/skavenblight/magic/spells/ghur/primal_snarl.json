@@ -1,0 +1,13 @@
+{
+  "wind": "ghur",
+  "tier": 1,
+  "casting_number": 35,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:weakness",
+    "duration_ticks": 400,
+    "amplifier": 1
+  },
+  "description_key": "spell.skavenblight.primal_snarl.description"
+}

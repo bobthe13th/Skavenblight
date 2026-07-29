@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:nexus",
+  "id": "skavenblight:environmental_catalysts",
+  "name": "entry.skavenblight.nexus_research.environmental_catalysts.name",
+  "icon": "minecraft:moss_block",
+  "x": 0,
+  "y": -2,
+  "parents": [ { "entry": "nexus/welcome" } ],
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.environmental_catalysts.title1",
+      "text": "page.skavenblight.nexus_research.environmental_catalysts.text1"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.environmental_catalysts.title2",
+      "text": "page.skavenblight.nexus_research.environmental_catalysts.text2"
+    }
+  ]
+}

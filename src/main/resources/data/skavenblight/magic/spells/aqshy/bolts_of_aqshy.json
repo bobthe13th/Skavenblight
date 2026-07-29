@@ -1,0 +1,12 @@
+{
+  "wind": "aqshy",
+  "tier": 1,
+  "casting_number": 35,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "projectile_launch",
+    "projectile_type": "small_fireball",
+    "speed": 1.5
+  },
+  "description_key": "spell.skavenblight.bolts_of_aqshy.description"
+}
