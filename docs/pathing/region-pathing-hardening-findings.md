@@ -5,8 +5,9 @@ untracked SDD working directory (`.superpowers/sdd/2026-07-27-region-pathing-har
 during the `devJimmy_gius2_hardening` hardening effort and were never committed to this repository
 - any citation pointing at them dangles for anyone who doesn't have that working directory. This
 file captures, in the codebase itself, everything those citations were actually pointing at:
-the two most significant findings from that effort (A and B below), plus a set of smaller measured
-facts and conventions individual tasks relied on (C).
+the two most significant findings from that effort (A and B below), a set of smaller measured
+facts and conventions individual tasks relied on (C), and one finding from branch-finishing
+verification after the effort concluded (D).
 
 All classes/methods named below live under
 `src/main/java/org/ratden/skavenblight/ai/pathing/region/` and
@@ -218,3 +219,53 @@ plug, comfortably within `SiegeLineTracer.MAX_CONSECUTIVE_MINE`'s real abort thr
 aborts on the *6th* consecutive MINE step, i.e. a margin of 2 steps, not 1 - `RegionScanner`'s own
 `MAX_CONSECUTIVE_MINE_DEPTH` does not govern vertical descent at all, since MINE steps only fire at
 `dy == 0` in `TerrainEvaluator.getValidOrthogonalSteps`).
+
+## Finding D: `testThreeRegionsRouteThroughCheaperIntermediateHop` is flaky under full-suite concurrency (unfixed, not production-reachable as far as tested)
+
+Discovered during branch-finishing verification (running `runGameTestServer` before merge), not during
+the original task dispatches. `PathingRegionGameTests.testThreeRegionsRouteThroughCheaperIntermediateHop`
+failed once with `expected a real direct C-A connector (more expensive than the via-B route)`, but the
+same source, same commit, passed on a rerun with no changes.
+
+**The connector logic itself is not the bug.** The failing run's own evidence dump showed all three
+connectors built at exactly the costs the test's javadoc predicts (C-B=18020, B-A=9020, direct
+C-A=33020) and the route tree correctly preferring the cheaper via-B hop (27040 < 33020). The only
+wrong value was `regionIdAt(probeC)`, which resolved to `2` - the same id as `getRouteTree().getRootRegionId()`
+- instead of the region actually containing `probeC` (id `0`, per its `hopCost`/`parent` matching the
+via-B total exactly). That made the test's own `directCA` lookup search for a self-connector
+(`regionA()==2 && regionB()==2`), which can't exist, producing the observed failure message.
+
+**Ruled out by direct code reading, not just non-reproduction:**
+- `RegionScanner.scan` is a pure function over a single-chunk `Set.of(...)` bound, with region ids
+  assigned by a fixed ascending `y`/`localX`/`localZ` scan (`nextId++`) - fully deterministic for
+  this test's fixed geometry.
+- `RegionIndex`'s per-cell tie-break ("iterate `regions` in list order, last match wins") is
+  documented and applied identically in both the constructor and `refreshChunks` - deterministic
+  given a deterministic `regions` list, which the point above establishes.
+- `RegionGraph.build` is single-threaded and sequential (plain nested loops, no executor, no shared
+  mutable state across region pairs) - not a source of intra-call races.
+- `SiegeProjectManager.setMaxCandidateProjectLength` (the connector-length cap added for the
+  route-tree-parent case) is an instance field mutated only *after* `RegionGraph.build` already
+  returned, and `RegionGraph.tryTrace` calls `SiegeLineTracer.trace`'s original overload, which
+  always uses the fixed 32-block default regardless of that cap - it cannot affect connector
+  discovery at all.
+- `TerritoryRegionMap.rebuildRegionsAndGraph` writes `regionIndex`/`regionGraph`/`routeTree` (all
+  `volatile`) before the async task's `finally` block flips `isCalculatingAsync` to `false` - the
+  JMM happens-before edge through that flag holds, ruling out a stale-publication race for a
+  `succeedWhen` poller that gates on `!isCalculating()`.
+
+**Confirmed environment-dependent, not logic-dependent:** run in isolation (all other 13 GameTests'
+`@GameTest` annotations temporarily removed, then restored - not committed), this test passed 7/7
+times with the correct `regionC=0` every time. It has also passed as part of a full, freshly-compiled
+14-test suite run. The failure has only been observed once, specifically when all 14 GameTests run
+concurrently in the same JVM.
+
+**Not fixed in this effort.** The mechanism is narrowed to "something affected by concurrent
+GameTest execution," but not to a specific class - `FlowFieldState`, `TerrainEvaluator`,
+`CalculationThrottler`, and Minecraft/NeoForge's own shared `ServerLevel`/background-executor
+infrastructure under concurrent load are the remaining candidates, and distinguishing between them
+needs runtime instrumentation (temporary logging across several more full-suite runs, watching for
+the failure to reoccur), not further static reading. Until then, treat this test as flaky in CI:
+a single-run failure on this specific test should be retried before treating it as a real
+regression, since every reproduction so far has coincided with concurrent full-suite execution and
+never with isolated or production-shaped execution.
