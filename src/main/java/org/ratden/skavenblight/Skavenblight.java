@@ -10,6 +10,7 @@ import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.item.ModArmorMaterials;
 import org.ratden.skavenblight.item.ModCreativeModeTabs;
 import org.ratden.skavenblight.item.ModItems;
+import org.ratden.skavenblight.magic.ModMagic;
 import org.ratden.skavenblight.screen.ModMenus;
 import org.ratden.skavenblight.sound.ModSounds;
 
@@ -46,6 +47,8 @@ public class Skavenblight {
 
         ModSounds.register(modEventBus);
         ModMenus.register(modEventBus);
+
+        ModMagic.register(modEventBus);
 
         modContainer.registerConfig(
                 ModConfig.Type.COMMON,

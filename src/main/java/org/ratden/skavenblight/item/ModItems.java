@@ -11,6 +11,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
 import org.ratden.skavenblight.item.custom.RatJuiceItem;
+import org.ratden.skavenblight.item.custom.SkavenblightBookItem;
 
 import java.util.List;
 
@@ -151,6 +152,14 @@ public final class ModItems {
         );
     }
 
+    public static final DeferredItem<Item> SKAVENBLIGHT_BOOK =
+            ITEMS.register(
+                    "skavenblight_book",
+                    () -> new SkavenblightBookItem(
+                            new Item.Properties()
+                                    .stacksTo(1)
+                    )
+            );
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

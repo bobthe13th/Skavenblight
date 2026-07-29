@@ -11,8 +11,6 @@ import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
 import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
 import org.ratden.skavenblight.capability.ModCapabilities;
 import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
-
 import java.util.*;
 
 public class WarpFluxNetwork {
@@ -21,6 +19,11 @@ public class WarpFluxNetwork {
     private final Set<BlockPos> conduits = new HashSet<>();
     private final Set<BlockPos> endpoints = new HashSet<>();
     private final Set<ChunkPos> territoryChunks = new HashSet<>();
+
+    // Gates the region-map bootstrap in tick() - see the comment there. 0 means "attempt on the
+    // very next tick", so a brand-new network still bootstraps immediately.
+    private static final long REGION_BOOTSTRAP_RETRY_TICKS = 100;
+    private long nextRegionBootstrapTick = 0;
 
     public WarpFluxNetwork() {
         this.networkId = UUID.randomUUID();
@@ -37,8 +40,25 @@ public class WarpFluxNetwork {
     public void addConduit(BlockPos pos) { this.conduits.add(pos); }
     public void addEndpoint(BlockPos pos) { this.endpoints.add(pos); }
 
+    /**
+     * True if this network has at least one endpoint whose block entity is a
+     * {@code WarpstoneNexusEntity}. A network with no nexus at all (e.g. a battery + consumer
+     * left over after conduits were rearranged) has nothing for the siege/pathing system to
+     * target - see {@link #tick}, which uses this to stay fully dormant until a nexus is added.
+     */
+    public boolean isValid(ServerLevel level) {
+        for (BlockPos pos : endpoints) {
+            if (level.getBlockEntity(pos) instanceof WarpstoneNexusEntity) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void tick(ServerLevel level) {
-        if (endpoints.isEmpty()) return;
+        // No nexus endpoint - no power transfer, no region-map bootstrap or tick. Stay dormant
+        // (cheap: just this one endpoint scan) until a nexus is added to this network.
+        if (!isValid(level)) return;
 
         List<EndpointData> generators = new ArrayList<>();
         List<EndpointData> batteries = new ArrayList<>();
@@ -73,11 +93,34 @@ public class WarpFluxNetwork {
         transferPower(batteries, consumers, level);
         transferPower(generators, batteries, level);
 
-        // This ticks every flow field tied to this network.
-        // It safely respects the 40-tick cooldown built into calculateMapIfNeeded!
-        for (StandardFlowField field : this.flowFields.values()) {
-            field.calculateMapIfNeeded(level);
+        // Self-healing bootstrap: nothing else ever kicks off the very first region scan, so a
+        // freshly-created (or freshly-loaded) network would otherwise never produce a region
+        // graph at all, and no mob would ever get a flow field. The first tick where this network
+        // has both a nexus endpoint AND an empty region index triggers one full rebuild; once
+        // regions exist this check is a no-op forever, and steady-state terrain changes are
+        // handled by TerritoryRegionMap.tick's own dirty-region tracking.
+        // The retry interval matters only for the failure case: a rebuild that captured no chunk
+        // columns yet (common on the first ticks after a world load, since the region map's forced
+        // chunk tickets don't take effect instantly) finds 0 regions, which leaves this condition
+        // true. Without the interval that retries a full-territory TerrainSnapshot.refresh - a
+        // MAIN-THREAD call - on literally every tick until it succeeds.
+        if (!generators.isEmpty()
+                && this.regionMap.getRegionIndex().getRegions().isEmpty()
+                && !this.regionMap.isCalculating()
+                && level.getGameTime() >= this.nextRegionBootstrapTick) {
+            this.nextRegionBootstrapTick = level.getGameTime() + REGION_BOOTSTRAP_RETRY_TICKS;
+            // Defensive copy, NOT the live field: rebuild() hands this set to a background thread
+            // (RegionScanner.scan iterates it, and every FlowFieldState keeps a reference for its
+            // bounds check), while updateTerritory() clears and refills this same HashSet on the
+            // main thread whenever a conduit is placed or broken. Sharing it risks a
+            // ConcurrentModificationException mid-rebuild, or - worse because it's silent - a
+            // transiently empty set, which FlowFieldState.isOutOfBounds treats as "global scope,
+            // no bounds check at all".
+            this.regionMap.rebuild(level, Set.copyOf(this.territoryChunks), generators.get(0).pos());
         }
+
+        // This ticks the region map tied to this network.
+        this.regionMap.tick(level);
     }
     public void scanForEndpoints(ServerLevel level) {
         this.endpoints.clear();
@@ -248,25 +291,19 @@ public class WarpFluxNetwork {
             case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
         };
     }
-    // Cache mapping a target Nexus to its specific flow field
-    private final Map<BlockPos, StandardFlowField> flowFields = new HashMap<>();
+    private final org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap regionMap =
+            new org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap();
 
-    /**
-     * Gets the shared flow field for a specific Nexus.
-     * Everything (Rats, Debug Item, Incursions) should use this single instance.
-     */
-    public StandardFlowField getSharedFlowField(BlockPos targetNexus) {
-        return flowFields.computeIfAbsent(targetNexus, pos ->
-                new StandardFlowField(pos, this.getTerritoryChunks())
-        );
+    public org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap getRegionMap() {
+        return this.regionMap;
     }
 
     /**
-     * Call this whenever your base territory expands or shrinks
-     * so the maps know they need to be rebuilt!
+     * Call this whenever your base territory expands or shrinks, or a new nexus becomes active,
+     * so the region graph gets rebuilt against the current layout.
      */
-    public void clearFlowFields() {
-        this.flowFields.clear();
+    public void rebuildRegionMap(ServerLevel level, BlockPos nexusPos) {
+        this.regionMap.rebuild(level, this.getTerritoryChunks(), nexusPos);
     }
     private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
 }

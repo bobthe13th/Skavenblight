@@ -1,0 +1,13 @@
+{
+  "wind": "shyish",
+  "tier": 1,
+  "casting_number": 45,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "sweeping_cone_damage",
+    "amount": 12.0,
+    "radius": 5.0,
+    "angle_degrees": 120.0
+  },
+  "description_key": "spell.skavenblight.scythe_of_shyish.description"
+}

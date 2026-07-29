@@ -1,0 +1,7 @@
+{
+  "book": "skavenblight:nexus_research",
+  "id": "skavenblight:dwarven_archeology",
+  "name": "category.skavenblight.nexus_research.dwarven_archeology.name",
+  "icon": "minecraft:brush",
+  "sort_number": 11
+}

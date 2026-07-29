@@ -43,5 +43,223 @@
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
 
-  "creativetab.skavenblight": "Skavenblight"
+  "creativetab.skavenblight": "Skavenblight",
+
+  "entry.skavenblight.nexus_research.welcome.name": "Welcome to Skavenblight",
+  "page.skavenblight.nexus_research.welcome.title": "The Nexus",
+  "page.skavenblight.nexus_research.welcome.text": "Welcome, yes-yes! Your journey into the depths of Skaven engineering and chaotic magic begins here...",
+
+  "entry.skavenblight.nexus_research.dwarven_wip.name": "Dwarven Archeology (WIP)",
+
+  "page.skavenblight.nexus_research.wip.title": "Work in Progress",
+  "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!",
+
+  "entry.skavenblight.nexus_research.warren_reckoner.name": "The Warren-Reckoner",
+  "page.skavenblight.nexus_research.warren_census.title": "Mapping the Warren",
+  "page.skavenblight.nexus_research.warren_census.text": "Before a single clanrat sets whisker toward the master's Nexus, the warlock-engineers send scurrying census-scryers through every burrow, tunnel, and open field the horde holds. Each scryer chitters back what ground connects to what -- walkable floor, crumbling ledge, sealed vault -- until the whole territory is carved into distinct 'holds': pockets of ground a rat could scamper across without digging or climbing. A hold cut off from the master's own hold by a chasm, a wall, or the open sky is marked as such, yes-yes -- ripe for conquest.",
+  "page.skavenblight.nexus_research.warren_route.title": "Chittering the Route",
+  "page.skavenblight.nexus_research.warren_route.text": "No sensible engineer digs three tunnels when one will do! Once the holds are known, the reckoning-ritual charts the CHEAPEST chain linking every cut-off hold back to the Nexus -- hold to hold to hold, never a wasteful straight line through solid rock if a shorter path already exists through a neighbour's territory. Wherever two holds must be joined, the ritual marks the exact spot for a staircase, a bridge, or a mineshaft, and the horde's engineers set to work raising it. Bury your Nexus in the deep rock, or perch it on a floating tower, and the horde simply marks a longer, costlier route -- a spiralling stair up a shaft, a bridge flung across the void, a tunnel gnawed through solid stone. No hold is unreachable, yes-yes -- only more or less troublesome.",
+  "page.skavenblight.nexus_research.warren_flow.title": "The Flow of the Swarm",
+  "page.skavenblight.nexus_research.warren_flow.text": "A horde of hundreds cannot afford to let every rat puzzle out its own path -- chaos and squabbling would follow! Instead, once a hold's route is reckoned, every clanrat within it senses the same simple truth: which way is 'toward the Nexus' from wherever it stands. The horde surges like water flowing downhill, not like scholars debating a map. The reckoning-ritual only stirs again when the ground itself changes -- a wall broken, a bridge finished -- sparing the warlock-engineers from re-chittering the whole warren every time a single brick moves. Efficient, yes-yes, and utterly relentless.",
+
+  "wind.skavenblight.hysh": "Light",
+  "wind.skavenblight.azyr": "Heavens",
+  "wind.skavenblight.chamon": "Metal",
+  "wind.skavenblight.ghyran": "Life",
+  "wind.skavenblight.aqshy": "Fire",
+  "wind.skavenblight.ghur": "Beasts",
+  "wind.skavenblight.ulgu": "Shadow",
+  "wind.skavenblight.shyish": "Death",
+
+  "category.skavenblight.nexus_research.winds_of_magic_hysh.name": "Hysh — The Light",
+  "category.skavenblight.nexus_research.winds_of_magic_azyr.name": "Azyr — The Heavens",
+  "category.skavenblight.nexus_research.winds_of_magic_chamon.name": "Chamon — Metal",
+  "category.skavenblight.nexus_research.winds_of_magic_ghyran.name": "Ghyran — Life",
+  "category.skavenblight.nexus_research.winds_of_magic_aqshy.name": "Aqshy — Fire",
+  "category.skavenblight.nexus_research.winds_of_magic_ghur.name": "Ghur — Beasts",
+  "category.skavenblight.nexus_research.winds_of_magic_ulgu.name": "Ulgu — Shadow",
+  "category.skavenblight.nexus_research.winds_of_magic_shyish.name": "Shyish — Death",
+  "category.skavenblight.nexus_research.dark_magic.name": "Dark Magic",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_hysh_overview.name": "The Wind of Light",
+  "page.skavenblight.nexus_research.winds_of_magic_hysh_overview.title": "Hysh",
+  "page.skavenblight.nexus_research.winds_of_magic_hysh_overview.text": "Hysh, the White Wind, flows strongest by daylight. It is the wind of healing, protection, and banishment — the Order of Light draws on it to ward the innocent and destroy the undead.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_azyr_overview.name": "The Wind of the Heavens",
+  "page.skavenblight.nexus_research.winds_of_magic_azyr_overview.title": "Azyr",
+  "page.skavenblight.nexus_research.winds_of_magic_azyr_overview.text": "Azyr, the Blue Wind, whispers of fate and weather. The Celestial College reads its currents to divine the future and command the storm.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_chamon_overview.name": "The Wind of Metal",
+  "page.skavenblight.nexus_research.winds_of_magic_chamon_overview.title": "Chamon",
+  "page.skavenblight.nexus_research.winds_of_magic_chamon_overview.text": "Chamon, the Yellow Wind, binds to metal and matter. The Golden Order shapes it into alchemy, transmutation, and enchantment.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ghyran_overview.name": "The Wind of Life",
+  "page.skavenblight.nexus_research.winds_of_magic_ghyran_overview.title": "Ghyran",
+  "page.skavenblight.nexus_research.winds_of_magic_ghyran_overview.text": "Ghyran, the Green Wind, is the breath of growing things. The Jade College tends it to heal the land and command nature's bounty.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_aqshy_overview.name": "The Wind of Fire",
+  "page.skavenblight.nexus_research.winds_of_magic_aqshy_overview.title": "Aqshy",
+  "page.skavenblight.nexus_research.winds_of_magic_aqshy_overview.text": "Aqshy, the Red Wind, burns hottest in destruction. The Bright Order channels it into flame, forge, and ruin.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ghur_overview.name": "The Wind of Beasts",
+  "page.skavenblight.nexus_research.winds_of_magic_ghur_overview.title": "Ghur",
+  "page.skavenblight.nexus_research.winds_of_magic_ghur_overview.text": "Ghur, the Brown Wind, runs wild and hungry. The Amber Brotherhood rides it to command beasts and take their shape.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_ulgu_overview.name": "The Wind of Shadow",
+  "page.skavenblight.nexus_research.winds_of_magic_ulgu_overview.title": "Ulgu",
+  "page.skavenblight.nexus_research.winds_of_magic_ulgu_overview.text": "Ulgu, the Grey Wind, thickens after dark. The Grey Order weaves it into illusion, fear, and things unseen.",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_shyish_overview.name": "The Wind of Death",
+  "page.skavenblight.nexus_research.winds_of_magic_shyish_overview.title": "Shyish",
+  "page.skavenblight.nexus_research.winds_of_magic_shyish_overview.text": "Shyish, the Purple Wind, pools where things end. The Amethyst Order commands it over death, decay, and the fates of mortals.",
+
+  "entry.skavenblight.nexus_research.dark_magic_overview.name": "Dark Magic (Dhar)",
+  "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
+  "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools.",
+
+  "entry.skavenblight.nexus_research.warpstone_mutation.name": "Warpstone Exposure",
+  "page.skavenblight.nexus_research.warpstone_exposure.title": "The Glow of Dhar",
+  "page.skavenblight.nexus_research.warpstone_exposure.text": "Prolonged contact with raw Warpstone or consumption of Rat Juice triggers a build-up of Warpstone Exposure inside players and mobs. As this exposure increases, it warps the spirit and body in chaotic ways, leading to unpredictable mutations.",
+  "page.skavenblight.nexus_research.warpstone_mutations.title": "Chaotic Mutations",
+  "page.skavenblight.nexus_research.warpstone_mutations.text": "Mutations manifest at higher exposure thresholds. Minor mutations might alter speed or grant night vision, while severe corruption permanently shifts attributes (e.g., maximum health or scale) or triggers horrific transformations (such as wild Wolves warping into Rat Wolves!).",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_lab.title": "The Golden Lab",
+  "page.skavenblight.nexus_research.alchemy_lab.text": "Transmutation of matter is the pride of Chamon. By researching higher tiers of Chamon, you can construct alchemical laboratories of Poor, Good, or Best quality. Superior laboratory quality significantly reduces potion volatility and increases the chance of brewing success.",
+  "page.skavenblight.nexus_research.brewing_process.title": "Brewing & Volatility",
+  "page.skavenblight.nexus_research.brewing_process.text": "Brewing requires recipe sheets and biome-specific ingredients. Every attempt tests the brewer's skill: high success generates extra potions (up to Xd10/2), while failure can cause catastrophic failures, triggering toxic gas leaks or explosive warp-lightning discharges!",
+
+  "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_chamon_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ghyran_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_aqshy_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ghur_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_ulgu_petty_spells.name": "Petty Spells",
+  "entry.skavenblight.nexus_research.winds_of_magic_shyish_petty_spells.name": "Petty Spells",
+
+  "spell.skavenblight.boon_of_hysh.name": "Boon of Hysh",
+  "spell.skavenblight.boon_of_hysh.description": "A soft white light bathes the caster, knitting flesh and easing pain.",
+  "spell.skavenblight.blinding_light.name": "Blinding Light",
+  "spell.skavenblight.blinding_light.description": "A flare of pure white light sears the eyes of all who look upon it.",
+
+  "spell.skavenblight.lightning_bolt.name": "Lightning Bolt",
+  "spell.skavenblight.lightning_bolt.description": "A crackling blue bolt leaps from the caster's hand, born of the storm-wracked heavens.",
+  "spell.skavenblight.starshine.name": "Starshine",
+  "spell.skavenblight.starshine.description": "The caster's fall slows as if drifting gently down from the night sky.",
+
+  "spell.skavenblight.curse_of_rust.name": "Curse of Rust",
+  "spell.skavenblight.curse_of_rust.description": "Metal pits and flakes, weakening the target's grip and guard.",
+  "spell.skavenblight.armour_of_lead.name": "Armour of Lead",
+  "spell.skavenblight.armour_of_lead.description": "A dull grey sheen of transmuted metal hardens over the caster's skin.",
+
+  "spell.skavenblight.earthblood.name": "Earthblood",
+  "spell.skavenblight.earthblood.description": "The green vitality of growing things flows into the caster's veins.",
+  "spell.skavenblight.curse_of_thorns.name": "Curse of Thorns",
+  "spell.skavenblight.curse_of_thorns.description": "Thorned vines erupt and lash at the target.",
+
+  "spell.skavenblight.fireball.name": "Fireball",
+  "spell.skavenblight.fireball.description": "A roaring ball of flame bursts from the caster's outstretched hand.",
+  "spell.skavenblight.shield_of_aqshy.name": "Shield of Aqshy",
+  "spell.skavenblight.shield_of_aqshy.description": "A shimmering heat haze wreathes the caster, turning aside flame.",
+
+  "spell.skavenblight.claws_of_fury.name": "Claws of Fury",
+  "spell.skavenblight.claws_of_fury.description": "The caster's muscles surge with bestial, savage strength.",
+  "spell.skavenblight.cowering_beasts.name": "Cowering Beasts",
+  "spell.skavenblight.cowering_beasts.description": "A primal snarl of dominance saps the target's will to fight.",
+
+  "spell.skavenblight.bewilder.name": "Bewilder",
+  "spell.skavenblight.bewilder.description": "Shifting grey shadows swim before the target's eyes, sowing confusion.",
+  "spell.skavenblight.shroud_of_invisibility.name": "Shroud of Invisibility",
+  "spell.skavenblight.shroud_of_invisibility.description": "Ulgu's grey mist wraps the caster, bending sight away from them.",
+
+  "spell.skavenblight.steal_life.name": "Steal Life",
+  "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
+  "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
+  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl.",
+
+  "entry.skavenblight.nexus_research.tzeentch_curse.name": "The Curse of Tzeentch",
+  "page.skavenblight.nexus_research.tzeentch_curse.title1": "Aethyrical Resonance",
+  "page.skavenblight.nexus_research.tzeentch_curse.text1": "Casting spells in Warhammer is never completely safe. The Aethyr is a roiling ocean of chaotic energy; drawing too much of it, or losing focus for a microsecond, allows the fabric of reality to buckle. This is represented by 'The Curse of Tzeentch' (Miscasts).",
+  "page.skavenblight.nexus_research.tzeentch_curse.title2": "Miscast Severities",
+  "page.skavenblight.nexus_research.tzeentch_curse.text2": "When matching digits (doubles) are rolled on a d100 casting check, a miscast occurs! Depending on the spell tier and failure margin, this can range from a Minor Miscast (causing whispers and nausea), to a Major Miscast (draining local winds), to a Catastrophic Miscast (localized chaos explosion).",
+
+  "entry.skavenblight.nexus_research.witchsight.name": "Witchsight",
+  "page.skavenblight.nexus_research.witchsight.title1": "The Third Eye",
+  "page.skavenblight.nexus_research.witchsight.text1": "Magisters possess the 'Third Eye', allowing them to perceive the ambient flows of the Aethyr. To an untrained peasant, a magical leyline looks like an empty field. To a wizard with Witchsight, it is a glowing, turbulent river of color reflecting the dominant Wind.",
+  "page.skavenblight.nexus_research.witchsight.title2": "Perceiving the Winds",
+  "page.skavenblight.nexus_research.witchsight.text2": "By wearing specialized Witchsight Goggles or drinking an Aethyr Elixir, the player gains Witchsight. This renders ambient particles matching the dominant Wind of each chunk. In highly saturated chunks, a subtle visual distortion wreathes the atmosphere.",
+
+  "entry.skavenblight.nexus_research.power_stones.name": "Power Stones",
+  "page.skavenblight.nexus_research.power_stones.title1": "Arcane Batteries",
+  "page.skavenblight.nexus_research.power_stones.text1": "Only master wizards can craft Power Stones—dense crystal matrixes attuned to a single wind. They act as magical sponges, soaking up ambient energy to release it in times of need. The 8 canonical stones range from Lumen Stones to Fire Rubies.",
+  "page.skavenblight.nexus_research.power_stones.title2": "Dual-State Mechanics",
+  "page.skavenblight.nexus_research.power_stones.text2": "When in high-wind areas, the stone passively absorbs local wind. In low-wind areas, it leaks charge, acting as a portable baseline anchor. While held in the off-hand, it can be actively consumed to grant a Catalytic Bonus (+1 to +25) to casting checks.",
+
+  "entry.skavenblight.nexus_research.grimoires_scribing.name": "Grimoires & Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.title1": "Scroll Scribing",
+  "page.skavenblight.nexus_research.grimoires_scribing.text1": "Spells are not naturally retained in the human mind forever—they must be meticulously cataloged in massive Grimoires or prepared on single-use Scrolls. At a Scribing Desk, players use ink catalysts (like Goldstone dust) to scribe spells onto parchment.",
+  "page.skavenblight.nexus_research.grimoires_scribing.title2": "Grimoires of Power",
+  "page.skavenblight.nexus_research.grimoires_scribing.text2": "Scrolls are single-use items that bypass spell knowledge checks but still consume local winds. Grimoires are multi-use books that increase aptitude for a specific wind by +10, but elevate Tzeentch's Curse severity by one tier if a double is rolled.",
+
+  "entry.skavenblight.nexus_research.environmental_catalysts.name": "Environmental Catalysts",
+  "page.skavenblight.nexus_research.environmental_catalysts.title1": "Block & Biome Baselines",
+  "page.skavenblight.nexus_research.environmental_catalysts.text1": "To make the ambient wind system truly dynamic, chunk wind baselines respond organically to their surroundings. This is driven by two key systems: Block-Level Baselines (local blocks) and Biome-Level Baselines (geographical multipliers).",
+  "page.skavenblight.nexus_research.environmental_catalysts.title2": "Catalytic Resonance",
+  "page.skavenblight.nexus_research.environmental_catalysts.text2": "Aqshy (Fire) baselines are boosted by lava and blast furnaces; Ghyran (Life) by moss and fully grown crops; Shyish (Death) by soul sand and spawners. Biome modifiers apply multipliers (e.g. Oceans boost Ghyran/Azyr, Netheir heavily boosts Aqshy).",
+
+  "block.skavenblight.alchemical_laboratory": "Alchemical Laboratory",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_brewing.title1": "Alchemical Laboratory",
+  "page.skavenblight.nexus_research.alchemy_brewing.text1": "Unlocking Chamon research grants access to the Alchemical Laboratory (Poor, Good, or Best quality). These laboratories allow mages to brew authentic Warhammer potions using local botanical and metallic ingredients.",
+  "page.skavenblight.nexus_research.alchemy_brewing.title2": "The Brewing Process",
+  "page.skavenblight.nexus_research.alchemy_brewing.text2": "Brewing is governed by potion Name, Effect, Lag Time, Volatility, Cost, Locale, Difficulty, Creation Number, and Time. A d100 skill check determines output potions: failure wastes ingredients, while a critical failure triggers a volatile Brewing Disaster!",
+
+  "spell.skavenblight.flaming_sword_of_rhuin.name": "Flaming Sword of Rhuin",
+  "spell.skavenblight.flaming_sword_of_rhuin.description": "Wreathes the caster's weapon in brilliant, searing flames that guide their strikes and increase physical damage.",
+  "spell.skavenblight.bolts_of_aqshy.name": "Bolts of Aqshy",
+  "spell.skavenblight.bolts_of_aqshy.description": "Launches a volley of small, crackling fire-darts from the caster's fingertips to ignite foes.",
+
+  "spell.skavenblight.fleet_foot_of_ghur.name": "Fleet Foot of Ghur",
+  "spell.skavenblight.fleet_foot_of_ghur.description": "Channels the spirit of the running stag, imbuing limbs with tireless speed and jump height.",
+
+  "spell.skavenblight.phas_protection.name": "Pha’s Protection",
+  "spell.skavenblight.phas_protection.description": "Surrounds the target in a shimmering golden aura of Hysh that dampens incoming blows.",
+  "spell.skavenblight.eyes_of_truth.name": "Eyes of Truth",
+  "spell.skavenblight.eyes_of_truth.description": "Illuminates the surrounding environment with white light, stripping away shadows to grant night sight.",
+  "spell.skavenblight.banishment.name": "Banishment",
+  "spell.skavenblight.banishment.description": "Directs a beam of pure, burning light that deals devastating damage to undead and nether monsters.",
+
+  "spell.skavenblight.father_of_the_thorn.name": "Father of the Thorn",
+  "spell.skavenblight.father_of_the_thorn.description": "The caster’s skin hardens into tough, thorny bark, increasing defense and turning aside attacks.",
+
+  "spell.skavenblight.creeping_dread.name": "Creeping Dread",
+  "spell.skavenblight.creeping_dread.description": "Projects a chilling aura of absolute, dark shadow-terror into the minds of surrounding foes, slowing their movements.",
+
+  "spell.skavenblight.silver_arrows_of_arha.name": "Silver Arrows of Arha",
+  "spell.skavenblight.silver_arrows_of_arha.description": "Summons gleaming, heat-seeking darts of transmuted quicksilver that slice through targets.",
+
+  "spell.skavenblight.scythe_of_shyish.name": "Scythe of Shyish",
+  "spell.skavenblight.scythe_of_shyish.description": "Sweeps a spectral, purple scythe through the air, reaping the lifeforce of all enemies immediately in front of the wizard.",
+  "spell.skavenblight.reap_soul.name": "Reap Soul",
+  "spell.skavenblight.reap_soul.description": "Commands the target's spirit to depart, dealing devastating instant damage if they are already weakened.",
+
+  "spell.skavenblight.wind_blast.name": "Wind Blast",
+  "spell.skavenblight.wind_blast.description": "Unleashes a sudden, powerful gale that blows away enemies and pushes them back.",
+
+  "spell.skavenblight.mantle_of_chamon.name": "Mantle of Chamon",
+  "spell.skavenblight.mantle_of_chamon.description": "Wreathes the caster in a metallic sheen of Chamon, granting standard defense and resistance.",
+  "spell.skavenblight.swift_ghyran.name": "Swift Ghyran",
+  "spell.skavenblight.swift_ghyran.description": "Infuses the caster with botanical speed, allowing rapid land movement.",
+  "spell.skavenblight.breath_of_life.name": "Breath of Life",
+  "spell.skavenblight.breath_of_life.description": "Gently touches the target, closing wounds and instantly restoring vital health.",
+  "spell.skavenblight.breath_of_aqshy.name": "Breath of Aqshy",
+  "spell.skavenblight.breath_of_aqshy.description": "Exhales a sweeping cone of bright fire that scorches all enemies in front of the caster.",
+  "spell.skavenblight.dazzling_brightness.name": "Dazzling Brightness",
+  "spell.skavenblight.dazzling_brightness.description": "Emits a sudden, blinding flash of Hysh light that temporarily deprives the target of sight.",
+  "spell.skavenblight.chilling_grave.name": "Chilling Grave",
+  "spell.skavenblight.chilling_grave.description": "Channels the deep freeze of the tomb, slowing the target to a crawl.",
+  "spell.skavenblight.primal_snarl.name": "Primal Snarl",
+  "spell.skavenblight.primal_snarl.description": "Emits a territorial beast roar that strikes weakness and fear into the target."
 }

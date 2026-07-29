@@ -1,0 +1,41 @@
+{
+  "category": "skavenblight:winds_of_magic_hysh",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name",
+  "icon": "minecraft:glowstone_dust",
+  "x": 1,
+  "y": 0,
+  "parents": [ { "entry": "winds_of_magic_hysh/overview" } ],
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.boon_of_hysh.name",
+      "text": "spell.skavenblight.boon_of_hysh.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.blinding_light.name",
+      "text": "spell.skavenblight.blinding_light.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.phas_protection.name",
+      "text": "spell.skavenblight.phas_protection.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.eyes_of_truth.name",
+      "text": "spell.skavenblight.eyes_of_truth.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.banishment.name",
+      "text": "spell.skavenblight.banishment.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.dazzling_brightness.name",
+      "text": "spell.skavenblight.dazzling_brightness.description"
+    }
+  ]
+}

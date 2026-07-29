@@ -1,0 +1,8 @@
+{
+  "wind": "shyish",
+  "tier": 0,
+  "casting_number": 30,
+  "casting_time": "half_action",
+  "effect": { "type": "damage", "amount": 4.0 },
+  "description_key": "spell.skavenblight.steal_life.description"
+}

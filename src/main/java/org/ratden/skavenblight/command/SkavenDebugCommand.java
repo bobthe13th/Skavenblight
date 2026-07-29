@@ -14,12 +14,12 @@ public class SkavenDebugCommand {
                         .then(DebugDifficultyCommands.register())
                         .then(DebugIncursionCommands.register())
                         .then(DebugIncursionLoadTest.register())
+                        .then(DebugWindCommands.register())
+                        .then(DebugMagicCommands.register())
                         .then(DebugMobCommands.register())
                         .then(DebugNexusCommands.register())
                         .then(DebugPathingCommands.register())
                         .then(DebugSourceCommands.register())
-
-
         );
     }
 }

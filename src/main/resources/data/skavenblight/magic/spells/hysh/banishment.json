@@ -1,0 +1,13 @@
+{
+  "wind": "hysh",
+  "tier": 2,
+  "casting_number": 60,
+  "casting_time": "full_action",
+  "effect": {
+    "type": "conditional_damage",
+    "base_amount": 10.0,
+    "extra_amount": 15.0,
+    "group_name": "undead"
+  },
+  "description_key": "spell.skavenblight.banishment.description"
+}

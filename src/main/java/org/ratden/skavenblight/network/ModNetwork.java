@@ -5,6 +5,7 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.network.payload.ChainLightningPayload;
 import org.ratden.skavenblight.network.payload.SyncFlowFieldDebugPayload;
 
 /**
@@ -34,6 +35,12 @@ public final class ModNetwork {
                 SyncFlowFieldDebugPayload.TYPE,
                 SyncFlowFieldDebugPayload.CODEC,
                 SyncFlowFieldDebugPayload::handle
+        );
+
+        registrar.playToClient(
+                ChainLightningPayload.TYPE,
+                ChainLightningPayload.STREAM_CODEC,
+                ChainLightningPayload::handleChainLightning
         );
     }
 

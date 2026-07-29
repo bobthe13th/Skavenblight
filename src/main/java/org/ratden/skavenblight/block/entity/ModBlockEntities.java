@@ -109,6 +109,18 @@ public final class ModBlockEntities {
                     ).build(null)
             );
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpLightningCoilBlockEntity>> WARP_LIGHTNING_COIL_BE =
+            BLOCK_ENTITIES.register("warp_lightning_coil", () ->
+                    BlockEntityType.Builder.of(WarpLightningCoilBlockEntity::new,
+                            ModBlocks.WARP_LIGHTNING_COIL.get()).build(null)
+            );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AlchemicalLaboratoryBlockEntity>> ALCHEMICAL_LABORATORY =
+            BLOCK_ENTITIES.register("alchemical_laboratory", () ->
+                    BlockEntityType.Builder.of(AlchemicalLaboratoryBlockEntity::new,
+                            ModBlocks.ALCHEMICAL_LABORATORY.get()).build(null)
+            );
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITY_TYPES.register(eventBus);
     }

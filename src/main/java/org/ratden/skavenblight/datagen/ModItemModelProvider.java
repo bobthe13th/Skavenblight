@@ -26,7 +26,7 @@ public class ModItemModelProvider extends ItemModelProvider {
         super(output, Skavenblight.MODID, existingFileHelper);
     }
 
-//The tutorial made the example armor trimmable, so i guess ill make ours trimmable too
+//The tutorial made the example armor trimmable, so I guess I'll make ours trimmable too
     private static final LinkedHashMap<ResourceKey<TrimMaterial>, Float> trimMaterials = new LinkedHashMap<>();
     static {
         trimMaterials.put(TrimMaterials.QUARTZ, 0.1F);
@@ -59,8 +59,9 @@ public class ModItemModelProvider extends ItemModelProvider {
         trimmedArmorItem(ModItems.WARPSTONE_BOOTS);
 
         basicItem(ModBlocks.PISTON_SPIKE_TRAP.asItem());
-
+        basicItem(ModItems.SKAVENBLIGHT_BOOK.get());
         basicItem(ModItems.DEBUG_FLOW_FIELD_READER.asItem());
+        basicItem(ModBlocks.WARP_LIGHTNING_COIL.asItem());
     }
 
 

@@ -8,6 +8,7 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
+import org.ratden.skavenblight.entity.custom.WarpLightningBoltEntity;
 import org.ratden.skavenblight.entity.custom.WolfRat;
 import org.ratden.skavenblight.entity.custom.wolfCat.WolfCat;
 
@@ -73,6 +74,25 @@ public final class ModEntities {
                             .sized(0.6F, 1.8F)
                             .build(
                                     Skavenblight.MODID + ":clanrat"
+                            )
+            );
+
+    public static final DeferredHolder<
+            EntityType<?>,
+            EntityType<WarpLightningBoltEntity>
+            > WARP_LIGHTNING_BOLT =
+            ENTITY_TYPES.register(
+                    "warp_lightning_bolt",
+                    () -> EntityType.Builder
+                            .<WarpLightningBoltEntity>of(
+                                    WarpLightningBoltEntity::new,
+                                    MobCategory.MISC
+                            )
+                            .sized(0.0F, 0.0F)
+                            .clientTrackingRange(16)
+                            .updateInterval(Integer.MAX_VALUE)
+                            .build(
+                                    Skavenblight.MODID + ":warp_lightning_bolt"
                             )
             );
 

@@ -39,6 +39,11 @@ public final class ModEntityRenderers {
                 ModEntities.CLANRAT.get(),
                 ClanratRenderer::new
         );
+
+        event.registerEntityRenderer(
+                ModEntities.WARP_LIGHTNING_BOLT.get(),
+                WarpLightningBoltRenderer::new
+        );
     }
 
     private ModEntityRenderers() {

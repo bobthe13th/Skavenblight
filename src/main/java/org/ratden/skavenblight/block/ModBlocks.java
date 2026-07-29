@@ -22,13 +22,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.block.custom.ActiveWarpstoneNexus;
-import org.ratden.skavenblight.block.custom.PistonSpikeTrapBlock;
-import org.ratden.skavenblight.block.custom.SkavenTunnelSourceBlock;
-import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
-import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
-import org.ratden.skavenblight.block.custom.WarpFluxFurnaceBlock;
-import org.ratden.skavenblight.block.custom.WarpFluxStorageBlock;
+import org.ratden.skavenblight.block.custom.*;
 import org.ratden.skavenblight.item.ModItems;
 import org.ratden.skavenblight.item.custom.WarpFluxStorageBlockItem;
 import org.ratden.skavenblight.block.custom.debug.DebugIncursionAnchorBlock;
@@ -344,6 +338,44 @@ public final class ModBlocks {
                                     .strength(3.5F)
                                     .requiresCorrectToolForDrops()
                                     .sound(SoundType.METAL)
+                                    .noOcclusion()
+                    )
+            );
+
+    public static final DeferredBlock<Block>
+            WARP_LIGHTNING_COIL =
+            registerBlock(
+                    "warp_lightning_coil",
+                    () -> new WarpLightningCoilBlock(
+                            BlockBehaviour.Properties.of()
+                                    .strength(3.5F)
+                                    .requiresCorrectToolForDrops()
+                                    .sound(SoundType.METAL)
+                                    .noOcclusion()
+                    )
+            );
+
+    // The invisible dummy block that handles the upper hitboxes
+    public static final DeferredBlock<Block>
+            WARP_LIGHTNING_COIL_DUMMY =
+            registerBlock(
+                    "warp_lightning_coil_dummy",
+                    () -> new WarpLightningCoilDummyBlock(
+                            BlockBehaviour.Properties.of()
+                                    .strength(3.5F)
+                                    .sound(SoundType.METAL)
+                                    .noOcclusion()
+                    )
+            );
+
+    public static final DeferredBlock<Block>
+            ALCHEMICAL_LABORATORY =
+            registerBlock(
+                    "alchemical_laboratory",
+                    () -> new AlchemicalLaboratoryBlock(
+                            BlockBehaviour.Properties.of()
+                                    .strength(3.0F)
+                                    .sound(SoundType.GLASS)
                                     .noOcclusion()
                     )
             );

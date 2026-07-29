@@ -4,11 +4,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
-import org.ratden.skavenblight.ai.pathing.StandardFlowField;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 public class SpawnClanrats {
 
-    public static int execute(ServerLevel level, BlockPos targetPos, int count, StandardFlowField flowField) {
+    public static int execute(ServerLevel level, BlockPos targetPos, int count, RegionFlowField flowField) {
         int spawned = 0;
 
         for (int i = 0; i < count; i++) {

@@ -28,6 +28,11 @@ public final class ModBlockEntityRenderers {
                 ModBlockEntities.PISTON_SPIKE_TRAP.get(),
                 context -> new PistonSpikeTrapRenderer()
         );
+
+        event.registerBlockEntityRenderer(
+                ModBlockEntities.WARP_LIGHTNING_COIL_BE.get(),
+                WarpLightningCoilRenderer::new
+        );
     }
 
     private ModBlockEntityRenderers() {

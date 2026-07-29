@@ -1,0 +1,21 @@
+{
+  "category": "skavenblight:nexus",
+  "id": "skavenblight:power_stones",
+  "name": "entry.skavenblight.nexus_research.power_stones.name",
+  "icon": "minecraft:amethyst_shard",
+  "x": 1,
+  "y": 1,
+  "parents": [ { "entry": "nexus/welcome" } ],
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.power_stones.title1",
+      "text": "page.skavenblight.nexus_research.power_stones.text1"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.power_stones.title2",
+      "text": "page.skavenblight.nexus_research.power_stones.text2"
+    }
+  ]
+}

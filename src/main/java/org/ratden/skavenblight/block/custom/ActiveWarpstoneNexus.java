@@ -87,6 +87,10 @@ public class ActiveWarpstoneNexus extends Block implements EntityBlock {
             boolean wasTrackedNexus = NexusTracker.isActiveNexus(serverLevel, pos);
 
             if (wasTrackedNexus) {
+                // Chunk-ticket cleanup for the destroyed nexus's territory is owned by
+                // WarpFluxNetwork/TerritoryRegionMap now, not by a flow field stashed directly on
+                // the block entity (that field was dead code - nothing ever called its setter, so
+                // this cleanup call never actually fired even before the region-pathing redesign).
                 NexusTracker.clearActiveNexus(serverLevel);
                 GameOverHandler.start(serverLevel, pos);
             }

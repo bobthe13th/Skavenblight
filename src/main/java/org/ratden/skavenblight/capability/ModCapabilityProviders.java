@@ -58,6 +58,13 @@ public final class ModCapabilityProviders {
                 (blockEntity, side) ->
                         blockEntity.getFluxStorage()
         );
+
+        event.registerBlockEntity(
+                ModCapabilities.WARP_FLUX,
+                ModBlockEntities.WARP_LIGHTNING_COIL_BE.get(),
+                (blockEntity, side) ->
+                        blockEntity.getFluxStorage()
+        );
     }
 
     private ModCapabilityProviders() {

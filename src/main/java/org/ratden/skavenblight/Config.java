@@ -147,9 +147,21 @@ public final class Config {
                             + "acts as a hard limit on pathfinding range."
             ).defineInRange(
                     "maxFlowFieldNodes",
-                    15_000,
+                    25_000,
                     1_000,
                     1_000_000
+            );
+
+    private static final ModConfigSpec.IntValue
+            REGION_SCAN_MAX_CELLS =
+            BUILDER.comment(
+                    "Maximum walkable cells RegionScanner will flood-fill "
+                            + "in a single territory scan pass."
+            ).defineInRange(
+                    "regionScanMaxCells",
+                    200_000,
+                    10_000,
+                    2_000_000
             );
 
     private static final ModConfigSpec.IntValue
@@ -163,6 +175,107 @@ public final class Config {
                     1_000,
                     0,
                     10_000
+            );
+
+    /*
+     * Warp Lightning Coil settings
+     */
+
+    private static final ModConfigSpec.IntValue WL_COIL_CAPACITY =
+            BUILDER.comment(
+                    "Max Warp Flux the coil can hold."
+            ).defineInRange(
+                    "wlCoilCapacity",
+                    5_000,
+                    0,
+                    Integer.MAX_VALUE
+            );
+
+    private static final ModConfigSpec.IntValue
+            WL_COIL_COST_PER_SHOT =
+            BUILDER.comment(
+                    "Flux cost per lightning arc triggered."
+            ).defineInRange(
+                    "wlCoilCostPerShot",
+                    100,
+                    0,
+                    Integer.MAX_VALUE
+            );
+
+    private static final ModConfigSpec.IntValue WL_COIL_COOLDOWN =
+            BUILDER.comment(
+                    "Number of ticks before firing again."
+            ).defineInRange(
+                    "wlCoilCooldown",
+                    500,
+                    0,
+                    1_000_000
+            );
+
+    private static final ModConfigSpec.DoubleValue WL_COIL_RANGE =
+            BUILDER.comment(
+                    "Detection and max chain range in blocks."
+            ).defineInRange(
+                    "wlCoilRange",
+                    6.0,
+                    1.0,
+                    256.0
+            );
+
+    private static final ModConfigSpec.DoubleValue WL_COIL_DAMAGE =
+            BUILDER.comment(
+                    "Damage dealt per lightning strike."
+            ).defineInRange(
+                    "wlCoilDamage",
+                    6.0,
+                    0.0,
+                    100.0
+            );
+
+    private static final ModConfigSpec.IntValue
+            WL_COIL_CHAIN_COUNT =
+            BUILDER.comment(
+                    "Maximum number of additional mobs the lightning can "
+                            + "chain to."
+            ).defineInRange(
+                    "wlCoilChainCount",
+                    13,
+                    0,
+                    255
+            );
+
+    private static final ModConfigSpec.IntValue
+            WL_COIL_CHAIN_RANGE =
+            BUILDER.comment(
+                    "Maximum range of mobs the lightning can chain to."
+            ).defineInRange(
+                    "wlCoilChainRange",
+                    13,
+                    0,
+                    255
+            );
+
+    private static final ModConfigSpec.IntValue
+            WL_COIL_POISON_TICKS =
+            BUILDER.comment(
+                    "Duration of Poison effect in ticks (20 ticks = 1 "
+                            + "second)."
+            ).defineInRange(
+                    "wlCoilPoisonTicks",
+                    1,
+                    0,
+                    1_200
+            );
+
+    private static final ModConfigSpec.IntValue
+            WL_COIL_SLOW_TICKS =
+            BUILDER.comment(
+                    "Duration of Slowness effect in ticks."
+            ).defineInRange(
+                    "wlCoilSlowTicks",
+                    1_000,
+                    0,
+                    1_200
             );
 
     public static final ModConfigSpec SPEC =
@@ -187,7 +300,18 @@ public final class Config {
     public static int miningBasePenalty;
     public static int buildingBasePenalty;
     public static int maxFlowFieldNodes;
+    public static int regionScanMaxCells;
     public static int minimumSettleDelayMs;
+
+    // --- Warp Lightning Coil Public Variables ---
+    public static int wlCoilCapacity;
+    public static int wlCoilCostPerShot;
+    public static double wlCoilRange;
+    public static double wlCoilDamage;
+    public static int wlCoilChainCount;
+    public static double wlCoilChainRange;
+    public static int wlCoilPoisonTicks;
+    public static int wlCoilSlowTicks;
 
     /**
      * Refreshes the runtime values when the common configuration is loaded
@@ -221,8 +345,35 @@ public final class Config {
         maxFlowFieldNodes =
                 MAX_FLOW_FIELD_NODES.get();
 
+        regionScanMaxCells =
+                REGION_SCAN_MAX_CELLS.get();
+
         minimumSettleDelayMs =
                 MINIMUM_SETTLE_DELAY_MS.get();
+
+        wlCoilCapacity =
+                WL_COIL_CAPACITY.get();
+
+        wlCoilCostPerShot =
+                WL_COIL_COST_PER_SHOT.get();
+
+        wlCoilRange =
+                WL_COIL_RANGE.get();
+
+        wlCoilDamage =
+                WL_COIL_DAMAGE.get();
+
+        wlCoilChainCount =
+                WL_COIL_CHAIN_COUNT.get();
+
+        wlCoilChainRange =
+                WL_COIL_CHAIN_RANGE.get();
+
+        wlCoilPoisonTicks =
+                WL_COIL_POISON_TICKS.get();
+
+        wlCoilSlowTicks =
+                WL_COIL_SLOW_TICKS.get();
     }
 
     private Config() {
