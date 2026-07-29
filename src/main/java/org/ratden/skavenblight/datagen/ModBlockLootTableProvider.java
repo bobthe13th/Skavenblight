@@ -65,6 +65,11 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
         this.add(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
 
         dropSelf(ModBlocks.ALCHEMICAL_LABORATORY.get());
+
+        // Invisible debug visualisation blocks placed/removed only by the
+        // incursion debug system - never dropped, so they get empty loot tables.
+        this.add(ModBlocks.DEBUG_FRONT_ANCHOR.get(), LootTable.lootTable());
+        this.add(ModBlocks.DEBUG_SOURCE_GROUP_ANCHOR.get(), LootTable.lootTable());
     }
 
     //Basically the createCopperOreDrops() vanilla method
