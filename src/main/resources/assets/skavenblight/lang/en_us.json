@@ -49,11 +49,18 @@
   "page.skavenblight.nexus_research.welcome.title": "The Nexus",
   "page.skavenblight.nexus_research.welcome.text": "Welcome, yes-yes! Your journey into the depths of Skaven engineering and chaotic magic begins here...",
 
-  "entry.skavenblight.nexus_research.skaven_wip.name": "Skaven Engineering (WIP)",
   "entry.skavenblight.nexus_research.dwarven_wip.name": "Dwarven Archeology (WIP)",
 
   "page.skavenblight.nexus_research.wip.title": "Work in Progress",
   "page.skavenblight.nexus_research.wip.text": "The warlock-engineers are still deciphering these ancient scrawlings! Check back in a future update, yes-yes!",
+
+  "entry.skavenblight.nexus_research.warren_reckoner.name": "The Warren-Reckoner",
+  "page.skavenblight.nexus_research.warren_census.title": "Mapping the Warren",
+  "page.skavenblight.nexus_research.warren_census.text": "Before a single clanrat sets whisker toward the master's Nexus, the warlock-engineers send scurrying census-scryers through every burrow, tunnel, and open field the horde holds. Each scryer chitters back what ground connects to what -- walkable floor, crumbling ledge, sealed vault -- until the whole territory is carved into distinct 'holds': pockets of ground a rat could scamper across without digging or climbing. A hold cut off from the master's own hold by a chasm, a wall, or the open sky is marked as such, yes-yes -- ripe for conquest.",
+  "page.skavenblight.nexus_research.warren_route.title": "Chittering the Route",
+  "page.skavenblight.nexus_research.warren_route.text": "No sensible engineer digs three tunnels when one will do! Once the holds are known, the reckoning-ritual charts the CHEAPEST chain linking every cut-off hold back to the Nexus -- hold to hold to hold, never a wasteful straight line through solid rock if a shorter path already exists through a neighbour's territory. Wherever two holds must be joined, the ritual marks the exact spot for a staircase, a bridge, or a mineshaft, and the horde's engineers set to work raising it. Bury your Nexus in the deep rock, or perch it on a floating tower, and the horde simply marks a longer, costlier route -- a spiralling stair up a shaft, a bridge flung across the void, a tunnel gnawed through solid stone. No hold is unreachable, yes-yes -- only more or less troublesome.",
+  "page.skavenblight.nexus_research.warren_flow.title": "The Flow of the Swarm",
+  "page.skavenblight.nexus_research.warren_flow.text": "A horde of hundreds cannot afford to let every rat puzzle out its own path -- chaos and squabbling would follow! Instead, once a hold's route is reckoned, every clanrat within it senses the same simple truth: which way is 'toward the Nexus' from wherever it stands. The horde surges like water flowing downhill, not like scholars debating a map. The reckoning-ritual only stirs again when the ground itself changes -- a wall broken, a bridge finished -- sparing the warlock-engineers from re-chittering the whole warren every time a single brick moves. Efficient, yes-yes, and utterly relentless.",
 
   "wind.skavenblight.hysh": "Light",
   "wind.skavenblight.azyr": "Heavens",
@@ -109,6 +116,18 @@
   "entry.skavenblight.nexus_research.dark_magic_overview.name": "Dark Magic (Dhar)",
   "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
   "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools.",
+
+  "entry.skavenblight.nexus_research.warpstone_mutation.name": "Warpstone Exposure",
+  "page.skavenblight.nexus_research.warpstone_exposure.title": "The Glow of Dhar",
+  "page.skavenblight.nexus_research.warpstone_exposure.text": "Prolonged contact with raw Warpstone or consumption of Rat Juice triggers a build-up of Warpstone Exposure inside players and mobs. As this exposure increases, it warps the spirit and body in chaotic ways, leading to unpredictable mutations.",
+  "page.skavenblight.nexus_research.warpstone_mutations.title": "Chaotic Mutations",
+  "page.skavenblight.nexus_research.warpstone_mutations.text": "Mutations manifest at higher exposure thresholds. Minor mutations might alter speed or grant night vision, while severe corruption permanently shifts attributes (e.g., maximum health or scale) or triggers horrific transformations (such as wild Wolves warping into Rat Wolves!).",
+
+  "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
+  "page.skavenblight.nexus_research.alchemy_lab.title": "The Golden Lab",
+  "page.skavenblight.nexus_research.alchemy_lab.text": "Transmutation of matter is the pride of Chamon. By researching higher tiers of Chamon, you can construct alchemical laboratories of Poor, Good, or Best quality. Superior laboratory quality significantly reduces potion volatility and increases the chance of brewing success.",
+  "page.skavenblight.nexus_research.brewing_process.title": "Brewing & Volatility",
+  "page.skavenblight.nexus_research.brewing_process.text": "Brewing requires recipe sheets and biome-specific ingredients. Every attempt tests the brewer's skill: high success generates extra potions (up to Xd10/2), while failure can cause catastrophic failures, triggering toxic gas leaks or explosive warp-lightning discharges!",
 
   "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name": "Petty Spells",
   "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name": "Petty Spells",
