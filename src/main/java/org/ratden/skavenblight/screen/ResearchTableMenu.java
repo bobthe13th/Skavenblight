@@ -94,7 +94,7 @@ public class ResearchTableMenu extends AbstractContainerMenu {
     @Override
     public boolean stillValid(Player player) {
         return stillValid(ContainerLevelAccess.create(blockEntity.getLevel(), blockEntity.getBlockPos()),
-                player, ModBlocks.RESEARCH_TABLE.get());
+                player, ModBlocks.RESEARCH_TABLES.get(blockEntity.wind).get());
     }
 
     // --- Standard Inventory Layout Helpers (matches the taller panel: rows start further down

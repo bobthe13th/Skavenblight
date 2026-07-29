@@ -20,6 +20,7 @@ import org.ratden.skavenblight.magic.spell.Spell;
 import org.ratden.skavenblight.magic.spell.SpellManager;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,17 +43,10 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
     private static final ResourceLocation TEXTURE =
             ResourceLocation.fromNamespaceAndPath(Skavenblight.MODID, "textures/gui/research_table_gui.png");
 
-    // Rail
-    private static final int RAIL_TAB_X = 6;
-    private static final int RAIL_TAB_FIRST_Y = 17;
-    private static final int RAIL_TAB_W = 16;
-    private static final int RAIL_TAB_H = 12;
-    private static final int RAIL_TAB_STEP = 14;
-
     // Spell list
-    private static final int LIST_X = 26;
+    private static final int LIST_X = 6;
     private static final int LIST_Y = 16;
-    private static final int LIST_W = 70;
+    private static final int LIST_W = 90;
     private static final int LIST_H = 122;
 
     // Detail pane
@@ -69,7 +63,6 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
 
     private SpellListWidget spellList;
     private Button beginButton;
-    private int selectedFilter = 0; // 0 = All, 1..8 = Wind.ordinal() + 1
 
     public ResearchTableScreen(ResearchTableMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
@@ -104,8 +97,8 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
 
     private void rebuildList() {
         List<Map.Entry<ResourceLocation, Spell>> entries = new ArrayList<>(SpellManager.getAll().entrySet());
-        entries.removeIf(e -> selectedFilter != 0 && e.getValue().wind().ordinal() != selectedFilter - 1);
-        entries.sort(Comparator2.BY_WIND_THEN_ID);
+        entries.removeIf(e -> e.getValue().wind() != this.menu.blockEntity.wind);
+        entries.sort(Comparator.comparing(Map.Entry::getKey));
 
         SpellListWidget.Entry previouslySelected = this.spellList.getSelected();
         this.spellList.replaceAllEntries(entries);
@@ -147,32 +140,12 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         int y = (height - imageHeight) / 2;
         guiGraphics.blit(TEXTURE, x, y, 0, 0, imageWidth, imageHeight);
 
-        // Highlight the selected wind-filter tab
-        int tabY = y + RAIL_TAB_FIRST_Y + selectedFilter * RAIL_TAB_STEP;
-        guiGraphics.renderOutline(x + RAIL_TAB_X - 1, tabY - 1, RAIL_TAB_W + 2, RAIL_TAB_H + 2, 0xFFFFFFFF);
-
         // Progress bar fill - purely server-synced data, independent of what's previewed client-side
         int filled = menu.getScaledProgress(PROGRESS_W - 2);
         if (filled > 0) {
             guiGraphics.fill(x + PROGRESS_X + 1, y + PROGRESS_Y + 1,
                     x + PROGRESS_X + 1 + filled, y + PROGRESS_Y + PROGRESS_H - 1, 0xFF9B6BC2);
         }
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        int x = (width - imageWidth) / 2;
-        int y = (height - imageHeight) / 2;
-        for (int i = 0; i <= Wind.values().length; i++) {
-            int tabX = x + RAIL_TAB_X;
-            int tabY = y + RAIL_TAB_FIRST_Y + i * RAIL_TAB_STEP;
-            if (mouseX >= tabX && mouseX <= tabX + RAIL_TAB_W && mouseY >= tabY && mouseY <= tabY + RAIL_TAB_H) {
-                selectedFilter = i;
-                rebuildList();
-                return true;
-            }
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
     }
 
     private void updateBeginButton() {
@@ -283,12 +256,6 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
     ) {
         static final PreviewState EMPTY = new PreviewState(null, null, null, false, false,
                 false, 0, false, false, false, false, null);
-    }
-
-    private static final class Comparator2 {
-        static final java.util.Comparator<Map.Entry<ResourceLocation, Spell>> BY_WIND_THEN_ID =
-                java.util.Comparator.<Map.Entry<ResourceLocation, Spell>>comparingInt(e -> e.getValue().wind().ordinal())
-                        .thenComparing(Map.Entry::getKey);
     }
 
     /** Vanilla-native scrollable spell browser, same widget class used by vanilla's resource-pack
