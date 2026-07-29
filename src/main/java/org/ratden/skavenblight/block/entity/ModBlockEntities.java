@@ -56,6 +56,11 @@ public class ModBlockEntities {
                             org.ratden.skavenblight.block.ModBlocks.PISTON_SPIKE_TRAP.get()
                     ).build(null));
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ResearchTableBlockEntity>> RESEARCH_TABLE =
+            BLOCK_ENTITIES.register("research_table", () ->
+                    BlockEntityType.Builder.of(ResearchTableBlockEntity::new,
+                            ModBlocks.RESEARCH_TABLE.get()).build(null));
+
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpLightningCoilBlockEntity>> WARP_LIGHTNING_COIL_BE =
             BLOCK_ENTITIES.register("warp_lightning_coil", () ->
                     BlockEntityType.Builder.of(WarpLightningCoilBlockEntity::new,

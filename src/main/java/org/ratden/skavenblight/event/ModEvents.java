@@ -82,5 +82,6 @@ public class ModEvents {
     @SubscribeEvent
     public static void registerScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenus.WARP_FLUX_FURNACE_MENU.get(), WarpFluxFurnaceScreen::new);
+        event.register(ModMenus.RESEARCH_TABLE_MENU.get(), org.ratden.skavenblight.screen.ResearchTableScreen::new);
     }
 }

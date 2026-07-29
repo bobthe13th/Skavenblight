@@ -79,6 +79,12 @@ public class ModBlockStateProvider extends BlockStateProvider {
                 "warp_flux_furnace_front",
                 "warp_flux_furnace_front_on");
 
+        standardMachineBlock(ModBlocks.RESEARCH_TABLE,
+                "research_table_side",
+                "research_table_top",
+                "research_table_front",
+                "research_table_front_on");
+
         // Create an empty "dummy" model for the Spike Trap since GeckoLib renders the real one.
         // We assign a texture to it purely so Minecraft knows what particles to spawn when you break it!
         ModelFile trapModel = models().getBuilder("piston_spike_trap")

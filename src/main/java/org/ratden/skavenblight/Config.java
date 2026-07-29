@@ -74,6 +74,12 @@ public class Config {
     private static final ModConfigSpec.IntValue WL_COIL_SLOW_TICKS = BUILDER.comment("Duration of Slowness effect in ticks.")
             .defineInRange("wlCoilSlowTicks", 1000, 0, 1200);
 
+    // --- Research Table Configs ---
+    private static final ModConfigSpec.IntValue RESEARCH_TICKS_BASE = BUILDER.comment("Base number of ticks required to complete spell research at the Research Table.")
+            .defineInRange("researchTicksBase", 200, 20, 72000);
+    private static final ModConfigSpec.IntValue RESEARCH_WIND_THRESHOLD = BUILDER.comment("Minimum local Wind level (of the spell's Wind) required to research a spell at the Research Table.")
+            .defineInRange("researchWindThreshold", 200, 0, 10000);
+
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
 
@@ -102,6 +108,10 @@ public class Config {
     public static int maxFlowFieldNodes;
     public static int minimumSettleDelayMs;
 
+    // --- Research Table Public Variables ---
+    public static int researchTicksBase;
+    public static int researchWindThreshold;
+
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
     public static int wlCoilCostPerShot;
@@ -129,6 +139,10 @@ public class Config {
         tier1Generation = TIER_1_GENERATION.get();
         tier2Capacity = TIER_2_CAPACITY.get();
         tier2Generation = TIER_2_GENERATION.get();
+
+        // Load Research Table Configs
+        researchTicksBase = RESEARCH_TICKS_BASE.get();
+        researchWindThreshold = RESEARCH_WIND_THRESHOLD.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();

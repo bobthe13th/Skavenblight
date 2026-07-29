@@ -52,4 +52,10 @@ public record PlayerMagicData(
         updated.put(wind, value);
         return new PlayerMagicData(updated, aptitude, knownSpells);
     }
+
+    public PlayerMagicData withKnownSpell(ResourceLocation spellId) {
+        Set<ResourceLocation> updated = new HashSet<>(knownSpells);
+        updated.add(spellId);
+        return new PlayerMagicData(tier, aptitude, updated);
+    }
 }

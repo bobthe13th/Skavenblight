@@ -124,6 +124,13 @@ public class ModBlocks {
                     .noOcclusion() // Highly recommended for GeckoLib animated blocks!
             ));
 
+    public static final DeferredBlock<Block> RESEARCH_TABLE = registerBlock("research_table",
+            () -> new ResearchTableBlock(BlockBehaviour.Properties.of()
+                    .strength(2.5f)
+                    .sound(SoundType.STONE)
+                    .lightLevel(state -> state.getValue(ResearchTableBlock.LIT) ? 10 : 0)
+            ));
+
     public static final DeferredBlock<Block> WARP_LIGHTNING_COIL = registerBlock("warp_lightning_coil",
             () -> new WarpLightningCoilBlock(BlockBehaviour.Properties.of()
                     .strength(3.5f)

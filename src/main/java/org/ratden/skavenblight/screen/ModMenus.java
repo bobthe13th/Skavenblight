@@ -16,6 +16,9 @@ public class ModMenus {
     public static final Supplier<MenuType<WarpFluxFurnaceMenu>> WARP_FLUX_FURNACE_MENU =
             MENUS.register("warp_flux_furnace_menu", () -> IMenuTypeExtension.create(WarpFluxFurnaceMenu::new));
 
+    public static final Supplier<MenuType<ResearchTableMenu>> RESEARCH_TABLE_MENU =
+            MENUS.register("research_table_menu", () -> IMenuTypeExtension.create(ResearchTableMenu::new));
+
     public static void register(IEventBus eventBus) {
         MENUS.register(eventBus);
     }

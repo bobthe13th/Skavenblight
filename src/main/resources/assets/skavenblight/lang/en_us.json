@@ -39,6 +39,15 @@
   "block.skavenblight.warp_flux_conduit": "Warp Flux Conduit",
   "block.skavenblight.warp_flux_furnace": "Warp Flux Furnace",
   "block.skavenblight.piston_spike_trap": "Piston Spike Trap",
+  "block.skavenblight.research_table": "Research Table",
+
+  "gui.skavenblight.research_table.choose_prompt": "Choose a spell to study, yes-yes!",
+  "gui.skavenblight.research_table.begin": "Begin Research",
+  "gui.skavenblight.research_table.studying": "Studying...",
+  "gui.skavenblight.research_table.reason.tier": "Requires a higher rank in this Wind.",
+  "gui.skavenblight.research_table.reason.busy": "The table is already studying something else.",
+  "gui.skavenblight.research_table.reason.wind": "The Wind here is too faint to study this.",
+  "gui.skavenblight.research_table.reason.catalyst": "Needs the right catalyst in the slot.",
 
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",

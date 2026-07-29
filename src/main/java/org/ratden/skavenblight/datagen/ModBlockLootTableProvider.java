@@ -60,6 +60,7 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                         .copy("flux", "flux")));
 
         dropSelf(ModBlocks.WARP_FLUX_FURNACE.get());
+        dropSelf(ModBlocks.RESEARCH_TABLE.get());
         dropSelf(ModBlocks.PISTON_SPIKE_TRAP.get());
         dropSelf(ModBlocks.WARP_LIGHTNING_COIL.get());
         this.add(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
