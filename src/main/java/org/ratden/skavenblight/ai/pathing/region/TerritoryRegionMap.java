@@ -52,6 +52,45 @@ public class TerritoryRegionMap {
     // FlowFieldState that this map no longer recomputes.
     private volatile long generation = 0;
 
+    // Task 9 Step 1: distinct counters for the two recomputeDirtyRegions outcomes, so a full
+    // rebuild triggered by a genuine (or, per the Task 9 Step 0c parking note, spuriously
+    // detected) topology change can be told apart from an ordinary single-region fast-path
+    // recompute - used by this task's characterization test and for manual observation via
+    // debug commands/logging later.
+    private volatile int topologyRebuildCount = 0;
+    private volatile int blockChangeRebuildCount = 0;
+
+    // Task 9 Step 4: debounces how often the topology-changed branch is actually ACTED on. Per
+    // the Step 3 characterization test (see docs/pathing/region-pathing-hardening-findings.md's
+    // Finding A), a sustained siege's connector
+    // traffic drives this branch far more often than genuine split/merge frequency alone would
+    // suggest (see the Step 0c parking note on reclaimConnectorCells for the proven cause).
+    // Distinct from Config.minimumSettleDelayMs, which governs terrain CAPTURE (how long to wait
+    // after a block change before recomputing at all) rather than how often a DETECTED merge gets
+    // acted on. This bounds HOW OFTEN a full rebuild fires; it does NOT restore the fast path's
+    // original intended benefit (a cheap region-local recompute instead of a network-wide one) -
+    // that requires the architectural fix the parking note describes, still unaddressed.
+    //
+    // PARKING NOTE (Task 9, not yet resolved): this cooldown is expected to be INERT at vanilla
+    // tick rate, and possibly always. RECALC_COOLDOWN_TICKS (80 ticks, below) already gates every
+    // dispatch of recomputeDirtyRegions, and that method increments topologyRebuildCount at most
+    // once per dispatch (it returns immediately after the first topology-changed hit in a batch) -
+    // so two consecutive topology-changed hits are naturally at least 80 ticks apart, which at
+    // vanilla 20 ticks/second is 4000ms, already STRICTER than this field's 2000ms window (and
+    // only gets stricter under server lag, which lengthens real time per tick). The
+    // PathingRegionGameTests characterization test can only observe this cooldown suppressing
+    // anything because that GameTest server ticks roughly 17x faster than vanilla (measured
+    // empirically at ~2.9ms/tick), compressing the 80-tick gate to ~230ms,
+    // well inside this 2000ms window. On a real, vanilla-or-slower-paced server this constant is
+    // therefore expected to never actually trigger the re-queue branch below - full-rebuild
+    // frequency stays bounded by RECALC_COOLDOWN_TICKS alone, exactly as before this Step existed.
+    // Confirming this against a real (non-GameTest, non-tick-compressed) server, and deciding
+    // whether a TICK-denominated cooldown (comparable to RECALC_COOLDOWN_TICKS, environment-speed-
+    // independent) would be the more meaningful fix if one is still wanted, is unresolved - see
+    // docs/pathing/region-pathing-hardening-findings.md's Finding A for the full analysis.
+    private long lastTopologyRebuildTime = 0;
+    private static final long TOPOLOGY_REBUILD_COOLDOWN_MS = 2000;
+
     private volatile RegionIndex regionIndex = new RegionIndex(List.of());
     private volatile RegionGraph regionGraph = null;
     private volatile RegionRouteTree routeTree = null;
@@ -159,8 +198,28 @@ public class TerritoryRegionMap {
         TerrainSnapshot snapshot = this.terrainSnapshot;
         List<Region> regions = regionScanner.scan(snapshot, territoryChunks, nexusPos,
                 snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
-        RegionIndex newIndex = new RegionIndex(regions);
-        RegionGraph newGraph = RegionGraph.build(snapshot, newIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
+        // Built from the flood-fill-only membership, and passed to RegionGraph.build for ITS OWN
+        // internal use (tryTrace's "did this trace land inside a different region" check) - that
+        // detection must see only genuine flood-fill membership, not connector claims a trace in
+        // progress might itself be adding, or a trace could spuriously terminate early against
+        // its own not-yet-finished chain.
+        RegionIndex preGraphIndex = new RegionIndex(regions);
+        RegionGraph newGraph = RegionGraph.build(snapshot, preGraphIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
+
+        // RegionGraph.build's registerConnector (see task-8) calls Region.addCell on both of a
+        // connector's endpoint regions for every cell it traced, mutating the SAME Region objects
+        // this method's own `regions` list holds - which would leave preGraphIndex (built BEFORE
+        // those addCell calls) stale for exactly the connector cells task-8 exists to stop
+        // orphaning. RegionGraph.build's LAST step re-stamps preGraphIndex in place for exactly the
+        // chunks its own connector claims touched (see RegionIndex.refreshChunks), so by the time
+        // build() returns, preGraphIndex already reflects every addCell mutation - a second,
+        // whole-territory `new RegionIndex(regions)` construction here would be redundant (this
+        // index's per-chunk arrays are a real `int[16*16*height]` allocation per occupied chunk -
+        // doing that twice per full rebuild was a real, avoidable cost). Reuse the SAME index
+        // object for rootRegion resolution and everything published below - getRegionFlowFieldFor
+        // and every other real caller of getRegionIndex() only ever sees this field, so this is the
+        // one index that actually needs to be current, and now it already is.
+        RegionIndex newIndex = preGraphIndex;
 
         // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS in
         // ModBlocks - plain full-collision blocks, no shape override), so RegionScanner never
@@ -195,10 +254,24 @@ public class TerritoryRegionMap {
             // Safe with one shared manager because regions are processed strictly sequentially
             // here - setActiveConnectorProject clears and re-seeds immediately before the pass
             // that consumes it, so no region can see another's project.
+            // Cap this region's own reactive macro-project search to a short local-gap length once
+            // it already has a route-tree-assigned parent connector - long-range connectivity is
+            // that connector's job now (see SiegeProjectManager.setMaxCandidateProjectLength's
+            // doc), not another sunburst-style search from evaluateMacroProjects. A region with no
+            // parent connector yet (including the root) keeps the generous territory-scale default,
+            // since local discovery may still be the only way it connects to anything.
+            projectManager.setMaxCandidateProjectLength(
+                    parentConnector != null ? 6 : SiegeProjectManager.DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH);
+
             // projectFor(region.getId()) picks the orientation that leads OUT of this (child)
             // region: a connector's traced instructions are direction-locked, and this region can
             // be on either end of it (see RegionConnector).
             projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(region.getId()) : null);
+            // Task 9 Step 0b fix: also seed this pass with the crossing project for any connector
+            // this region is the route-tree PARENT of - see injectSharedConnectorProjects's doc
+            // for why the primary project alone leaves the parent side without instructions for
+            // cells the tie-break may hand it.
+            injectSharedConnectorProjects(newGraph, newRouteTree, region.getId());
 
             FlowFieldState state = new FlowFieldState(target, territoryChunks, region::contains);
             // Unthrottled: this is the one-shot rebuild pass, run once at world-join/territory
@@ -313,6 +386,40 @@ public class TerritoryRegionMap {
         return generation;
     }
 
+    /**
+     * True if {@code capturedGeneration} (the value of {@link #getGeneration()} at the time some
+     * region id was captured/cached) still matches this map's current generation. Region ids are
+     * renumbered from 0 on every full rebuild, so any cached id is only meaningful paired with the
+     * generation it was captured under - use this instead of hand-rolling the comparison at each
+     * call site.
+     */
+    public boolean isCurrent(long capturedGeneration) {
+        return capturedGeneration == this.generation;
+    }
+
+    /**
+     * Number of times {@code recomputeDirtyRegions} has taken its topology-changed branch (a
+     * dirty region's local rescan found other than exactly 1 sub-region, triggering a full
+     * {@code rebuildRegionsAndGraph} - see that method's call site). See the Task 9 Step 0c
+     * parking note on {@code reclaimConnectorCells} and
+     * docs/pathing/region-pathing-hardening-findings.md's Finding A: this fires far more
+     * often than a genuine split/merge, for any region with an active connector.
+     */
+    public int getTopologyRebuildCount() {
+        return topologyRebuildCount;
+    }
+
+    /**
+     * Number of times {@code recomputeDirtyRegions} has taken its non-topology-changed ("fast
+     * path") branch - a dirty region's local rescan found exactly 1 sub-region, so only that
+     * region's membership/flow field were recomputed rather than the whole network. Distinct from
+     * {@link #getTopologyRebuildCount()} so the two outcomes can be told apart by manual
+     * observation (e.g. a debug command) as well as by tests.
+     */
+    public int getBlockChangeRebuildCount() {
+        return blockChangeRebuildCount;
+    }
+
     /** Network-wide siege project manager (shared by every region's calculation pass) - exposed for debug dumps. */
     public SiegeProjectManager getProjectManager() {
         return projectManager;
@@ -415,6 +522,15 @@ public class TerritoryRegionMap {
     private void recomputeDirtyRegions(Set<Integer> dirtyIds, Set<ChunkPos> territoryChunks) {
         TerrainSnapshot snapshot = this.terrainSnapshot;
 
+        // Task 9 Step 0 fix: accumulated across the WHOLE batch and turned into exactly one new
+        // RegionIndex after the loop finishes, instead of the old code's `this.regionIndex = new
+        // RegionIndex(updatedRegions)` sitting INSIDE the loop below (one full ~384KB-per-chunk
+        // reconstruction per dirty region in this batch, N-1 of which were built from a
+        // still-incomplete snapshot and discarded unread before the batch finished). Seeded from
+        // the pre-batch region list, exactly like the old per-iteration code's own
+        // `new ArrayList<>(regionIndex.getRegions())` did on its first iteration.
+        List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+
         for (int regionId : dirtyIds) {
             Region oldRegion = regionIndex.getRegions().stream().filter(r -> r.getId() == regionId).findFirst().orElse(null);
             if (oldRegion == null || oldRegion.getMin() == null || oldRegion.getMax() == null) continue;
@@ -434,6 +550,43 @@ public class TerritoryRegionMap {
             List<Region> rescanned = regionScanner.scan(snapshot, localBounds, oldRegion.getMin(),
                     snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
 
+            // PARKING NOTE (Task 9, not yet resolved): this check reliably flags a SPLIT
+            // (rescanned.size() > 1 - more pieces than before) but silently MISSES a completing
+            // MERGE. When a connector's gap fully closes, rescanning EITHER old endpoint region's
+            // own localBounds (already inflated by addCell to cover the other endpoint's chunk -
+            // see reclaimConnectorCells's own parking note) now finds exactly 1 piece: itself,
+            // having absorbed what used to be the other region. rescanned.size() != 1 reads that
+            // as "no topology change" even though a merge - the most dramatic topology change
+            // possible - just happened. Confirmed empirically (see
+            // docs/pathing/region-pathing-hardening-findings.md's Finding B): when the closing
+            // dirty batch contains BOTH endpoint region ids (which it
+            // does, deterministically, for the specific FLOOR-support-type geometry that test
+            // exercises - via a deliberate, non-production onBlockChanged convention; see below),
+            // BOTH take the non-topology-changed branch below IN THE SAME BATCH, each independently
+            // re-flooding the identical now-merged cell set and getting stamped with its own,
+            // different id - producing two Region objects with fully overlapping cell sets, a
+            // regionGraph/routeTree left completely stale (never rebuilt, since neither id
+            // triggered rebuildRegionsAndGraph), and RegionIndex's last-write-wins tie-break
+            // silently orphaning one of the two duplicates with no generation bump to signal it.
+            // This is a real, distinct, UNFIXED bug (not merely the topology-changed branch firing
+            // too often, which is reclaimConnectorCells's own, separate parking note) - see that
+            // method's javadoc for the full trace and why a fix wasn't attempted opportunistically
+            // here. Production reachability is NOT uniform across scenarios: confirmed-plausible
+            // for a same-level WALL-break-type merge (the same-Y flanking cells on either side of
+            // the wall were ALREADY indexed region members before the break, so production's real
+            // neighborsAndSelf check succeeds immediately there), but NOT yet confirmed for a
+            // FLOOR-support-type merge specifically, because production's actual event path
+            // (SiegeBlockEventHandler.handleBlockChange) reports the literal changed floor-block
+            // position, not the walkable cell one Y above it that this test reports instead.
+            // neighborsAndSelf DOES check above()/below() (all 6 face-adjacent neighbors plus the
+            // position itself, not just same-Y ones) - the gap is a stale-index/timing one, not a
+            // directional blind spot: every one of those 7 candidates was unwalkable, unindexed
+            // terrain before this exact change (the floor block itself, and the newly-walkable
+            // cell its above() lands on, which only just became walkable because of this same
+            // change), so a production-faithful floor-support change produces zero dirty regions
+            // and never reaches this method at all for that case. See
+            // docs/pathing/region-pathing-hardening-findings.md's Finding B ("Production
+            // reachability is scenario-dependent") for the full reconciliation.
             boolean topologyChanged = rescanned.size() != 1;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
@@ -455,9 +608,26 @@ public class TerritoryRegionMap {
                 // this int - keep referring to the same region, just with membership that now
                 // matches current terrain.
                 Region freshRegion = rescanned.get(0).withId(regionId);
-                List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+
+                // Task 9 Step 0c fix: a connector's traced cells were claimed into this region via
+                // Region.addCell (see RegionGraph.registerConnector) at the last full rebuild, and
+                // by construction are NOT ordinary flood-fill reachable from this region's interior
+                // - that's the whole reason addCell exists instead of relying on the scan above.
+                // The plain rescan just above therefore can never rediscover them, so without
+                // re-adding them here BEFORE freshRegion replaces the old (already-claiming)
+                // Region object, this region would silently drop every connector cell it was
+                // claiming on its very first dirty rescan after a rebuild - reopening task-8's
+                // orphan-lookup gap until the next full rebuild. Only projectTowardA's instruction
+                // keys are used (not the union with projectTowardB): inboundInstructions (which
+                // backs projectTowardA) keys its map by every traced step's OWN position, exactly
+                // matching registerConnector's own addCell loop; outboundInstructions (projectTowardB)
+                // additionally keys on the connector's ANCHOR cell, which already belongs to
+                // whichever region the trace started from via ordinary flood-fill - re-adding it
+                // into the OTHER region too would over-claim a cell registerConnector never
+                // actually gave it.
+                reclaimConnectorCells(freshRegion, regionGraph, regionId);
+
                 updatedRegions.replaceAll(r -> r.getId() == regionId ? freshRegion : r);
-                this.regionIndex = new RegionIndex(updatedRegions);
 
                 FlowFieldState state = regionStates.get(regionId);
                 if (state != null) {
@@ -471,13 +641,44 @@ public class TerritoryRegionMap {
                     // call in rebuildRegionsAndGraph). Uses the CURRENT route tree - this is the
                     // steady-state single-region path, not a full rebuild, so no new tree exists.
                     RegionConnector parentConnector = routeTree != null ? routeTree.getParentConnector(regionId) : null;
+                    // Same local-gap cap as rebuildRegionsAndGraph's matching call - see that
+                    // call's doc and SiegeProjectManager.setMaxCandidateProjectLength's own doc.
+                    projectManager.setMaxCandidateProjectLength(
+                            parentConnector != null ? 6 : SiegeProjectManager.DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH);
                     projectManager.setActiveConnectorProject(parentConnector != null ? parentConnector.projectFor(regionId) : null);
+                    // Task 9 Step 0b fix: also seed this pass with the crossing project for any
+                    // connector this region is the route-tree PARENT of - see
+                    // injectSharedConnectorProjects's doc for why the primary project alone isn't
+                    // enough.
+                    injectSharedConnectorProjects(regionGraph, routeTree, regionId);
                     calculator.calculateFully(snapshot, state);
                 }
+                // Task 9 Step 1: counts a completed fast-path pass for this region, distinct from
+                // topologyRebuildCount below - see getBlockChangeRebuildCount's doc.
+                this.blockChangeRebuildCount++;
                 continue;
             }
 
+            // Task 9 Step 4: debounces how often a DETECTED topology change is actually acted on -
+            // see the lastTopologyRebuildTime field doc for why this is a frequency bound, not a
+            // fix for the underlying over-detection (see the Step 0c parking note on
+            // reclaimConnectorCells). Deliberately checked BEFORE the "topology changed" log line
+            // below so a debounced pass doesn't claim a rebuild was triggered when it wasn't.
+            if (System.currentTimeMillis() - lastTopologyRebuildTime < TOPOLOGY_REBUILD_COOLDOWN_MS) {
+                // Still within cooldown - re-queue this region as dirty so it's picked up on the
+                // next eligible pass instead of silently dropping the detected change.
+                dirtyRegionIds.add(regionId);
+                continue;
+            }
+            lastTopologyRebuildTime = System.currentTimeMillis();
+
             LOGGER.info("[Skavenblight] Region {} topology changed ({} sub-regions found) - full territory rebuild triggered", regionId, rescanned.size());
+            // Task 9 Step 1: counts every time this branch fires, whether from a genuine
+            // split/merge or (per the Task 9 Step 0c parking note on reclaimConnectorCells) a
+            // spurious re-detection driven by a connector's bbox-inflated localBounds - see
+            // getTopologyRebuildCount's doc and docs/pathing/region-pathing-hardening-findings.md's
+            // Finding A.
+            this.topologyRebuildCount++;
             // A genuine split/merge is rare and the region count for a typical base is small (see
             // RegionScanner's manual test notes) - falling back to a full rebuild here is simpler
             // and safer than hand-patching RegionGraph/RegionRouteTree, and still only runs when
@@ -488,6 +689,122 @@ public class TerritoryRegionMap {
             BlockPos rootTarget = this.nexusPos != null ? this.nexusPos : oldRegion.getMin();
             rebuildRegionsAndGraph(territoryChunks, rootTarget);
             return;
+        }
+
+        this.regionIndex = new RegionIndex(updatedRegions);
+    }
+
+    /**
+     * Re-adds a connector's traced cells (see RegionGraph.registerConnector's addCell claim) back
+     * into {@code freshRegion} - see Task 9 Step 0c's call site for why the plain rescan that
+     * produced {@code freshRegion} can never include them on its own.
+     *
+     * <p><b>PARKING NOTE (Task 9, corrected - NOT simply "unreachable"):</b> this method's own
+     * call site (the non-topology-changed branch above) is unreachable for a region with an
+     * active connector for as long as the connector's gap remains genuinely open - {@code
+     * addCell}'s unconditional {@code expandBounds} means a connector's endpoint region bounding
+     * boxes always grow to include each OTHER's landing chunk (confirmed via {@code
+     * SiegeLineTracer.trace}: a completed trace's {@code orderedSteps} always ends with the
+     * landing position itself, which {@code registerConnector} then {@code addCell}s into BOTH
+     * endpoints), so a dirty rescan of either endpoint re-sweeps the other's chunk too and
+     * (while the gap is open) always rediscovers it as a separate component ({@code
+     * rescanned.size() &gt;= 2}), taking the topology-changed branch instead.
+     *
+     * <p><b>It IS reachable, and confirmed empirically reached, at the exact moment the gap fully
+     * closes</b> - see {@code recomputeDirtyRegions}'s {@code rescanned.size() != 1} check (its
+     * own parking note documents why a completing merge satisfies "found exactly 1 piece" and
+     * reads as no-change) - and this exposes a real, DISTINCT, more serious bug than merely
+     * reaching previously-dead code: when the closing dirty batch contains BOTH endpoint region
+     * ids (confirmed to happen - the closing placement's near-side neighbor resolves to the
+     * already-absorbed near region, its far-side neighbor to the far region's own native cell),
+     * BOTH ids independently take this fast path in the SAME batch (nothing here mirrors the
+     * topology-changed branch's early {@code return} after the first hit), each re-flooding the
+     * now-IDENTICAL fully-merged cell set and calling {@code reclaimConnectorCells} against the
+     * STALE {@code regionGraph} (never rebuilt, since neither id triggered a full rebuild) -
+     * producing two {@code Region} objects in {@code updatedRegions} with fully overlapping cell
+     * sets, while {@code regionGraph}/{@code routeTree} keep listing the now-physically-stale
+     * connector between them. {@code RegionIndex}'s last-write-wins per-cell stamping then makes
+     * whichever region was processed last in the list the only one any position resolves to,
+     * silently orphaning the other (still present in {@code getRegionIndex().getRegions()}, zero
+     * resolvable cells) - with no {@code generation} bump to signal anything happened. Confirmed
+     * reproducibly (6/6 runs) via direct inspection in
+     * {@code PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: two
+     * regions with byte-identical {@code min}/{@code max}/{@code cellCount}, a connector still
+     * listed between them, and two probes on opposite original sides of the trench both resolving
+     * to the same winning region id. See docs/pathing/region-pathing-hardening-findings.md's
+     * Finding B for the full
+     * empirical evidence and trace. THIS IS AN UNFIXED, DISTINCT BUG, not merely a documentation
+     * correction - it was not fixed in this pass because a correct fix likely requires either
+     * mirroring the topology-changed branch's early-return/single-winner semantics onto the fast
+     * path, or detecting "multiple ids in one batch resolved to the identical merged content" and
+     * collapsing them into one before publishing {@code updatedRegions} - both real design
+     * decisions needing their own scoped follow-up, not a fix attempted opportunistically here.
+     *
+     * <p><b>Production reachability is scenario-dependent, not uniform</b> - the GameTest above
+     * reaches this bug via a FLOOR-support-type merge (filling a trench's floor one column at a
+     * time), but only by deliberately reporting {@code onBlockChanged} against the newly-walkable
+     * cell one Y above the placed floor block, NOT the floor block's own position - a documented
+     * deviation from what production actually does (confirmed by reading {@code
+     * SiegeBlockEventHandler.handleBlockChange}: it passes the literal changed-block position
+     * straight into {@code onBlockChanged}, unmodified). {@code tick()}'s {@code neighborsAndSelf}
+     * DOES check {@code above()}/{@code below()} (all 6 face-adjacent neighbors plus the position
+     * itself, not just same-Y ones) - the gap is a stale-index/timing one, not a directional blind
+     * spot: every one of those 7 candidates is resolved against a {@code regionIndex} snapshot from
+     * BEFORE the change, and for a floor placement, all 7 were unwalkable, unindexed terrain prior
+     * to it (the floor block itself, and the newly-walkable cell {@code above()} lands on, which
+     * only just became walkable because of this same change) - so a production-faithful report of
+     * a floor block's own position never resolves to any dirty region for a floor-support change in
+     * the first place - {@code recomputeDirtyRegions} is never reached for that case, and neither
+     * is this bug. For a same-level WALL-break-type merge, nothing about that gap applies (the
+     * same-Y flanking cells on either side of the wall were ALREADY indexed region members before
+     * the break, so production's real neighbor check succeeds immediately, same as this test's own
+     * workaround), so the mechanism traced above is confirmed-plausible reachable there via
+     * production's real event path - but this has not been separately tested. In short: confirmed
+     * reproducible in GameTest for a floor-support merge (via a non-production reporting
+     * convention), confirmed-plausible for a production wall-break merge, NOT yet confirmed
+     * reachable via production's actual event path for a floor-support merge specifically. See
+     * docs/pathing/region-pathing-hardening-findings.md's Finding B for the full reconciliation
+     * against the separately-documented floor-support dirty-detection gap.
+     */
+    private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
+        if (graph == null) return;
+        for (RegionConnector connector : graph.getConnectorsFor(regionId)) {
+            for (BlockPos pos : connector.projectTowardA().getInstructions().keySet()) {
+                freshRegion.addCell(pos);
+            }
+        }
+    }
+
+    /**
+     * Layers the crossing project for every connector {@code regionId} is the route-tree PARENT
+     * side of on top of whatever {@code setActiveConnectorProject} already seeded for this same
+     * region's pass - see Task 9 Step 0b. RegionGraph.registerConnector (task-8) claims a
+     * connector's traced cells into BOTH endpoint regions so a mob mid-crossing never fails a
+     * REGION lookup, but RegionIndex's shared-cell tie-break (last-write-wins in region SCAN/
+     * discovery order) and the route tree's parent/child assignment (cost order from the root) are
+     * two entirely unrelated orderings. Before this fix, only the CHILD side of a connector ever
+     * got its crossing instructions injected (via parentConnector.projectFor(childId) in the
+     * caller), so a shared cell that the tie-break happened to hand to the PARENT instead had no
+     * instruction at all, even though the region lookup itself succeeded. Injecting the SAME
+     * project (`connector.projectFor(childId)`, i.e. exactly what the child's own pass already
+     * gets) into the parent's pass too means the answer no longer depends on which side wins the
+     * tie-break.
+     *
+     * <p>Deliberately additive, not a replacement: must be called AFTER
+     * {@code setActiveConnectorProject} (which clears and reseeds this region's OWN upstream
+     * project) and BEFORE the one {@code calculateFully} call that consumes the active-project
+     * list - {@code injectActiveProjects} iterates the whole list at that point, so both the
+     * region's own project and every downstream child's crossing project it stacks on top must
+     * already be present together.
+     */
+    private void injectSharedConnectorProjects(RegionGraph graph, RegionRouteTree tree, int regionId) {
+        if (graph == null || tree == null) return;
+        for (RegionConnector connector : graph.getConnectorsFor(regionId)) {
+            int otherId = connector.other(regionId);
+            Integer otherParent = tree.getParentRegion(otherId);
+            if (otherParent != null && otherParent == regionId) {
+                projectManager.addSharedConnectorProject(connector.projectFor(otherId));
+            }
         }
     }
 }

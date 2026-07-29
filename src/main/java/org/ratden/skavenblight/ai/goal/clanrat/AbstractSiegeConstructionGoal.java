@@ -85,8 +85,33 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     /** Extra per-tick bookkeeping a subclass needs regardless of animation phase (e.g. cooldown timers). */
     protected void onTick() {}
 
-    /** Called right after a successful execute(); override to react to finishing a chain of actions. */
-    protected void onChainComplete(ServerLevel level, BlockPos completedPos) {}
+    private long nextRecalculationTime = 0;
+
+    /**
+     * Default: mark the affected region dirty after every completed action, debounced the same
+     * way BuildFlowFieldGoal already debounces its own explicit call - without this, subclasses
+     * that don't override this hook (WidenStairsGoal, SmartBreachGoal) never tell the region
+     * system about their own construction (confirmed bug - see the "a mess lol" commit history's
+     * fix for BuildFlowFieldGoal, which never generalized to these siblings).
+     *
+     * <p>Null-checked for the same reason {@code DeployClimbableGoal}'s two analogous
+     * {@code forceRecalculation} calls are: {@code ClanratEntity.assignFlowField} can hand this
+     * goal a {@code null} flowField at any time (via {@code customServerAiStep}'s periodic
+     * region-membership re-check, every 40 ticks, decoupled from whether a goal is mid-chain),
+     * including while {@code tick()} is actively executing a chain (a goal only stops on its own
+     * on the NEXT {@code canContinueToUse()} check, which does not itself check {@code flowField}
+     * - see this class's own {@code tick()}). This is a narrow, pre-existing race window shared by
+     * several other unguarded {@code this.flowField} calls in both this class and
+     * {@code DeployClimbableGoal} (e.g. {@code releaseTarget}/{@code tryClaimTarget}); fixing all
+     * of them is out of scope here - this guard only covers the specific call this hook itself
+     * added.
+     */
+    protected void onChainComplete(ServerLevel level, BlockPos completedPos) {
+        if (this.flowField != null && level.getGameTime() >= this.nextRecalculationTime && !this.flowField.isCalculating()) {
+            this.flowField.forceRecalculation(completedPos);
+            this.nextRecalculationTime = level.getGameTime() + 100;
+        }
+    }
 
     public record Target(BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {
         public Target(BlockPos pos, SiegeNode.SiegeAction action) {
