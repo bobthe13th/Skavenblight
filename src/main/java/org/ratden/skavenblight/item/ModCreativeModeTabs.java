@@ -44,7 +44,7 @@ public class ModCreativeModeTabs {
 
                         output.accept(ModBlocks.SKAVEN_TUNNEL_SOURCE);
 
-                        output.accept(ModBlocks.RESEARCH_TABLE);
+                        ModBlocks.RESEARCH_TABLES.values().forEach(output::accept);
 
                         output.accept(ModItems.WARPSTONE_HELMET);
                         output.accept(ModItems.WARPSTONE_CHESTPLATE);

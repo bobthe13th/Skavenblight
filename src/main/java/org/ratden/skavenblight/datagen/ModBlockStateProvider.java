@@ -15,6 +15,7 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.block.custom.SpawnTunnelSmall;
+import org.ratden.skavenblight.magic.Wind;
 import net.minecraft.client.renderer.item.ItemProperties;
 import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
 
@@ -79,11 +80,11 @@ public class ModBlockStateProvider extends BlockStateProvider {
                 "warp_flux_furnace_front",
                 "warp_flux_furnace_front_on");
 
-        standardMachineBlock(ModBlocks.RESEARCH_TABLE,
-                "research_table_side",
-                "research_table_top",
-                "research_table_front",
-                "research_table_front_on");
+        for (Wind wind : Wind.values()) {
+            String id = "research_table_" + wind.getSerializedName();
+            standardMachineBlock(ModBlocks.RESEARCH_TABLES.get(wind),
+                    id + "_side", id + "_top", id + "_front", id + "_front_on");
+        }
 
         // Create an empty "dummy" model for the Spike Trap since GeckoLib renders the real one.
         // We assign a texture to it purely so Minecraft knows what particles to spawn when you break it!

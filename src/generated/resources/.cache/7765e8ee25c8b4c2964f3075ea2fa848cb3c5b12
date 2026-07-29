@@ -1,6 +1,14 @@
-// 1.21.1	2026-07-10T17:50:24.5278902	Tags for minecraft:block mod id skavenblight
+// 1.21.1	2026-07-29T06:54:59.9102079	Tags for minecraft:block mod id skavenblight
 64cf98cd8fd09c3c9383aa822b8a514ea3b31672 data/minecraft/tags/block/fences.json
 282669dabd33661ba4f888018ae44372aabb6933 data/minecraft/tags/block/fence_gates.json
 077e584f9d9339020c4278a38f539517caa1eaea data/minecraft/tags/block/mineable/pickaxe.json
 98146993dedc67c62d47e5a9a25891dc7e98d138 data/minecraft/tags/block/needs_diamond_tool.json
 ebf4ed8c427a8f72fd237e67bd7babe078f5ae0e data/minecraft/tags/block/walls.json
+95c0da81ccdeb26da34c0c7adc2f32e98ad80914 data/skavenblight/tags/block/wind_source/aqshy.json
+29e50e7bb884d8a967a97bf711c017c3738411ba data/skavenblight/tags/block/wind_source/azyr.json
+ba39ef4f3444ad9dd5d12c1ef330667ff2257c45 data/skavenblight/tags/block/wind_source/chamon.json
+994ddb652b2219f25f90459f9872c90b4b95fb1e data/skavenblight/tags/block/wind_source/ghur.json
+e84b5696a910f3f4c0f4ddb97e14a1f5dcd0dce7 data/skavenblight/tags/block/wind_source/ghyran.json
+8362b147ad35ef506700e5e98cd6ea4e696bdd7e data/skavenblight/tags/block/wind_source/hysh.json
+01af62b4d84834da771b51c62ad91879be88d3e4 data/skavenblight/tags/block/wind_source/shyish.json
+d82eab0cdbd52e221f86575a2d08c00911812de1 data/skavenblight/tags/block/wind_source/ulgu.json
