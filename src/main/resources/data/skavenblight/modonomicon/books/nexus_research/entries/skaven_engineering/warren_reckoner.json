@@ -1,0 +1,25 @@
+{
+  "category": "skavenblight:skaven_engineering",
+  "id": "skavenblight:warren_reckoner",
+  "name": "entry.skavenblight.nexus_research.warren_reckoner.name",
+  "icon": "minecraft:compass",
+  "x": 0,
+  "y": 0,
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.warren_census.title",
+      "text": "page.skavenblight.nexus_research.warren_census.text"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.warren_route.title",
+      "text": "page.skavenblight.nexus_research.warren_route.text"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.warren_flow.title",
+      "text": "page.skavenblight.nexus_research.warren_flow.text"
+    }
+  ]
+}
