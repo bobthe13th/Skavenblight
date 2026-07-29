@@ -12,6 +12,7 @@ public final class ChunkWindState {
     private final float[] current = new float[Wind.values().length];
     private final float[] baseline = new float[Wind.values().length];
     private float dharLevel = 0f;
+    private final int[] taggedBlockCount = new int[Wind.values().length];
 
     public float getCurrent(Wind wind) {
         return current[wind.ordinal()];
@@ -37,10 +38,19 @@ public final class ChunkWindState {
         dharLevel = value;
     }
 
+    public int getTaggedBlockCount(Wind wind) {
+        return taggedBlockCount[wind.ordinal()];
+    }
+
+    public void addTaggedBlockCount(Wind wind, int delta) {
+        taggedBlockCount[wind.ordinal()] = Math.max(0, taggedBlockCount[wind.ordinal()] + delta);
+    }
+
     public CompoundTag save(CompoundTag tag) {
         tag.put("current", floatArrayTag(current));
         tag.put("baseline", floatArrayTag(baseline));
         tag.putFloat("dharLevel", dharLevel);
+        tag.putIntArray("taggedBlockCount", taggedBlockCount);
         return tag;
     }
 
@@ -49,6 +59,11 @@ public final class ChunkWindState {
         readFloatArrayTag(tag, "current", state.current);
         readFloatArrayTag(tag, "baseline", state.baseline);
         state.dharLevel = tag.getFloat("dharLevel");
+        if (tag.contains("taggedBlockCount")) {
+            int[] counts = tag.getIntArray("taggedBlockCount");
+            System.arraycopy(counts, 0, state.taggedBlockCount, 0,
+                    Math.min(counts.length, state.taggedBlockCount.length));
+        }
         return state;
     }
 
