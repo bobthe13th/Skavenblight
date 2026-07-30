@@ -19,6 +19,7 @@ public class SkavenDebugCommand {
                         .then(DebugIncursionLoadTest.register())
                         .then(DebugWindCommands.register())
                         .then(DebugMagicCommands.register())
+                        .then(DebugCorruptionCommands.register())
         );
     }
 }

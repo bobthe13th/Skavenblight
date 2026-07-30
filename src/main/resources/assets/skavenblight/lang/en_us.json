@@ -129,6 +129,10 @@
   "page.skavenblight.nexus_research.dark_magic_overview.title": "Dhar",
   "page.skavenblight.nexus_research.dark_magic_overview.text": "Where the Winds mix and stagnate, corruption follows. This chapter is locked for now — return once you have mastered at least two schools.",
 
+  "entry.skavenblight.nexus_research.tzeentchs_curse.name": "Tzeentch's Curse",
+  "page.skavenblight.nexus_research.tzeentchs_curse.title": "Corruption",
+  "page.skavenblight.nexus_research.tzeentchs_curse.text": "Every soul that touches Dhar leaves a mark. Corruption Points accumulate quietly: reading the runes of a Chaos Monolith risks a surge, and every attempt to cast a Dhar spell taints you a little further, win or lose. A Tome of Corruption must first be read to unlock Dhar spellcasting at all — until then, the dark arts are simply beyond reach.\n\nAs your Corruption rises through its tiers, the Tainted affliction grows worse, from a faint unease to fits of nausea and weakness at the highest tiers. Left unchecked, there is no cure.\n\nThe only known remedy is a Cleansing Ward: a rare, costly working of Hysh that scours away a portion of accumulated Corruption. It demands a strong local flow of the Light, and even then may only be attempted once every so often — Tzeentch does not give up his hold easily.",
+
   "entry.skavenblight.nexus_research.winds_of_magic_hysh_petty_spells.name": "Petty Spells",
   "entry.skavenblight.nexus_research.winds_of_magic_azyr_petty_spells.name": "Petty Spells",
   "entry.skavenblight.nexus_research.winds_of_magic_chamon_petty_spells.name": "Petty Spells",
