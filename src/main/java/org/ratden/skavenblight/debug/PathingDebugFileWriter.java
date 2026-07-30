@@ -241,6 +241,7 @@ public class PathingDebugFileWriter {
             // healthy in-progress build, and was invisible before this.
             String canUseState = (mob instanceof ClanratEntity clanrat) ? clanrat.describeSiegeGoalCanUseState() : "n/a";
             String claimantDesc = "";
+            String claimantStateDesc = "";
             if (next != null && next.action() != SiegeNode.SiegeAction.WALK && mobField != null) {
                 Mob claimant = mobField.getClaimant(next.pos());
                 if (claimant != null) {
@@ -249,12 +250,18 @@ public class PathingDebugFileWriter {
                             next.pos().toShortString(), BuiltInRegistries.ENTITY_TYPE.getKey(claimant.getType()),
                             claimant.getUUID().toString().substring(0, 8), claimant.blockPosition().toShortString(),
                             claimant.isAlive(), dist);
+                    // Compare across two dumps taken a few seconds apart: actionTicks/stalledTicks
+                    // NOT advancing between them, or repeated identical targetPos, means the
+                    // claimant is genuinely stuck - not just caught mid-animation on this one snapshot.
+                    if (claimant instanceof ClanratEntity claimantRat) {
+                        claimantStateDesc = "\n    claimant state: " + claimantRat.describeActiveSiegeGoalState();
+                    }
                 }
             }
 
-            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s%s\n    canUse: %s\n",
+            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s%s\n    canUse: %s%s\n",
                     BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc, jamFlag,
-                    claimantDesc, canUseState));
+                    claimantDesc, canUseState, claimantStateDesc));
         }
         writer.write("\n");
     }

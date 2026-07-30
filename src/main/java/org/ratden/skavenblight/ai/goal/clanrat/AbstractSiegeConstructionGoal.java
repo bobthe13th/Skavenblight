@@ -55,6 +55,25 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.flowField = flowField;
     }
 
+    /**
+     * Diagnostic-only: this goal's own progress on its currently claimed target, or a fixed
+     * string if it doesn't hold one right now. Exists to answer "the claimant is alive and
+     * plausibly close enough - so why hasn't it finished?" - actionTicks/stalledTicks/
+     * nextAllowedActionTime are otherwise fully private to the goal instance, invisible to any
+     * external diagnostic (including PathingDebugFileWriter's claimant lookup).
+     */
+    public String describeState() {
+        if (this.targetPos == null) return "<no claimed target>";
+        long now = this.mob.level().getGameTime();
+        return String.format(
+                "targetPos=%s action=%s actionTicks=%d/%d stalledTicks=%d/%s flowFieldNull=%b "
+                        + "nextAllowedActionTime=%d(now=%d, %s) supportSolidAtClaim=%b",
+                this.targetPos.toShortString(), this.targetAction, this.actionTicks, getActionDurationTicks(),
+                this.stalledTicks, getMaxStalledTicks() > 0 ? String.valueOf(getMaxStalledTicks()) : "unbounded",
+                this.flowField == null, this.nextAllowedActionTime, now,
+                now < this.nextAllowedActionTime ? "IN COOLDOWN" : "clear", this.supportSolidAtClaim);
+    }
+
     // =================================================================================
     // HOOKS - concrete goals implement these
     // =================================================================================

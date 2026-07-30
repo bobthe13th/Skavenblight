@@ -239,6 +239,24 @@ public class ClanratEntity extends Monster implements GeoEntity {
     }
 
     /**
+     * Diagnostic-only: the currently-RUNNING siege-construction goal's own progress on its
+     * claimed target (actionTicks/stalledTicks/cooldown state - see
+     * AbstractSiegeConstructionGoal#describeState()), or a fixed string if none is running.
+     * Meant to be called on whichever mob {@link RegionFlowField#getClaimant} returns for a
+     * stuck target: canUse()/running alone say THAT a goal holds a claim, this says whether it's
+     * actually making progress (ticking up normally) or stuck (actionTicks not advancing,
+     * repeatedly stalled, or sitting in a cooldown that never seems to expire).
+     */
+    public String describeActiveSiegeGoalState() {
+        return this.goalSelector.getAvailableGoals().stream()
+                .filter(wrapped -> wrapped.isRunning() && wrapped.getGoal() instanceof AbstractSiegeConstructionGoal)
+                .map(wrapped -> ((AbstractSiegeConstructionGoal) wrapped.getGoal()).getClass().getSimpleName()
+                        + " " + ((AbstractSiegeConstructionGoal) wrapped.getGoal()).describeState())
+                .findFirst()
+                .orElse("<no siege construction goal currently running>");
+    }
+
+    /**
      * Clanrats are never ambient/vanilla world-spawns - they only ever exist because the
      * siege/incursion system (or a debug command) deliberately spawned them as the attacking
      * force, and are already lifecycle-managed by that system's own manual cleanup commands
