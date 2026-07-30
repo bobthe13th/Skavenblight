@@ -95,4 +95,33 @@ public class AwaitFormationGoalGameTests {
 
         helper.succeed();
     }
+
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testFormationSlotClaimIsIndependentOfTargetClaim(GameTestHelper helper) {
+        BlockPos relativePos = new BlockPos(4, 2, 4);
+        BlockPos pos = helper.absolutePos(relativePos);
+        RegionFlowField flowField = buildFlowField(pos);
+
+        ClanratEntity mobA = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mobA.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(mobA);
+
+        ClanratEntity mobB = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mobB.setPos(pos.getX() + 3.5, pos.getY(), pos.getZ() + 3.5);
+        helper.getLevel().addFreshEntity(mobB);
+
+        check(!flowField.isFormationSlotClaimed(pos), "an unclaimed formation slot must report unclaimed");
+
+        check(flowField.tryClaimFormationSlot(pos, mobA), "first claim on an unclaimed slot should succeed");
+        check(flowField.isFormationSlotClaimed(pos), "slot should now report claimed");
+        check(!flowField.isTargetClaimed(pos), "a formation-slot claim must NOT be visible as a construction-target claim");
+
+        check(!flowField.tryClaimFormationSlot(pos, mobB), "a second mob must not be able to claim an already-held slot");
+
+        flowField.releaseFormationSlot(pos);
+        check(!flowField.isFormationSlotClaimed(pos), "slot should be unclaimed again after release");
+        check(flowField.tryClaimFormationSlot(pos, mobB), "a released slot should be claimable by a different mob");
+
+        helper.succeed();
+    }
 }

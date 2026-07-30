@@ -34,6 +34,10 @@ public class RegionFlowField {
 
     private final Map<BlockPos, Mob> claimedTargets = new HashMap<>();
 
+    // Separate registry from claimedTargets - a waiting slot must never be mistaken for a build
+    // target or vice versa (see AwaitFormationGoal).
+    private final Map<BlockPos, Mob> formationSlots = new HashMap<>();
+
     // Tracks how many mobs are currently funneling through a given connector lane (e.g. a
     // narrow bridge/staircase's entry node), so WidenStairsGoal can widen a saturated lane
     // proactively instead of only reacting after a rat is already stuck off-path.
@@ -91,6 +95,35 @@ public class RegionFlowField {
     public boolean isTargetClaimed(BlockPos pos) {
         Mob owner = claimedTargets.get(pos);
         return owner != null && owner.isAlive();
+    }
+
+    /**
+     * Same tryClaim/release/isClaimed shape as claimedTargets on purpose, for a consistent
+     * mental model - but a SEPARATE map, so a formation-slot claim is never visible as (or
+     * confused with) a construction-target claim.
+     */
+    public boolean tryClaimFormationSlot(BlockPos pos, Mob claimant) {
+        BlockPos key = pos.immutable();
+        Mob current = formationSlots.get(key);
+        if (current != null && current != claimant && current.isAlive()) {
+            return false;
+        }
+        formationSlots.put(key, claimant);
+        return true;
+    }
+
+    public void releaseFormationSlot(BlockPos pos) {
+        if (pos != null) formationSlots.remove(pos);
+    }
+
+    public boolean isFormationSlotClaimed(BlockPos pos) {
+        Mob owner = formationSlots.get(pos);
+        return owner != null && owner.isAlive();
+    }
+
+    /** AwaitFormationGoal needs this to reach the real Region object (via getRegionIndex()) for terrain-validated formation-slot search. */
+    public TerritoryRegionMap getOwner() {
+        return this.owner;
     }
 
     /**
