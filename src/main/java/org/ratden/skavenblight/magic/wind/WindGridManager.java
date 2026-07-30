@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.saveddata.SavedData;
 import org.ratden.skavenblight.magic.Wind;
+import org.ratden.skavenblight.magic.wind.influence.TaggedBlockInfluence;
 import org.ratden.skavenblight.magic.wind.influence.TimeOfDayInfluence;
 
 import java.util.ArrayList;
@@ -29,6 +30,7 @@ public class WindGridManager extends SavedData {
     private static final List<WindBaselineInfluence> INFLUENCES = new ArrayList<>();
     static {
         INFLUENCES.add(new TimeOfDayInfluence());
+        INFLUENCES.add(new TaggedBlockInfluence());
     }
 
     /** Fraction of the current-to-baseline gap closed per tick. */

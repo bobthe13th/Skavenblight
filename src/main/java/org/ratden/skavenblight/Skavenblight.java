@@ -46,6 +46,9 @@ public class Skavenblight {
         ModBlockEntities.register(modEventBus);
 
         ModSounds.register(modEventBus);
+
+        org.ratden.skavenblight.magic.corruption.ModMobEffects.register(modEventBus);
+
         ModMenus.register(modEventBus);
 
         ModMagic.register(modEventBus);

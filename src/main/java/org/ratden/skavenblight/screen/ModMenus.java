@@ -8,6 +8,8 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
 
+import java.util.function.Supplier;
+
 /**
  * Registers the MenuTypes added by Skavenblight.
  *
@@ -33,6 +35,9 @@ public final class ModMenus {
                             WarpFluxFurnaceMenu::new
                     )
             );
+
+    public static final Supplier<MenuType<ResearchTableMenu>> RESEARCH_TABLE_MENU =
+            MENUS.register("research_table_menu", () -> IMenuTypeExtension.create(ResearchTableMenu::new));
 
     public static void register(IEventBus eventBus) {
         MENUS.register(eventBus);

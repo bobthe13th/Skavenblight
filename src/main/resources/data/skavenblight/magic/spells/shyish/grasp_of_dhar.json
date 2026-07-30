@@ -1,0 +1,9 @@
+{
+  "wind": "shyish",
+  "tier": 0,
+  "casting_number": 25,
+  "casting_time": "half_action",
+  "effect": { "type": "damage", "amount": 6.0 },
+  "description_key": "spell.skavenblight.grasp_of_dhar.description",
+  "dark": true
+}

@@ -84,6 +84,46 @@ public final class Config {
                     Integer.MAX_VALUE
             );
 
+    // --- Research Table Configs ---
+    private static final ModConfigSpec.IntValue RESEARCH_TICKS_BASE = BUILDER.comment("Base number of ticks required to complete spell research at the Research Table.")
+            .defineInRange("researchTicksBase", 200, 20, 72000);
+    private static final ModConfigSpec.IntValue RESEARCH_WIND_THRESHOLD = BUILDER.comment("Base minimum local Wind level required to research a tier-0 spell at the Research Table; each additional tier requires this much more (tier 2 needs 3x this value).")
+            .defineInRange("researchWindThreshold", 200, 0, 10000);
+    private static final ModConfigSpec.IntValue RESEARCH_WIND_BONUS_REFERENCE = BUILDER.comment("Extra local Wind (above the research requirement) needed to add +1.0x to research speed.")
+            .defineInRange("researchWindBonusReference", 300, 1, 100000);
+    private static final ModConfigSpec.DoubleValue RESEARCH_WIND_MAX_BONUS_MULTIPLIER = BUILDER.comment("Cap on the speed bonus from abundant Wind - e.g. 2.0 means research can run up to 3x base speed (1x base + up to 2x bonus).")
+            .defineInRange("researchWindMaxBonusMultiplier", 2.0, 0.0, 50.0);
+
+    // --- Wind Influence Configs ---
+    private static final ModConfigSpec.IntValue WIND_SOURCE_BLOCK_BONUS = BUILDER.comment("Baseline bonus per tagged wind_source block placed in a chunk (see TaggedBlockInfluence).")
+            .defineInRange("windSourceBlockBonus", 15, 0, 1000);
+
+    // --- Corruption Configs ---
+    private static final ModConfigSpec.IntValue CORRUPTION_TICK_INTERVAL_TICKS = BUILDER.comment("How often (in ticks) each player's Tainted effect is refreshed and their Tome-of-Corruption carry drain is checked.")
+            .defineInRange("corruptionTickIntervalTicks", 6000, 20, 72000);
+    private static final ModConfigSpec.IntValue DHAR_CAST_CORRUPTION = BUILDER.comment("Corruption Points granted per attempted Dhar (dark-tagged) spell cast, success or failure.")
+            .defineInRange("dharCastCorruption", 1, 0, 100);
+    private static final ModConfigSpec.IntValue MONOLITH_MAX_WOUNDS = BUILDER.comment("Total Wounds a Chaos Monolith has before it's destroyed (WFRP source: 500).")
+            .defineInRange("monolithMaxWounds", 500, 10, 10000);
+    private static final ModConfigSpec.IntValue MONOLITH_DAMAGE_PER_HIT = BUILDER.comment("Wounds removed per attack against a Chaos Monolith.")
+            .defineInRange("monolithDamagePerHit", 5, 1, 500);
+    private static final ModConfigSpec.IntValue MONOLITH_WOUNDS_PER_DAEMON_SUMMON = BUILDER.comment("Every this many Wounds lost, the Monolith summons a Lesser Daemon at the attacker (WFRP source: every 50 Wounds).")
+            .defineInRange("monolithWoundsPerDaemonSummon", 50, 1, 10000);
+    private static final ModConfigSpec.IntValue MONOLITH_READ_CORRUPTION_CHANCE_PERCENT = BUILDER.comment("Percent chance that reading a Chaos Monolith's runes grants Corruption Points (WFRP source: failing a Hard(-20%) Will Power Test).")
+            .defineInRange("monolithReadCorruptionChancePercent", 60, 0, 100);
+    private static final ModConfigSpec.IntValue MONOLITH_CASTING_RADIUS_BLOCKS = BUILDER.comment("Radius in blocks around a Chaos Monolith where casting gets a bonus but any failure triggers a Catastrophic Chaos Manifestation (WFRP source: 100 feet, approximated at Minecraft scale).")
+            .defineInRange("monolithCastingRadiusBlocks", 20, 1, 200);
+    private static final ModConfigSpec.IntValue TOME_CARRY_CORRUPTION_PER_CHECK = BUILDER.comment("Corruption Points gained per corruptionTickIntervalTicks while a Tome of Corruption is anywhere in the player's inventory.")
+            .defineInRange("tomeCarryCorruptionPerCheck", 1, 0, 100);
+    private static final ModConfigSpec.IntValue CLEANSE_HYSH_REQUIREMENT = BUILDER.comment("Minimum local Hysh Wind level required to use a Cleansing Ward.")
+            .defineInRange("cleanseHyshRequirement", 300, 0, 10000);
+    private static final ModConfigSpec.IntValue CLEANSE_AMOUNT = BUILDER.comment("Corruption Points removed by a single successful Cleansing Ward use.")
+            .defineInRange("cleanseAmount", 15, 1, 1000);
+    private static final ModConfigSpec.IntValue CLEANSE_COOLDOWN_TICKS = BUILDER.comment("Minimum ticks between a player's Cleansing Ward uses (default: one Minecraft day).")
+            .defineInRange("cleanseCooldownTicks", 24000, 0, 1000000);
+    private static final ModConfigSpec.IntValue MONOLITH_READ_COOLDOWN_TICKS = BUILDER.comment("Minimum ticks between successful rune-reads on the same Chaos Monolith, regardless of who reads it (prevents spam-clicking one Monolith to instantly max Corruption).")
+            .defineInRange("monolithReadCooldownTicks", 1200, 0, 1000000);
+
     /*
      * AI territory settings
      */
@@ -303,6 +343,29 @@ public final class Config {
     public static int regionScanMaxCells;
     public static int minimumSettleDelayMs;
 
+    // --- Research Table Public Variables ---
+    public static int researchTicksBase;
+    public static int researchWindThreshold;
+    public static int researchWindBonusReference;
+    public static double researchWindMaxBonusMultiplier;
+
+    // --- Wind Influence Public Variables ---
+    public static int windSourceBlockBonus;
+
+    // --- Corruption Public Variables ---
+    public static int corruptionTickIntervalTicks;
+    public static int dharCastCorruption;
+    public static int monolithMaxWounds;
+    public static int monolithDamagePerHit;
+    public static int monolithWoundsPerDaemonSummon;
+    public static int monolithReadCorruptionChancePercent;
+    public static int monolithCastingRadiusBlocks;
+    public static int tomeCarryCorruptionPerCheck;
+    public static int cleanseHyshRequirement;
+    public static int cleanseAmount;
+    public static int cleanseCooldownTicks;
+    public static int monolithReadCooldownTicks;
+
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
     public static int wlCoilCostPerShot;
@@ -329,6 +392,29 @@ public final class Config {
 
         tier2Capacity = TIER_2_CAPACITY.get();
         tier2Generation = TIER_2_GENERATION.get();
+
+        // Load Research Table Configs
+        researchTicksBase = RESEARCH_TICKS_BASE.get();
+        researchWindThreshold = RESEARCH_WIND_THRESHOLD.get();
+        researchWindBonusReference = RESEARCH_WIND_BONUS_REFERENCE.get();
+        researchWindMaxBonusMultiplier = RESEARCH_WIND_MAX_BONUS_MULTIPLIER.get();
+
+        // Load Wind Influence Configs
+        windSourceBlockBonus = WIND_SOURCE_BLOCK_BONUS.get();
+
+        // Load Corruption Configs
+        corruptionTickIntervalTicks = CORRUPTION_TICK_INTERVAL_TICKS.get();
+        dharCastCorruption = DHAR_CAST_CORRUPTION.get();
+        monolithMaxWounds = MONOLITH_MAX_WOUNDS.get();
+        monolithDamagePerHit = MONOLITH_DAMAGE_PER_HIT.get();
+        monolithWoundsPerDaemonSummon = MONOLITH_WOUNDS_PER_DAEMON_SUMMON.get();
+        monolithReadCorruptionChancePercent = MONOLITH_READ_CORRUPTION_CHANCE_PERCENT.get();
+        monolithCastingRadiusBlocks = MONOLITH_CASTING_RADIUS_BLOCKS.get();
+        tomeCarryCorruptionPerCheck = TOME_CARRY_CORRUPTION_PER_CHECK.get();
+        cleanseHyshRequirement = CLEANSE_HYSH_REQUIREMENT.get();
+        cleanseAmount = CLEANSE_AMOUNT.get();
+        cleanseCooldownTicks = CLEANSE_COOLDOWN_TICKS.get();
+        monolithReadCooldownTicks = MONOLITH_READ_COOLDOWN_TICKS.get();
 
         territoryChunkRadius =
                 TERRITORY_CHUNK_RADIUS.get();

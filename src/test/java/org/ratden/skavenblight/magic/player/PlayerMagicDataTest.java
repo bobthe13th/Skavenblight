@@ -24,7 +24,7 @@ class PlayerMagicDataTest {
         ResourceLocation boon = ResourceLocation.fromNamespaceAndPath("skavenblight", "boon_of_hysh");
         knownSpells.add(boon);
 
-        PlayerMagicData data = new PlayerMagicData(tier, aptitude, knownSpells);
+        PlayerMagicData data = new PlayerMagicData(tier, aptitude, knownSpells, 0, false, 0L);
 
         // Mutating the caller's original collections must not affect the record.
         tier.put(Wind.AZYR, 5);
@@ -62,7 +62,10 @@ class PlayerMagicDataTest {
         PlayerMagicData data = new PlayerMagicData(
                 Map.of(Wind.AQSHY, 1),
                 Map.of(Wind.AQSHY, 35),
-                Set.of(fireball)
+                Set.of(fireball),
+                0,
+                false,
+                0L
         );
 
         var encoded = PlayerMagicData.CODEC.encodeStart(JsonOps.INSTANCE, data).getOrThrow();

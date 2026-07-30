@@ -8,6 +8,8 @@
     "tooltip_info_item.fused_warpstone.description": "§7It pulses gently in your hands...",
   "item.skavenblight.rat_juice": "Rat Juice",
     "tooltip_info_item.rat_juice.description": "§7And where does the juice come from, exactly?",
+  "item.skavenblight.tome_of_corruption": "Tome of Corruption",
+  "item.skavenblight.cleansing_ward": "Cleansing Ward",
 
   "item.skavenblight.warpstone_helmet": "Warpstone Helmet",
   "item.skavenblight.warpstone_chestplate": "Warpstone Chestplate",
@@ -39,6 +41,23 @@
   "block.skavenblight.warp_flux_conduit": "Warp Flux Conduit",
   "block.skavenblight.warp_flux_furnace": "Warp Flux Furnace",
   "block.skavenblight.piston_spike_trap": "Piston Spike Trap",
+  "block.skavenblight.chaos_monolith": "Chaos Monolith",
+  "block.skavenblight.research_table_hysh": "Font of Hysh",
+  "block.skavenblight.research_table_azyr": "Orrery of Azyr",
+  "block.skavenblight.research_table_chamon": "Alembic of Chamon",
+  "block.skavenblight.research_table_ghyran": "Grove of Ghyran",
+  "block.skavenblight.research_table_aqshy": "Forge of Aqshy",
+  "block.skavenblight.research_table_ghur": "Den of Ghur",
+  "block.skavenblight.research_table_ulgu": "Veil of Ulgu",
+  "block.skavenblight.research_table_shyish": "Ossuary of Shyish",
+
+  "gui.skavenblight.research_table.choose_prompt": "Choose a spell to study, yes-yes!",
+  "gui.skavenblight.research_table.begin": "Begin Research",
+  "gui.skavenblight.research_table.studying": "Studying...",
+  "gui.skavenblight.research_table.reason.tier": "Requires a higher rank in this Wind.",
+  "gui.skavenblight.research_table.reason.busy": "The table is already studying something else.",
+  "gui.skavenblight.research_table.reason.wind": "The Wind here is too faint to study this.",
+  "gui.skavenblight.research_table.reason.catalyst": "Needs the right catalyst in the slot.",
 
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
@@ -123,6 +142,10 @@
   "page.skavenblight.nexus_research.warpstone_mutations.title": "Chaotic Mutations",
   "page.skavenblight.nexus_research.warpstone_mutations.text": "Mutations manifest at higher exposure thresholds. Minor mutations might alter speed or grant night vision, while severe corruption permanently shifts attributes (e.g., maximum health or scale) or triggers horrific transformations (such as wild Wolves warping into Rat Wolves!).",
 
+  "entry.skavenblight.nexus_research.tzeentchs_curse.name": "Tzeentch's Curse",
+  "page.skavenblight.nexus_research.tzeentchs_curse.title": "Corruption",
+  "page.skavenblight.nexus_research.tzeentchs_curse.text": "Every soul that touches Dhar leaves a mark. Corruption Points accumulate quietly: reading the runes of a Chaos Monolith risks a surge, and every attempt to cast a Dhar spell taints you a little further, win or lose. A Tome of Corruption must first be read to unlock Dhar spellcasting at all — until then, the dark arts are simply beyond reach.\n\nAs your Corruption rises through its tiers, the Tainted affliction grows worse, from a faint unease to fits of nausea and weakness at the highest tiers. Left unchecked, there is no cure.\n\nThe only known remedy is a Cleansing Ward: a rare, costly working of Hysh that scours away a portion of accumulated Corruption. It demands a strong local flow of the Light, and even then may only be attempted once every so often — Tzeentch does not give up his hold easily.",
+
   "entry.skavenblight.nexus_research.alchemy_brewing.name": "Alchemical Brewing",
   "page.skavenblight.nexus_research.alchemy_lab.title": "The Golden Lab",
   "page.skavenblight.nexus_research.alchemy_lab.text": "Transmutation of matter is the pride of Chamon. By researching higher tiers of Chamon, you can construct alchemical laboratories of Poor, Good, or Best quality. Superior laboratory quality significantly reduces potion volatility and increases the chance of brewing success.",
@@ -177,6 +200,10 @@
   "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
   "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
   "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl.",
+  "spell.skavenblight.grasp_of_dhar.name": "Grasp of Dhar",
+  "spell.skavenblight.grasp_of_dhar.description": "A forbidden pull at the caster's own vitality, siphoned from the black side of Shyish. Requires Dhar to be unlocked.",
+
+  "effect.skavenblight.tainted": "Tainted",
 
   "entry.skavenblight.nexus_research.tzeentch_curse.name": "The Curse of Tzeentch",
   "page.skavenblight.nexus_research.tzeentch_curse.title1": "Aethyrical Resonance",

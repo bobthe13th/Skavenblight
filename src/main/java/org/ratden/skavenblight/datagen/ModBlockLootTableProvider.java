@@ -60,11 +60,13 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
                         .copy("flux", "flux")));
 
         dropSelf(ModBlocks.WARP_FLUX_FURNACE.get());
+        ModBlocks.RESEARCH_TABLES.values().forEach(table -> dropSelf(table.get()));
         dropSelf(ModBlocks.PISTON_SPIKE_TRAP.get());
         dropSelf(ModBlocks.WARP_LIGHTNING_COIL.get());
         this.add(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
 
         dropSelf(ModBlocks.ALCHEMICAL_LABORATORY.get());
+        this.add(ModBlocks.CHAOS_MONOLITH.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
     }
 
     //Basically the createCopperOreDrops() vanilla method

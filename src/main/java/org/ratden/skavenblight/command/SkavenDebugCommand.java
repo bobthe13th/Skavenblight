@@ -20,6 +20,7 @@ public class SkavenDebugCommand {
                         .then(DebugNexusCommands.register())
                         .then(DebugPathingCommands.register())
                         .then(DebugSourceCommands.register())
+                        .then(DebugCorruptionCommands.register())
         );
     }
 }

@@ -9,9 +9,11 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.item.custom.CleansingWardItem;
 import org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
 import org.ratden.skavenblight.item.custom.RatJuiceItem;
 import org.ratden.skavenblight.item.custom.SkavenblightBookItem;
+import org.ratden.skavenblight.item.custom.TomeOfCorruptionItem;
 
 import java.util.List;
 
@@ -160,6 +162,12 @@ public final class ModItems {
                                     .stacksTo(1)
                     )
             );
+
+    public static final DeferredItem<Item> TOME_OF_CORRUPTION = ITEMS.register("tome_of_corruption",
+            () -> new TomeOfCorruptionItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<Item> CLEANSING_WARD = ITEMS.register("cleansing_ward",
+            () -> new CleansingWardItem(new Item.Properties()));
+
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }
