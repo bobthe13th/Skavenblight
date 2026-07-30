@@ -68,6 +68,22 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     }
 
     /**
+     * Coordination-only: this goal's own findTarget() result, but ONLY if a valid target exists
+     * AND it's currently claimed by a different, living mob - i.e. "I have real work to do here,
+     * but someone else already has it." Empty in every other case (no target at all, or an
+     * unclaimed target this goal would just claim normally on its own next canUse() check) -
+     * callers only care about the specific "blocked by someone else" case. Pure read, same as
+     * findTarget()/canUse() - safe to call from outside this goal's own tick cycle (see
+     * AwaitFormationGoal, which calls this on sibling goals it doesn't own).
+     */
+    public Optional<BlockPos> peekClaimedTarget() {
+        if (this.flowField == null) return Optional.empty();
+        return findTarget()
+                .map(Target::pos)
+                .filter(pos -> this.flowField.isTargetClaimed(pos));
+    }
+
+    /**
      * Diagnostic-only: this goal's own progress on its currently claimed target, or a fixed
      * string if it doesn't hold one right now. Exists to answer "the claimant is alive and
      * plausibly close enough - so why hasn't it finished?" - actionTicks/stalledTicks/
