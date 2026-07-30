@@ -72,6 +72,11 @@ public class ModBlockEntities {
                             ModBlocks.WARP_LIGHTNING_COIL.get()).build(null)
             );
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<org.ratden.skavenblight.block.entity.ChaosMonolithBlockEntity>> CHAOS_MONOLITH =
+            BLOCK_ENTITIES.register("chaos_monolith", () ->
+                    BlockEntityType.Builder.of(org.ratden.skavenblight.block.entity.ChaosMonolithBlockEntity::new,
+                            ModBlocks.CHAOS_MONOLITH.get()).build(null));
+
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITIES.register(eventBus);
     }

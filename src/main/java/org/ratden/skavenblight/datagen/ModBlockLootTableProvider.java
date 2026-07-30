@@ -64,6 +64,8 @@ public class ModBlockLootTableProvider extends BlockLootSubProvider {
         dropSelf(ModBlocks.PISTON_SPIKE_TRAP.get());
         dropSelf(ModBlocks.WARP_LIGHTNING_COIL.get());
         this.add(ModBlocks.WARP_LIGHTNING_COIL_DUMMY.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
+
+        this.add(ModBlocks.CHAOS_MONOLITH.get(), net.minecraft.world.level.storage.loot.LootTable.lootTable());
     }
 
     //Basically the createCopperOreDrops() vanilla method

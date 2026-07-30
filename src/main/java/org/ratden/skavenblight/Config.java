@@ -93,6 +93,14 @@ public class Config {
             .defineInRange("corruptionTickIntervalTicks", 6000, 20, 72000);
     private static final ModConfigSpec.IntValue DHAR_CAST_CORRUPTION = BUILDER.comment("Corruption Points granted per attempted Dhar (dark-tagged) spell cast, success or failure.")
             .defineInRange("dharCastCorruption", 1, 0, 100);
+    private static final ModConfigSpec.IntValue MONOLITH_MAX_WOUNDS = BUILDER.comment("Total Wounds a Chaos Monolith has before it's destroyed (WFRP source: 500).")
+            .defineInRange("monolithMaxWounds", 500, 10, 10000);
+    private static final ModConfigSpec.IntValue MONOLITH_DAMAGE_PER_HIT = BUILDER.comment("Wounds removed per attack against a Chaos Monolith.")
+            .defineInRange("monolithDamagePerHit", 5, 1, 500);
+    private static final ModConfigSpec.IntValue MONOLITH_WOUNDS_PER_DAEMON_SUMMON = BUILDER.comment("Every this many Wounds lost, the Monolith summons a Lesser Daemon at the attacker (WFRP source: every 50 Wounds).")
+            .defineInRange("monolithWoundsPerDaemonSummon", 50, 1, 10000);
+    private static final ModConfigSpec.IntValue MONOLITH_READ_CORRUPTION_CHANCE_PERCENT = BUILDER.comment("Percent chance that reading a Chaos Monolith's runes grants Corruption Points (WFRP source: failing a Hard(-20%) Will Power Test).")
+            .defineInRange("monolithReadCorruptionChancePercent", 60, 0, 100);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -134,6 +142,10 @@ public class Config {
     // --- Corruption Public Variables ---
     public static int corruptionTickIntervalTicks;
     public static int dharCastCorruption;
+    public static int monolithMaxWounds;
+    public static int monolithDamagePerHit;
+    public static int monolithWoundsPerDaemonSummon;
+    public static int monolithReadCorruptionChancePercent;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -175,6 +187,10 @@ public class Config {
         // Load Corruption Configs
         corruptionTickIntervalTicks = CORRUPTION_TICK_INTERVAL_TICKS.get();
         dharCastCorruption = DHAR_CAST_CORRUPTION.get();
+        monolithMaxWounds = MONOLITH_MAX_WOUNDS.get();
+        monolithDamagePerHit = MONOLITH_DAMAGE_PER_HIT.get();
+        monolithWoundsPerDaemonSummon = MONOLITH_WOUNDS_PER_DAEMON_SUMMON.get();
+        monolithReadCorruptionChancePercent = MONOLITH_READ_CORRUPTION_CHANCE_PERCENT.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();

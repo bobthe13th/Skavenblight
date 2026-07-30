@@ -46,6 +46,8 @@ public class ModCreativeModeTabs {
 
                         ModBlocks.RESEARCH_TABLES.values().forEach(output::accept);
 
+                        output.accept(ModBlocks.CHAOS_MONOLITH);
+
                         output.accept(ModItems.WARPSTONE_HELMET);
                         output.accept(ModItems.WARPSTONE_CHESTPLATE);
                         output.accept(ModItems.WARPSTONE_LEGGINGS);

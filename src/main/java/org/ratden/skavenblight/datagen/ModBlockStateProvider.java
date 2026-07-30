@@ -93,6 +93,8 @@ public class ModBlockStateProvider extends BlockStateProvider {
 
         // Generate the blockstate allowing it to face all 6 directions
         directionalBlock(ModBlocks.PISTON_SPIKE_TRAP.get(), trapModel);
+
+        simpleBlockWithItem(ModBlocks.CHAOS_MONOLITH.get(), cubeAll(ModBlocks.CHAOS_MONOLITH.get()));
     }
 
     public void makeConduit(DeferredBlock<?> block, String baseName) {

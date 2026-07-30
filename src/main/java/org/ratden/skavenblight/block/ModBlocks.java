@@ -160,6 +160,12 @@ public class ModBlocks {
                     .noOcclusion() // Essential for invisible blocks
             ));
 
+    public static final DeferredBlock<Block> CHAOS_MONOLITH = registerBlock("chaos_monolith",
+            () -> new org.ratden.skavenblight.block.custom.ChaosMonolithBlock(BlockBehaviour.Properties.of()
+                    .strength(50.0f, 1200.0f)
+                    .sound(SoundType.NETHER_GOLD_ORE)
+                    .noOcclusion()));
+
 
 
     // A specialized helper function just for your expandable storage block tiers
