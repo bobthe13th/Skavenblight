@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.StairBlock;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import org.ratden.skavenblight.ai.pathing.*;
@@ -208,6 +209,107 @@ public class PathingGoalRecalculationGameTests {
         helper.assertBlockState(relativeMobPos, s -> !s.is(Blocks.COBBLESTONE_STAIRS),
                 () -> "stair should NOT have been placed once its support was removed mid-action - "
                         + "a placement here would float with nothing beneath it");
+
+        helper.succeed();
+    }
+
+    /**
+     * Regression coverage for the narrowing correction described in
+     * docs/superpowers/plans/2026-07-29-siege-project-floating-stair-fix.md's "Correction"
+     * section: the original support guard required solid ground below EVERY BUILD_STAIR target,
+     * which wrongly blocked a macro SiegeProject's legitimate next-unbuilt chain step (step N's
+     * support is step N-1, built moments earlier - it never has support at the instant it's
+     * selected). That over-broad guard invalidated every such step on tick 1 (before 15 ticks of
+     * animation could complete), producing a silent start/stop loop with no log output at all -
+     * exactly what a real user reported as clanrats "still stuck" after the first fix shipped.
+     *
+     * <p>This test drives {@link BuildFlowFieldGoal} through FOUR consecutive diagonal
+     * BUILD_STAIR steps of a hand-built macro chain (mirroring the real bug's 15-step staircase,
+     * just shorter for test speed), where every single step's support (target.below()) is air
+     * throughout - never solid, matching the real diagonal-climb geometry where a step's target
+     * cell and the previous step's own position are different cells entirely. If the guard were
+     * still over-broad, {@code canUse()} would return true (a target IS proposed) but the build
+     * would never actually complete within the per-step tick budget - proving the WHOLE macro
+     * chain can progress end-to-end, not just that one isolated placement isn't wrongly blocked.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
+    public static void testBuildFlowFieldGoalCompletesMultiStepMacroChainWithNoPriorSupport(GameTestHelper helper) {
+        // helper-Y=2 is the walkable layer above the template's solid floor (helper-Y=1) - see
+        // this file's class javadoc / PathingRegionGameTests' for the +1 helper-Y convention.
+        BlockPos relativeStart = new BlockPos(4, 2, 4);
+
+        // Four diagonal steps climbing north-east, one Y per step - the same shape as the real
+        // bug's staircase (each step offset (+1 X, +1 Y, same Z) from the last).
+        BlockPos[] relativeChain = new BlockPos[5];
+        relativeChain[0] = relativeStart;
+        for (int i = 1; i <= 4; i++) {
+            relativeChain[i] = relativeStart.offset(i, i, 0);
+        }
+
+        // Explicitly clear every step's own cell, its support cell, and 2 blocks of headroom -
+        // every one of these must be open air (never solid) for the whole test, proving the
+        // chain builds through a genuine void with no scaffolding ever appearing beneath any step.
+        for (int i = 1; i <= 4; i++) {
+            BlockPos step = relativeChain[i];
+            helper.setBlock(step, Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.below(), Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.above(), Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.above(2), Blocks.AIR.defaultBlockState());
+        }
+
+        BlockPos startPos = helper.absolutePos(relativeStart);
+
+        RecordingRegionMap owner = new RecordingRegionMap();
+        FlowFieldState state = new FlowFieldState(startPos, Set.of(new ChunkPos(startPos)));
+
+        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
+        for (int i = 0; i < 4; i++) {
+            BlockPos from = helper.absolutePos(relativeChain[i]);
+            BlockPos to = helper.absolutePos(relativeChain[i + 1]);
+            instructions.put(from, new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
+        }
+        state.updateInstructions(instructions);
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mob.setPos(startPos.getX() + 0.5, startPos.getY(), startPos.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(mob);
+
+        for (int i = 0; i < 4; i++) {
+            BlockPos fromPos = helper.absolutePos(relativeChain[i]);
+            BlockPos toPos = helper.absolutePos(relativeChain[i + 1]);
+            mob.setPos(fromPos.getX() + 0.5, fromPos.getY(), fromPos.getZ() + 0.5);
+
+            check(!helper.getLevel().getBlockState(toPos.below()).blocksMotion(),
+                    "step " + i + "'s support at " + toPos.below() + " must be air BEFORE building - "
+                            + "this is the whole point of the test (no support ever appears)");
+
+            // A fresh goal instance per step: getPostActionCooldownTicks() (10 ticks) is set
+            // against the world's real game time after a successful build, but this test drives
+            // everything synchronously within one GameTest invocation with no real ticks elapsing
+            // between steps - reusing one goal instance would have its own just-set cooldown
+            // block canUse() on the very next step, an artifact of the test harness having no
+            // elapsed time, not a real gate on whether the step itself is legitimate.
+            BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
+            goal.setFlowField(flowField);
+
+            check(goal.canUse(), "step " + i + ": goal should propose BUILD_STAIR -> " + toPos.toShortString()
+                    + " even though its support is air - a legitimate unbuilt chain step must not be rejected");
+
+            goal.start();
+            for (int t = 0; t < 15; t++) goal.tick();
+
+            int stepIndex = i;
+            helper.assertBlockState(relativeChain[stepIndex + 1], s -> s.is(Blocks.COBBLESTONE_STAIRS),
+                    () -> "step " + stepIndex + " should have been built at " + relativeChain[stepIndex + 1]
+                            + " despite having no support below it - the narrowed guard must not block a "
+                            + "legitimately-unbuilt macro chain step");
+        }
 
         helper.succeed();
     }
