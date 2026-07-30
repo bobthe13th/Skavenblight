@@ -709,72 +709,55 @@ public class TerritoryRegionMap {
      * into {@code freshRegion} - see Task 9 Step 0c's call site for why the plain rescan that
      * produced {@code freshRegion} can never include them on its own.
      *
-     * <p><b>PARKING NOTE (Task 9, corrected - NOT simply "unreachable"):</b> this method's own
-     * call site (the non-topology-changed branch above) is unreachable for a region with an
-     * active connector for as long as the connector's gap remains genuinely open - {@code
-     * addCell}'s unconditional {@code expandBounds} means a connector's endpoint region bounding
-     * boxes always grow to include each OTHER's landing chunk (confirmed via {@code
-     * SiegeLineTracer.trace}: a completed trace's {@code orderedSteps} always ends with the
-     * landing position itself, which {@code registerConnector} then {@code addCell}s into BOTH
-     * endpoints), so a dirty rescan of either endpoint re-sweeps the other's chunk too and
-     * (while the gap is open) always rediscovers it as a separate component ({@code
-     * rescanned.size() &gt;= 2}), taking the topology-changed branch instead.
+     * <p><b>HISTORICAL NOTE (Task 9, corrected - NOT simply "unreachable"; superseded by the
+     * Task 2 merge-detection fix below):</b> this method's own call site (the non-topology-changed
+     * fast-path branch above) used to be unreachable for a region with an active connector for as
+     * long as the connector's gap remained genuinely open - {@code addCell}'s unconditional {@code
+     * expandBounds} means a connector's endpoint region bounding boxes always grow to include each
+     * OTHER's landing chunk (confirmed via {@code SiegeLineTracer.trace}: a completed trace's
+     * {@code orderedSteps} always ends with the landing position itself, which {@code
+     * registerConnector} then {@code addCell}s into BOTH endpoints), so a dirty rescan of either
+     * endpoint re-swept the other's chunk too and (while the gap was open) always rediscovered it
+     * as a separate component ({@code rescanned.size() &gt;= 2}), taking the topology-changed
+     * branch instead.
      *
-     * <p><b>It IS reachable, and confirmed empirically reached, at the exact moment the gap fully
-     * closes</b> - see {@code recomputeDirtyRegions}'s {@code rescanned.size() != 1} check (its
-     * own parking note documents why a completing merge satisfies "found exactly 1 piece" and
-     * reads as no-change) - and this exposes a real, DISTINCT, more serious bug than merely
-     * reaching previously-dead code: when the closing dirty batch contains BOTH endpoint region
-     * ids (confirmed to happen - the closing placement's near-side neighbor resolves to the
-     * already-absorbed near region, its far-side neighbor to the far region's own native cell),
-     * BOTH ids independently take this fast path in the SAME batch (nothing here mirrors the
-     * topology-changed branch's early {@code return} after the first hit), each re-flooding the
-     * now-IDENTICAL fully-merged cell set and calling {@code reclaimConnectorCells} against the
-     * STALE {@code regionGraph} (never rebuilt, since neither id triggered a full rebuild) -
-     * producing two {@code Region} objects in {@code updatedRegions} with fully overlapping cell
-     * sets, while {@code regionGraph}/{@code routeTree} keep listing the now-physically-stale
-     * connector between them. {@code RegionIndex}'s last-write-wins per-cell stamping then makes
-     * whichever region was processed last in the list the only one any position resolves to,
-     * silently orphaning the other (still present in {@code getRegionIndex().getRegions()}, zero
-     * resolvable cells) - with no {@code generation} bump to signal anything happened. Confirmed
-     * reproducibly (6/6 runs) via direct inspection in
-     * {@code PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: two
-     * regions with byte-identical {@code min}/{@code max}/{@code cellCount}, a connector still
-     * listed between them, and two probes on opposite original sides of the trench both resolving
-     * to the same winning region id. See docs/pathing/region-pathing-hardening-findings.md's
-     * Finding B for the full
-     * empirical evidence and trace. THIS IS AN UNFIXED, DISTINCT BUG, not merely a documentation
-     * correction - it was not fixed in this pass because a correct fix likely requires either
-     * mirroring the topology-changed branch's early-return/single-winner semantics onto the fast
-     * path, or detecting "multiple ids in one batch resolved to the identical merged content" and
-     * collapsing them into one before publishing {@code updatedRegions} - both real design
-     * decisions needing their own scoped follow-up, not a fix attempted opportunistically here.
+     * <p>At the exact moment the gap fully closed, this method used to be reached in a way that
+     * exposed a real, DISTINCT, more serious bug than merely reaching previously-dead code: when
+     * the closing dirty batch contained BOTH endpoint region ids (confirmed to happen - the closing
+     * placement's near-side neighbor resolves to the already-absorbed near region, its far-side
+     * neighbor to the far region's own native cell), BOTH ids would independently take the fast
+     * path in the SAME batch (nothing there mirrors the topology-changed branch's early {@code
+     * return} after the first hit), each re-flooding the now-IDENTICAL fully-merged cell set and
+     * calling {@code reclaimConnectorCells} against the STALE {@code regionGraph} (never rebuilt,
+     * since neither id triggered a full rebuild) - producing two {@code Region} objects in {@code
+     * updatedRegions} with fully overlapping cell sets, while {@code regionGraph}/{@code
+     * routeTree} kept listing the now-physically-stale connector between them. {@code
+     * RegionIndex}'s last-write-wins per-cell stamping then made whichever region was processed
+     * last in the list the only one any position resolved to, silently orphaning the other (still
+     * present in {@code getRegionIndex().getRegions()}, zero resolvable cells) - with no {@code
+     * generation} bump to signal anything happened. Confirmed reproducibly (6/6 runs) via direct
+     * inspection in {@code
+     * PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: two regions
+     * with byte-identical {@code min}/{@code max}/{@code cellCount}, a connector still listed
+     * between them, and two probes on opposite original sides of the trench both resolving to the
+     * same winning region id. See docs/pathing/region-pathing-hardening-findings.md's Finding B
+     * for the full empirical evidence and trace of how this manifested before the fix below.
      *
-     * <p><b>Production reachability is scenario-dependent, not uniform</b> - the GameTest above
-     * reaches this bug via a FLOOR-support-type merge (filling a trench's floor one column at a
-     * time), but only by deliberately reporting {@code onBlockChanged} against the newly-walkable
-     * cell one Y above the placed floor block, NOT the floor block's own position - a documented
-     * deviation from what production actually does (confirmed by reading {@code
-     * SiegeBlockEventHandler.handleBlockChange}: it passes the literal changed-block position
-     * straight into {@code onBlockChanged}, unmodified). {@code tick()}'s {@code neighborsAndSelf}
-     * DOES check {@code above()}/{@code below()} (all 6 face-adjacent neighbors plus the position
-     * itself, not just same-Y ones) - the gap is a stale-index/timing one, not a directional blind
-     * spot: every one of those 7 candidates is resolved against a {@code regionIndex} snapshot from
-     * BEFORE the change, and for a floor placement, all 7 were unwalkable, unindexed terrain prior
-     * to it (the floor block itself, and the newly-walkable cell {@code above()} lands on, which
-     * only just became walkable because of this same change) - so a production-faithful report of
-     * a floor block's own position never resolves to any dirty region for a floor-support change in
-     * the first place - {@code recomputeDirtyRegions} is never reached for that case, and neither
-     * is this bug. For a same-level WALL-break-type merge, nothing about that gap applies (the
-     * same-Y flanking cells on either side of the wall were ALREADY indexed region members before
-     * the break, so production's real neighbor check succeeds immediately, same as this test's own
-     * workaround), so the mechanism traced above is confirmed-plausible reachable there via
-     * production's real event path - but this has not been separately tested. In short: confirmed
-     * reproducible in GameTest for a floor-support merge (via a non-production reporting
-     * convention), confirmed-plausible for a production wall-break merge, NOT yet confirmed
-     * reachable via production's actual event path for a floor-support merge specifically. See
-     * docs/pathing/region-pathing-hardening-findings.md's Finding B for the full reconciliation
-     * against the separately-documented floor-support dirty-detection gap.
+     * <p><b>FIXED:</b> the exact scenario traced above - a fast-path rescan silently absorbing a
+     * foreign region's cells and being misread as "no topology change" - is now detected and
+     * routed to the full-rebuild path BEFORE either id's fast-path branch (and therefore this
+     * method) would ever run, by {@code recomputeDirtyRegions}'s {@code absorbedForeignRegion}
+     * check a few hundred lines above this method. This method itself was not changed by that fix
+     * - the fix lives entirely upstream, in what counts as a topology change in the first place.
+     * See docs/superpowers/specs/2026-07-30-region-merge-detection-design.md for the design.
+     *
+     * <p>This bug's production reachability (a floor-support-type merge, reached in GameTest only
+     * via a deliberate non-production {@code onBlockChanged} reporting convention, vs. a
+     * same-level wall-break-type merge, confirmed-plausible reachable via production's real event
+     * path) was analyzed in detail in docs/pathing/region-pathing-hardening-findings.md's Finding
+     * B before this fix; that analysis is now moot for either case, since {@code
+     * absorbedForeignRegion} intercepts the merge upstream regardless of which event-reporting
+     * path found it.
      */
     private static void reclaimConnectorCells(Region freshRegion, RegionGraph graph, int regionId) {
         if (graph == null) return;

@@ -920,10 +920,12 @@ public class PathingRegionGameTests {
      * geometry. **Narrowed per a later finding (Task 9 Steps 1-5 - see
      * docs/pathing/region-pathing-hardening-findings.md's Finding B and
      * {@code reclaimConnectorCells}'s own updated javadoc): the fast path IS
-     * reachable, and reaches a real, distinct, unfixed bug (duplicate overlapping Region objects,
+     * reachable, and used to reach a real, distinct bug (duplicate overlapping Region objects,
      * a stale connector graph, one region silently orphaned) at the exact moment a connector's
      * gap fully closes, if that closing dirty batch contains both endpoint region ids - which
-     * {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount} exercises and confirms.**
+     * {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount} exercised and confirmed
+     * before Task 2's {@code absorbedForeignRegion} check fixed it by routing that exact moment
+     * to the full-rebuild path instead.**
      * THIS test verifies something adjacent but distinct, discovered while writing it.
      *
      * <p><b>This geometry cannot reach the fast path at all - it always full-rebuilds instead,
@@ -950,10 +952,12 @@ public class PathingRegionGameTests {
      * assertion below pins this specific run's outcome down as an executable fact. **Narrowed per
      * a later finding (Task 9 Steps 1-5): the fast path is NOT unreachable in general - once a
      * connector's gap fully closes (not exercised by this test's own geometry), the completing
-     * dirty rescan finds exactly 1 piece and takes the fast path instead, which - when the closing
-     * batch contains both endpoint ids, as {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount}
-     * confirms it deterministically does for that test's geometry - exposes a real, distinct,
-     * unfixed bug. See docs/pathing/region-pathing-hardening-findings.md's Finding B and
+     * dirty rescan used to find exactly 1 piece and take the fast path instead, which - when the
+     * closing batch contains both endpoint ids, as {@code testRepeatedConnectorCompletionsDontExplodeRebuildCount}
+     * confirmed it deterministically did for that test's geometry - exposed a real, distinct bug.
+     * Since fixed by Task 2's {@code absorbedForeignRegion} check, which now routes that exact
+     * completing rescan into the topology-changed/full-rebuild branch instead of the fast path.
+     * See docs/pathing/region-pathing-hardening-findings.md's Finding B and
      * {@code reclaimConnectorCells}'s own updated javadoc for the full trace and evidence.</b>
      *
      * <p>What this test DOES prove, which is still new/genuine coverage: extends
@@ -1341,15 +1345,6 @@ public class PathingRegionGameTests {
                             + "region count={}, blockChangeRebuildCount={}",
                     nearProbeId, farProbeId, finalRegions.size(), regionMap.getBlockChangeRebuildCount());
 
-            // NOTE: this bound partly holds BECAUSE of the parked duplicate-region bug (Finding B,
-            // docs/pathing/region-pathing-hardening-findings.md) - the merge-completing placement
-            // takes the fast path (blockChangeRebuildCount above), not the topology-changed branch,
-            // so it does NOT increment topologyRebuildCount. If that bug is ever fixed in a way
-            // that makes the merge-completing placement correctly register as a topology change
-            // (e.g. Option C, fixing rescanned.size() != 1's own merge-blindness), this count would
-            // go up by 1 and this assertion's margin would shrink accordingly - a future fix
-            // changing this number is expected, not a regression, and should not be "fixed" by
-            // just raising the threshold without re-reading why it moved.
             // Post-fix: the merge-completing placement must now correctly register as a
             // topology change (the whole point of this fix), so this bound is expected to be
             // one higher than the pre-fix threshold, not the same number - see
@@ -1385,6 +1380,40 @@ public class PathingRegionGameTests {
      * increments, topologyRebuildCount does NOT), exactly as before this fix. Mirrors
      * testConnectorCellsSurviveADirtyRegionRescan's geometry but WITHOUT a connector - a single
      * region, one unrelated interior block change.
+     *
+     * <p>The "block change" has to be a REAL one, not just a call to {@code onBlockChanged} against
+     * unchanged terrain - otherwise {@code rescanned.get(0).cellsNotIn(oldRegion)} is always empty
+     * and {@code absorbedForeignRegion}'s {@code anyMatch} check never runs its body at all, proving
+     * nothing about the over-trigger risk this test exists to guard against.
+     *
+     * <p><b>A single-cell "block this Y=2 interior cell solid, then reopen it" attempt does NOT
+     * work here</b> - discovered empirically, not just reasoned about: {@code RegionScanner}'s
+     * flood fill offers a MINE step into any solid same-Y neighbor up to
+     * {@code MAX_CONSECUTIVE_MINE_DEPTH} (5) deep, and {@code floodFill} calls {@code
+     * region.addCell(current)} for a MINE-reached cell exactly like a WALK-reached one - so a lone
+     * blocked interior cell surrounded by open floor is swept into the region at depth 1 regardless
+     * of being "blocked," and the delta stays empty. Confirmed by running this exact version and
+     * watching the assertion below ("expected the deliberately-blocked cell to start out of the
+     * region") fail.
+     *
+     * <p><b>What actually works, mirroring {@link #testRepeatedConnectorCompletionsDontExplodeRebuildCount}'s
+     * own floor-support technique:</b> {@code unrelatedFloorPos} (helper y=2, already open and
+     * already a member of the single region, like every other y=2 cell on this platform) is
+     * converted to solid stone - genuinely removing it from the region on the next rescan, not
+     * merely re-swept back in (whether it is or isn't doesn't matter for this test). That same
+     * change gives {@code unrelatedPos} (helper y=3, directly above it) real solid support for the
+     * first time, making it {@code isWalkableTerrain} for the first time - reachable from an
+     * ADJACENT y=2 cell via one ordinary WALK step (dy=+1), so the rescan picks it up as a genuine
+     * new member, not via MINE. Reporting {@code onBlockChanged} against {@code unrelatedPos} (not
+     * {@code unrelatedFloorPos}) still finds region 0 dirty: {@code neighborsAndSelf} checks
+     * {@code unrelatedPos.below()}, which is exactly {@code unrelatedFloorPos} - already indexed as
+     * region 0 in the (as-yet-unrefreshed) {@code regionIndex} at the moment {@code tick()}
+     * processes this change, since the actual block placement always happens before the index
+     * itself is rebuilt. {@code unrelatedPos} itself was never indexed before this change (helper
+     * y=3 has no support anywhere else on this platform either), so the newly-gained cell reads as
+     * "genuinely new, previously unowned" to {@code absorbedForeignRegion} - never as absorbing a
+     * foreign region's territory - while still giving the delta computation a real, non-empty cell
+     * to examine.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 8000, skyAccess = true)
     public static void testOrdinaryChangeWithNoConnectorStillTakesFastPath(GameTestHelper helper) {
@@ -1408,7 +1437,16 @@ public class PathingRegionGameTests {
         helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
         BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
 
-        BlockPos unrelatedPos = helper.absolutePos(new BlockPos(baseX + 10, 2, baseZ + 10));
+        // unrelatedFloorPos (helper y=2) starts open, like every other y=2 cell on this platform -
+        // already a member of the single region after the initial rebuild. unrelatedPos (helper
+        // y=3, directly above it) starts unwalkable (no support) and therefore unindexed, like
+        // every other y=3 cell on this platform - see this method's own javadoc for why converting
+        // unrelatedFloorPos to solid stone (the actual "block change" below) is what gives
+        // unrelatedPos real support for the first time, and why reporting onBlockChanged against
+        // unrelatedPos (not unrelatedFloorPos) still finds region 0 dirty.
+        BlockPos relativeUnrelatedFloorPos = new BlockPos(baseX + 10, 2, baseZ + 10);
+        BlockPos relativeUnrelatedPos = new BlockPos(baseX + 10, 3, baseZ + 10);
+        BlockPos unrelatedPos = helper.absolutePos(relativeUnrelatedPos);
 
         TerritoryRegionMap regionMap = new TerritoryRegionMap();
         regionMap.rebuild(helper.getLevel(), territory, nexusPos);
@@ -1420,6 +1458,18 @@ public class PathingRegionGameTests {
             check(!regionMap.isCalculating(), "region map still calculating");
 
             if (!changeReported[0]) {
+                // Confirms the "before" half of the empirical proof: unrelatedPos really did
+                // start out of the region (no support below it yet), so its presence afterward
+                // (checked below, once the fast path has run) is a genuine gain, not something
+                // that was already there.
+                check(regionMap.getRegionIndex().regionIdAt(unrelatedPos) == null,
+                        "expected unrelatedPos to start out of the region (no support below it yet)");
+
+                // The actual terrain change: give unrelatedPos real solid support for the first
+                // time, exactly like testRepeatedConnectorCompletionsDontExplodeRebuildCount's own
+                // floor-support columns. This is what gives the subsequent rescan a real, non-empty
+                // cellsNotIn(oldRegion) delta to check.
+                helper.setBlock(relativeUnrelatedFloorPos, Blocks.STONE.defaultBlockState());
                 regionMap.onBlockChanged(unrelatedPos);
                 changeReported[0] = true;
                 check(false, "waiting for the dirty recompute to run");
@@ -1431,6 +1481,16 @@ public class PathingRegionGameTests {
             check(regionMap.getTopologyRebuildCount() == 0,
                     "an unrelated single-region change with no connector should never trigger a full "
                             + "topology rebuild - topologyRebuildCount=" + regionMap.getTopologyRebuildCount());
+
+            // Directly proves the delta this test depends on was actually non-empty and actually
+            // got processed by the fast path - not merely that the assertions above happen to hold
+            // vacuously. Before the change, unrelatedPos had no support and resolved to null (see
+            // the "before" check above); if the newly-supported cell had never been picked up
+            // (e.g. the fast-path rescan silently dropped it, or never ran at all), this would
+            // still resolve to null.
+            check(regionMap.getRegionIndex().regionIdAt(unrelatedPos) != null,
+                    "expected the newly-supported cell to now resolve to a region - the fast-path "
+                            + "rescan must have picked up a genuinely non-empty delta, not a no-op");
 
             regionMap.cleanup(helper.getLevel());
         });

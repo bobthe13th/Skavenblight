@@ -177,11 +177,17 @@ else, right now" needs to mean.
 - **No new "which region ID wins" logic.** The full rebuild already renumbers everything from
   scratch; there is nothing to decide.
 - **Finding A's performance concern (the fast path being unreachable at all for connector-bearing
-  regions) is being fixed as a side effect of correctly reaching the fast path more often**, but
-  the deeper architectural change Finding A itself proposes (separating a region's "natural"
-  flood-fill bounds from its full addCell-inclusive bounds) is not part of this fix. If the fast
-  path is still taken less often than expected after this ships, that's the next thing to look at,
-  not a sign this fix is wrong.
+  regions) is untouched by this fix.** The fix (`topologyChanged = rescanned.size() != 1 ||
+  absorbedForeignRegion`) is monotone - `absorbedForeignRegion` can only ADD topology-changed
+  outcomes (routing MORE dirty rescans into the expensive full-rebuild path), never remove any -
+  and nothing about `RegionScanner.scan`'s fast-path reachability changes. It cannot, as a side
+  effect, make the fast path reachable more often; if anything it is reachable at exactly one
+  fewer moment (the merge-completing rescan, now caught upstream instead of reaching the fast
+  path). The evidence is in the branch itself: the topology-rebuild-count test bound in
+  `testRepeatedConnectorCompletionsDontExplodeRebuildCount` moved UP, from `&lt;= 3` to `&lt;= 4`,
+  not down - one more full rebuild is now expected, not fewer. The deeper architectural change
+  Finding A itself proposes (separating a region's "natural" flood-fill bounds from its full
+  addCell-inclusive bounds) is not part of this fix and remains its own, separate follow-up.
 - **Dynamic staircase-width scaling** (tying lane count to queue depth) — still its own, separate,
   not-yet-started follow-up plan.
 

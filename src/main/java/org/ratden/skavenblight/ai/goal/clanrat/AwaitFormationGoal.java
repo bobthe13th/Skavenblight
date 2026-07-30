@@ -113,8 +113,10 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
     /**
      * Searches outward from the rat's OWN current position (not the contested target) in
      * expanding square rings, validated against the REAL Region membership this rat's flowField
-     * belongs to - never blind geometry, so a slot is never inside a wall or over a drop (region
-     * membership already implies real, walkable terrain - see RegionScanner). Anchoring on the
+     * belongs to - never blind geometry. Region membership alone is NOT sufficient to guarantee a
+     * slot is never inside a wall or over a drop, though: a provisionally-claimed-but-unbuilt
+     * connector cell reports {@code region.contains()}-true too (see the live-ground check a few
+     * lines below in this same method, and its own inline comment, for why). Anchoring on the
      * rat's own position rather than the target matters: a macro chain's contested target is
      * often one Y level up from any real ground (the next unbuilt climbing step), so it may not
      * be region-member territory at all yet - the rat's own standing position always is, since
