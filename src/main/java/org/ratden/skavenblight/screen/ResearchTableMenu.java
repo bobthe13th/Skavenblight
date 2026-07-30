@@ -16,6 +16,7 @@ import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.SlotItemHandler;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.block.ModBlocks;
+import org.ratden.skavenblight.block.entity.ResearchFormulas;
 import org.ratden.skavenblight.block.entity.ResearchTableBlockEntity;
 import org.ratden.skavenblight.magic.Wind;
 
@@ -54,7 +55,7 @@ public class ResearchTableMenu extends AbstractContainerMenu {
     }
 
     public int getScaledProgress(int pixelWidth) {
-        int max = Config.researchTicksBase;
+        int max = Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE;
         int progress = data.get(0);
         return max != 0 ? Math.min(pixelWidth, progress * pixelWidth / max) : 0;
     }

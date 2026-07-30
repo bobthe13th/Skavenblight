@@ -22,7 +22,7 @@ public class TaggedBlockWindHandler {
 
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel) || event.isCanceled()) {
             return;
         }
         adjustTaggedCounts(serverLevel, event.getPos(), event.getPlacedBlock(), 1);
@@ -30,7 +30,7 @@ public class TaggedBlockWindHandler {
 
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel) || event.isCanceled()) {
             return;
         }
         adjustTaggedCounts(serverLevel, event.getPos(), event.getState(), -1);

@@ -212,3 +212,11 @@ what changed from the v1 design above:
   tower": decorating the chunk with `#skavenblight:wind_source/<wind>`-tagged blocks
   (`TaggedBlockInfluence`) raises the local Wind, which both unlocks higher-tier research and makes
   all research in that tower faster.
+
+**Save compatibility note:** the old single-generic `skavenblight:research_table` block id is gone
+entirely as of this addendum — there is no NeoForge datafixer remapping it to one of the 8 new
+per-Wind ids. This is an acceptable, deliberate gap: v1 was never released to any real save before
+this v2 split superseded it (both landed in the same development branch before either shipped). A
+world that somehow already had one placed would silently lose it on load (logged, not a crash) with
+no automatic migration. If this block ever ships to real players before a v2-style split happens
+again, a datafixer would be needed at that point — don't repeat this shortcut once real saves exist.

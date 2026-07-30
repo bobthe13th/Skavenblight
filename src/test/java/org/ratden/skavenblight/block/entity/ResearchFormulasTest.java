@@ -39,4 +39,12 @@ class ResearchFormulasTest {
         // huge excess wind, but the bonus portion is capped at +2.0 -> 3.0x total, never more
         assertEquals(3.0f, ResearchFormulas.speedMultiplier(100000f, 200f, 300, 2.0), 0.001f);
     }
+
+    @Test
+    void progressIncrementScalesContinuously() {
+        assertEquals(100, ResearchFormulas.progressIncrement(1.0f));
+        assertEquals(113, ResearchFormulas.progressIncrement(1.13f));
+        assertEquals(150, ResearchFormulas.progressIncrement(1.5f));
+        assertEquals(300, ResearchFormulas.progressIncrement(3.0f));
+    }
 }

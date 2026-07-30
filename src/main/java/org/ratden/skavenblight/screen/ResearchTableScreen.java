@@ -12,6 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.block.entity.ResearchFormulas;
 import org.ratden.skavenblight.block.entity.ResearchTableBlockEntity;
 import org.ratden.skavenblight.magic.Wind;
 import org.ratden.skavenblight.magic.player.ModAttachments;
@@ -199,7 +200,7 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
 
         // Wind meter
         int current = Math.max(0, preview.windLevel);
-        int required = Math.max(1, Config.researchWindThreshold);
+        int required = Math.max(1, Math.round(ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold)));
         int meterFill = Math.min(METER_W - 2, current * (METER_W - 2) / required);
         int meterColor = preview.windSufficient ? (0xFF000000 | wind.getColor()) : 0xFFAA3333;
         if (meterFill > 0) {
@@ -221,7 +222,7 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         boolean known = data.knownSpells().contains(selected.id);
         boolean tierLocked = spell.tier() > data.getTier(spell.wind());
         int windLevel = this.menu.getWindLevel(spell.wind());
-        boolean windSufficient = windLevel >= Config.researchWindThreshold;
+        boolean windSufficient = windLevel >= ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold);
 
         Optional<Ingredient> component = spell.componentItem();
         ItemStack catalyst = this.menu.slots.get(0).getItem();

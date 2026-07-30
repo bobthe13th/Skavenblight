@@ -82,7 +82,7 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
                     : null;
 
             boolean shouldProgress = false;
-            int increment = 1;
+            int increment = ResearchFormulas.PROGRESS_SCALE;
             if (spell != null && researcher != null) {
                 float current = WindGridManager.get(serverLevel).getOrCreate(new ChunkPos(pos)).getCurrent(spell.wind());
                 float required = ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold);
@@ -90,17 +90,17 @@ public class ResearchTableBlockEntity extends BlockEntity implements MenuProvide
                 if (shouldProgress) {
                     float multiplier = ResearchFormulas.speedMultiplier(current, required,
                             Config.researchWindBonusReference, Config.researchWindMaxBonusMultiplier);
-                    increment = Math.max(1, Math.round(multiplier));
+                    increment = ResearchFormulas.progressIncrement(multiplier);
                 }
             }
 
             if (shouldProgress) {
                 be.progress += increment;
-                if (be.progress >= Config.researchTicksBase) {
+                if (be.progress >= Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE) {
                     be.completeResearch(researcher, spell);
                 }
             } else if (be.progress > 0) {
-                be.progress = Math.max(0, be.progress - 2);
+                be.progress = Math.max(0, be.progress - 2 * ResearchFormulas.PROGRESS_SCALE);
             }
             be.setChanged();
         }

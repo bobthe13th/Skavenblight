@@ -41,7 +41,10 @@ public class ModBlockTagProvider extends BlockTagsProvider {
         tag(ModWindBlockTags.windSource(Wind.AZYR))
                 .add(Blocks.LAPIS_BLOCK, Blocks.AMETHYST_BLOCK, Blocks.CONDUIT, Blocks.LODESTONE);
         tag(ModWindBlockTags.windSource(Wind.CHAMON))
-                .add(Blocks.IRON_BLOCK, Blocks.GOLD_BLOCK, Blocks.COPPER_BLOCK, Blocks.NETHERITE_BLOCK);
+                .add(Blocks.IRON_BLOCK, Blocks.GOLD_BLOCK, Blocks.COPPER_BLOCK, Blocks.NETHERITE_BLOCK,
+                        Blocks.EXPOSED_COPPER, Blocks.WEATHERED_COPPER, Blocks.OXIDIZED_COPPER,
+                        Blocks.WAXED_COPPER_BLOCK, Blocks.WAXED_EXPOSED_COPPER,
+                        Blocks.WAXED_WEATHERED_COPPER, Blocks.WAXED_OXIDIZED_COPPER);
         tag(ModWindBlockTags.windSource(Wind.GHYRAN))
                 .add(Blocks.MOSS_BLOCK, Blocks.FLOWERING_AZALEA, Blocks.BEEHIVE, Blocks.COMPOSTER);
         tag(ModWindBlockTags.windSource(Wind.AQSHY))

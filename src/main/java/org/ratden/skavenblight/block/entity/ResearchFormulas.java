@@ -29,4 +29,16 @@ public final class ResearchFormulas {
         double bonus = Math.min(maxBonusMultiplier, excess / bonusReference);
         return 1f + (float) bonus;
     }
+
+    /** Hundredths-of-a-tick granularity progress accrues in, so a fractional speed multiplier (e.g.
+     *  1.13x) genuinely scales research speed continuously rather than being rounded down to a flat
+     *  integer tick count. ResearchTableBlockEntity's progress field and completion threshold are
+     *  both expressed in this unit. */
+    public static final int PROGRESS_SCALE = 100;
+
+    /** Converts a speed multiplier into how much progress (in PROGRESS_SCALE units) to add for one
+     *  real tick of research. */
+    public static int progressIncrement(float multiplier) {
+        return Math.round(multiplier * PROGRESS_SCALE);
+    }
 }
