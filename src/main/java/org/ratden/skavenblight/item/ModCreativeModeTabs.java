@@ -75,6 +75,20 @@ public final class ModCreativeModeTabs {
                                         ModBlocks.WARPSTONE_BUTTON
                                 );
 
+                                ModBlocks.RESEARCH_TABLES.values().forEach(output::accept);
+
+                                output.accept(
+                                        ModBlocks.CHAOS_MONOLITH
+                                );
+
+                                output.accept(
+                                        ModItems.TOME_OF_CORRUPTION
+                                );
+
+                                output.accept(
+                                        ModItems.CLEANSING_WARD
+                                );
+
                                 output.accept(
                                         ModBlocks.WARPSTONE_FENCE
                                 );

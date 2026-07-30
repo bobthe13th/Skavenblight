@@ -8,17 +8,13 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.magic.Wind;
 import org.ratden.skavenblight.magic.player.ModAttachments;
 import org.ratden.skavenblight.magic.player.PlayerMagicData;
-import org.ratden.skavenblight.magic.spell.CastingResolver;
 import org.ratden.skavenblight.magic.spell.Spell;
+import org.ratden.skavenblight.magic.spell.SpellCasting;
 import org.ratden.skavenblight.magic.spell.SpellManager;
-import org.ratden.skavenblight.magic.wind.ChunkWindState;
-import org.ratden.skavenblight.magic.wind.WindGridManager;
 
 public class DebugMagicCommands {
 
@@ -53,34 +49,23 @@ public class DebugMagicCommands {
             return 0;
         }
 
-        PlayerMagicData data = player.getData(ModAttachments.PLAYER_MAGIC.get());
-        int aptitude = data.getAptitude(spell.wind());
+        SpellCasting.Outcome outcome = SpellCasting.attemptCast(player, spell);
 
-        ServerLevel level = source.getLevel();
-        ChunkPos pos = new ChunkPos(player.blockPosition());
-        ChunkWindState windState = WindGridManager.get(level).getOrCreate(pos);
-        float windLevel = windState.getCurrent(spell.wind());
-        int windLevelBonus = CastingResolver.windLevelBonus(windLevel);
-
-        int roll = level.getRandom().nextInt(100) + 1;
-        CastingResolver.CastResult result =
-                CastingResolver.resolve(aptitude, windLevelBonus, spell.castingNumber(), roll);
-
-        if (!result.success()) {
-            int total = aptitude + windLevelBonus - spell.castingNumber();
+        if (outcome.blockedDarkMagic()) {
             source.sendFailure(Component.literal(
-                    "Cast failed: rolled " + roll + ", needed <= " + total
-                            + " (aptitude " + aptitude + " + wind bonus " + windLevelBonus
-                            + " - casting number " + spell.castingNumber() + ")"));
+                    "Cast failed: " + spellId + " is a Dhar spell and you have not unlocked Dark Magic."));
             return 0;
         }
 
-        spell.effect().apply(player, player);
-        windState.setCurrent(spell.wind(), Math.max(0f, windLevel - spell.castingNumber()));
+        if (!outcome.success()) {
+            source.sendFailure(Component.literal(
+                    "Cast failed: rolled " + outcome.roll() + ", needed <= " + outcome.total()));
+            return 0;
+        }
 
         source.sendSuccess(() -> Component.literal(
-                "Cast " + spellId + " successfully! (rolled " + roll
-                        + ", degrees of success: " + result.degreesOfSuccess() + ")"), true);
+                "Cast " + spellId + " successfully! (rolled " + outcome.roll()
+                        + ", degrees of success: " + outcome.degreesOfSuccess() + ")"), true);
         return 1;
     }
 

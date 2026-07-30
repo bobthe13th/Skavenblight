@@ -3,6 +3,7 @@ package org.ratden.skavenblight.magic;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
+import org.ratden.skavenblight.magic.corruption.ChaosManifestationManager;
 import org.ratden.skavenblight.magic.player.ModAttachments;
 import org.ratden.skavenblight.magic.spell.SpellManager;
 
@@ -17,9 +18,11 @@ public class ModMagic {
     public static void register(IEventBus modEventBus) {
         ModAttachments.register(modEventBus);
         NeoForge.EVENT_BUS.addListener(ModMagic::onAddReloadListeners);
+        NeoForge.EVENT_BUS.addListener(org.ratden.skavenblight.magic.corruption.CorruptionTickHandler::onPlayerTick);
     }
 
     private static void onAddReloadListeners(AddReloadListenerEvent event) {
         event.addListener(new SpellManager());
+        event.addListener(new ChaosManifestationManager());
     }
 }

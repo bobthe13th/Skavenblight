@@ -25,6 +25,7 @@ public record ChainLightningPayload(List<Integer> hitEntityIds) implements Custo
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
+
     public static void handleChainLightning(final ChainLightningPayload payload, final IPayloadContext context) {
         // Delegates to a client-only class instead of referencing Minecraft/ClientLevel here -
         // see ClientChainLightningHandler's javadoc for why (this method's own bytecode must stay

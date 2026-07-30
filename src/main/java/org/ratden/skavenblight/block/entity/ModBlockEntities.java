@@ -1,8 +1,10 @@
 package org.ratden.skavenblight.block.entity;
 
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.ratden.skavenblight.Skavenblight;
@@ -109,6 +111,14 @@ public final class ModBlockEntities {
                     ).build(null)
             );
 
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ResearchTableBlockEntity>> RESEARCH_TABLE =
+            BLOCK_ENTITY_TYPES.register("research_table", () ->
+                    BlockEntityType.Builder.of(ResearchTableBlockEntity::new,
+                            ModBlocks.RESEARCH_TABLES.values().stream()
+                                    .map(DeferredBlock::get)
+                                    .toArray(Block[]::new)
+                    ).build(null));
+
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WarpLightningCoilBlockEntity>> WARP_LIGHTNING_COIL_BE =
             BLOCK_ENTITY_TYPES.register("warp_lightning_coil", () ->
                     BlockEntityType.Builder.of(WarpLightningCoilBlockEntity::new,
@@ -120,6 +130,11 @@ public final class ModBlockEntities {
                     BlockEntityType.Builder.of(AlchemicalLaboratoryBlockEntity::new,
                             ModBlocks.ALCHEMICAL_LABORATORY.get()).build(null)
             );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<org.ratden.skavenblight.block.entity.ChaosMonolithBlockEntity>> CHAOS_MONOLITH =
+            BLOCK_ENTITY_TYPES.register("chaos_monolith", () ->
+                    BlockEntityType.Builder.of(org.ratden.skavenblight.block.entity.ChaosMonolithBlockEntity::new,
+                            ModBlocks.CHAOS_MONOLITH.get()).build(null));
 
     public static void register(IEventBus eventBus) {
         BLOCK_ENTITY_TYPES.register(eventBus);

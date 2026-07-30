@@ -50,4 +50,41 @@ class ChunkWindStateTest {
         }
         assertEquals(99.5f, loaded.getDharLevel(), 0.001f);
     }
+
+    @Test
+    void taggedBlockCountDefaultsToZeroAndAccumulates() {
+        ChunkWindState state = new ChunkWindState();
+        assertEquals(0, state.getTaggedBlockCount(Wind.HYSH));
+
+        state.addTaggedBlockCount(Wind.HYSH, 3);
+        assertEquals(3, state.getTaggedBlockCount(Wind.HYSH));
+
+        state.addTaggedBlockCount(Wind.HYSH, 2);
+        assertEquals(5, state.getTaggedBlockCount(Wind.HYSH));
+
+        state.addTaggedBlockCount(Wind.HYSH, -2);
+        assertEquals(3, state.getTaggedBlockCount(Wind.HYSH));
+
+        // floors at 0, never goes negative
+        state.addTaggedBlockCount(Wind.HYSH, -100);
+        assertEquals(0, state.getTaggedBlockCount(Wind.HYSH));
+
+        // unrelated wind untouched
+        assertEquals(0, state.getTaggedBlockCount(Wind.AQSHY));
+    }
+
+    @Test
+    void taggedBlockCountRoundTripsThroughNbt() {
+        ChunkWindState state = new ChunkWindState();
+        for (Wind wind : Wind.values()) {
+            state.addTaggedBlockCount(wind, wind.ordinal() + 1);
+        }
+
+        CompoundTag tag = state.save(new CompoundTag());
+        ChunkWindState loaded = ChunkWindState.load(tag);
+
+        for (Wind wind : Wind.values()) {
+            assertEquals(wind.ordinal() + 1, loaded.getTaggedBlockCount(wind));
+        }
+    }
 }

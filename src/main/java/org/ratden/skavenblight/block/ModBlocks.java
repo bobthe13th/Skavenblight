@@ -27,7 +27,11 @@ import org.ratden.skavenblight.item.ModItems;
 import org.ratden.skavenblight.item.custom.WarpFluxStorageBlockItem;
 import org.ratden.skavenblight.block.custom.debug.DebugIncursionAnchorBlock;
 import org.ratden.skavenblight.block.entity.debug.DebugAnchorType;
+import org.ratden.skavenblight.magic.Wind;
 
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -355,6 +359,22 @@ public final class ModBlocks {
                     )
             );
 
+    public static final Map<Wind, DeferredBlock<Block>> RESEARCH_TABLES = registerResearchTables();
+
+    private static Map<Wind, DeferredBlock<Block>> registerResearchTables() {
+        Map<Wind, DeferredBlock<Block>> map = new EnumMap<>(Wind.class);
+        for (Wind wind : Wind.values()) {
+            DeferredBlock<Block> table = registerBlock("research_table_" + wind.getSerializedName(),
+                    () -> new ResearchTableBlock(wind, BlockBehaviour.Properties.of()
+                            .strength(2.5f)
+                            .sound(SoundType.STONE)
+                            .lightLevel(state -> state.getValue(ResearchTableBlock.LIT) ? 10 : 0)
+                    ));
+            map.put(wind, table);
+        }
+        return Collections.unmodifiableMap(map);
+    }
+
     // The invisible dummy block that handles the upper hitboxes
     public static final DeferredBlock<Block>
             WARP_LIGHTNING_COIL_DUMMY =
@@ -379,6 +399,12 @@ public final class ModBlocks {
                                     .noOcclusion()
                     )
             );
+
+    public static final DeferredBlock<Block> CHAOS_MONOLITH = registerBlock("chaos_monolith",
+            () -> new org.ratden.skavenblight.block.custom.ChaosMonolithBlock(BlockBehaviour.Properties.of()
+                    .strength(50.0f, 1200.0f)
+                    .sound(SoundType.NETHER_GOLD_ORE)
+                    .noOcclusion()));
 
     private static BlockBehaviour.Properties
     createDebugAnchorProperties() {

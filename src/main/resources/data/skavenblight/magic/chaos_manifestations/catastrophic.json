@@ -1,0 +1,21 @@
+{
+  "severity": "catastrophic",
+  "entries": [
+    {
+      "weight": 3,
+      "effect": { "type": "mob_effect", "effect": "minecraft:wither", "duration_ticks": 200, "amplifier": 1 }
+    },
+    {
+      "weight": 3,
+      "effect": { "type": "damage", "amount": 11.0 }
+    },
+    {
+      "weight": 2,
+      "effect": { "type": "mob_effect", "effect": "minecraft:blindness", "duration_ticks": 200, "amplifier": 0 }
+    },
+    {
+      "weight": 3,
+      "effect": { "type": "grant_corruption", "amount": 5 }
+    }
+  ]
+}
