@@ -93,6 +93,17 @@ public class RegionFlowField {
         return owner != null && owner.isAlive();
     }
 
+    /**
+     * Diagnostic-only: the mob currently claiming {@code pos}, or null if unclaimed. Unlike
+     * {@link #isTargetClaimed}, this does NOT check {@code isAlive()} - a dead claimant is
+     * exactly the kind of thing a debug dump needs to surface (a live claimant that's alive but
+     * stuck/far away looks identical to a healthy in-progress build from {@link #isTargetClaimed}
+     * alone).
+     */
+    public Mob getClaimant(BlockPos pos) {
+        return claimedTargets.get(pos);
+    }
+
     /** True if there's room for {@code mob} on the lane at {@code connectorEntry} - callers should widen (see WidenStairsGoal) once this starts returning false often. */
     public boolean tryOccupyLane(BlockPos connectorEntry, Mob mob) {
         Set<Mob> occupants = laneOccupants.computeIfAbsent(connectorEntry.immutable(), k -> new HashSet<>());

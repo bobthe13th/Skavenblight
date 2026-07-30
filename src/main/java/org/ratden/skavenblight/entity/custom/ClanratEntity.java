@@ -9,6 +9,7 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.ai.goal.*;
+import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
@@ -28,6 +29,7 @@ import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
+import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
@@ -201,6 +203,39 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 .reduce((a, b) -> a + "+" + b)
                 .orElse(null);
         return names != null ? names : "<idle>";
+    }
+
+    /**
+     * Diagnostic-only: for every registered siege-construction goal on this rat, reports whether
+     * it's currently RUNNING (per the vanilla goal selector) alongside a fresh {@code canUse()}
+     * call, even for goals that aren't running right now. {@code canUse()} on these goals is a
+     * pure read (findTarget()/isTargetClaimed() mutate nothing), so calling it here on top of
+     * the goal selector's own calls is side-effect-free.
+     *
+     * <p>Exists to answer a question {@code getActiveGoalNames()} alone can't: a rat standing
+     * exactly on a BUILD_STAIR instruction that's still running FollowFlowFieldGoal could mean
+     * either "BuildFlowFieldGoal correctly declines" (canUse()=false - the real reason lives
+     * elsewhere, e.g. a stale claim - see PathingDebugFileWriter's claimant lookup) or
+     * "BuildFlowFieldGoal thinks it CAN run but the goal selector never gave it the chance"
+     * (canUse()=true while not running - a goal-selector-level bug, not a canUse() logic bug).
+     */
+    public String describeSiegeGoalCanUseState() {
+        String result = this.goalSelector.getAvailableGoals().stream()
+                .filter(wrapped -> wrapped.getGoal() instanceof AbstractSiegeConstructionGoal)
+                .map(wrapped -> {
+                    Goal goal = wrapped.getGoal();
+                    boolean canUseNow;
+                    try {
+                        canUseNow = goal.canUse();
+                    } catch (Exception e) {
+                        canUseNow = false;
+                    }
+                    return goal.getClass().getSimpleName() + "[running=" + wrapped.isRunning()
+                            + ", canUseNow=" + canUseNow + "]";
+                })
+                .reduce((a, b) -> a + " " + b)
+                .orElse(null);
+        return result != null ? result : "<no siege construction goals registered>";
     }
 
     /**

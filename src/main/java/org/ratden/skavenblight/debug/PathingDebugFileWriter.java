@@ -233,8 +233,28 @@ public class PathingDebugFileWriter {
 
             String jamFlag = occupancy.getOrDefault(pos, 1) > 1 ? String.format(" [JAM: %d mobs on this block]", occupancy.get(pos)) : "";
 
-            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s\n",
-                    BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc, jamFlag));
+            // "running" alone can't tell you WHY a higher-priority construction goal isn't the
+            // one running - canUseState answers that directly (declining on its own merits vs.
+            // never getting picked despite being able to run). claimant answers the other half:
+            // if canUseNow=false because the target is claimed, WHO holds it and are they even
+            // near it - a live-but-stuck-elsewhere claimant blocks everyone else identically to a
+            // healthy in-progress build, and was invisible before this.
+            String canUseState = (mob instanceof ClanratEntity clanrat) ? clanrat.describeSiegeGoalCanUseState() : "n/a";
+            String claimantDesc = "";
+            if (next != null && next.action() != SiegeNode.SiegeAction.WALK && mobField != null) {
+                Mob claimant = mobField.getClaimant(next.pos());
+                if (claimant != null) {
+                    double dist = Math.sqrt(claimant.blockPosition().distSqr(next.pos()));
+                    claimantDesc = String.format(" | claimant of %s: %s (%s) @ %s alive=%s dist=%.1f",
+                            next.pos().toShortString(), BuiltInRegistries.ENTITY_TYPE.getKey(claimant.getType()),
+                            claimant.getUUID().toString().substring(0, 8), claimant.blockPosition().toShortString(),
+                            claimant.isAlive(), dist);
+                }
+            }
+
+            writer.write(String.format("  %-22s @ %-16s | running: %-40s | next: %s%s%s\n    canUse: %s\n",
+                    BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()), pos.toShortString(), goals, nextDesc, jamFlag,
+                    claimantDesc, canUseState));
         }
         writer.write("\n");
     }
