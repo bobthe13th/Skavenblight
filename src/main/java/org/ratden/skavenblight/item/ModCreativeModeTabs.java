@@ -52,6 +52,8 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.WARPSTONE_CHESTPLATE);
                         output.accept(ModItems.WARPSTONE_LEGGINGS);
                         output.accept(ModItems.WARPSTONE_BOOTS);
+
+                        output.accept(ModItems.TOME_OF_CORRUPTION);
                     })).build());
 
 

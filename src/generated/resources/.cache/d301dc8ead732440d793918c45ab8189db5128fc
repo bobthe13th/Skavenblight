@@ -1,10 +1,11 @@
-// 1.21.1	2026-07-21T14:15:21.8961203	Item Models: skavenblight
+// 1.21.1	2026-07-30T05:06:15.8096209	Item Models: skavenblight
 5c7b0463f979ef8a02f547d8003c3090483a29d7 assets/skavenblight/models/item/debug_flow_field_reader.json
 9fc7648f094b88989eb3b53584e0d9f5d54c165a assets/skavenblight/models/item/fused_warpstone.json
 5c4f4862d947333fda99589b8df015581b7bd640 assets/skavenblight/models/item/piston_spike_trap.json
 bcc130134f2f3537f491c0dedbcf27fb9566f99d assets/skavenblight/models/item/rat_juice.json
 5264b9c71f68c2fabefb387eb1f2d7f8de6c22ed assets/skavenblight/models/item/raw_warpstone.json
 36289df475115ed6d982b48a220a84a71902ac73 assets/skavenblight/models/item/skavenblight_book.json
+6c137cd00f0245cd3cbdb6b9f693f658d0bba77e assets/skavenblight/models/item/tome_of_corruption.json
 3cabcbad5eecccb44636324c82f08335d24fc344 assets/skavenblight/models/item/warpstone_boots.json
 b48b3207e4d0958487d09ccf6978221a21f164e0 assets/skavenblight/models/item/warpstone_boots_amethyst_trim.json
 460129dd8ee6782ada5de0a5b5c4762918329694 assets/skavenblight/models/item/warpstone_boots_copper_trim.json

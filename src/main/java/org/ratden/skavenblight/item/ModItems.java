@@ -12,6 +12,7 @@ import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.item.custom.DebugFlowFieldReaderItem;
 import org.ratden.skavenblight.item.custom.RatJuiceItem;
 import org.ratden.skavenblight.item.custom.SkavenblightBookItem;
+import org.ratden.skavenblight.item.custom.TomeOfCorruptionItem;
 
 
 import java.util.List;
@@ -56,6 +57,8 @@ public class ModItems {
             () -> new DebugFlowFieldReaderItem(new Item.Properties().stacksTo(1)));
     public static final DeferredItem<Item> SKAVENBLIGHT_BOOK = ITEMS.register("skavenblight_book",
             () -> new SkavenblightBookItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<Item> TOME_OF_CORRUPTION = ITEMS.register("tome_of_corruption",
+            () -> new TomeOfCorruptionItem(new Item.Properties().stacksTo(1)));
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }
