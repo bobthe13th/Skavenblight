@@ -172,6 +172,44 @@ public class PathingRegionGameTests {
     }
 
     /**
+     * Region.cellsNotIn in isolation, no scanner/rebuild needed - two hand-built Region objects
+     * with a partial cell overlap, confirming the delta is exactly "cells in the first but not
+     * the second" and nothing else. This is the primitive Task 2's merge-detection check is
+     * built on (see docs/superpowers/specs/2026-07-30-region-merge-detection-design.md).
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testCellsNotInReturnsOnlyTheNewCells(GameTestHelper helper) {
+        int minBuildHeight = helper.getLevel().getMinBuildHeight();
+        int height = helper.getLevel().getMaxBuildHeight() - minBuildHeight;
+
+        BlockPos shared = helper.absolutePos(new BlockPos(4, 2, 4));
+        BlockPos onlyInA = helper.absolutePos(new BlockPos(5, 2, 4));
+        BlockPos onlyInB = helper.absolutePos(new BlockPos(6, 2, 4));
+
+        Region regionA = new Region(0, minBuildHeight, height);
+        regionA.addCell(shared);
+        regionA.addCell(onlyInA);
+
+        Region regionB = new Region(1, minBuildHeight, height);
+        regionB.addCell(shared);
+        regionB.addCell(onlyInB);
+
+        Set<BlockPos> delta = regionA.cellsNotIn(regionB);
+
+        check(delta.size() == 1, "expected exactly 1 cell in A but not B, found " + delta.size() + ": " + delta);
+        check(delta.contains(onlyInA), "delta should contain the cell only A has - found: " + delta);
+        check(!delta.contains(shared), "delta should NOT contain the cell both regions share - found: " + delta);
+        check(!delta.contains(onlyInB), "delta should NOT contain a cell only B has - found: " + delta);
+
+        // Symmetry check: B's delta against A should be the mirror image.
+        Set<BlockPos> reverseDelta = regionB.cellsNotIn(regionA);
+        check(reverseDelta.size() == 1 && reverseDelta.contains(onlyInB),
+                "expected exactly 1 cell in B but not A (onlyInB) - found: " + reverseDelta);
+
+        helper.succeed();
+    }
+
+    /**
      * End-to-end validation of the headline region-graph requirement: a trench splits the floor
      * into two disconnected regions, {@code RegionGraph} proposes exactly one connector across
      * it, and {@code RegionRouteTree} marks the far side reachable via that connector.

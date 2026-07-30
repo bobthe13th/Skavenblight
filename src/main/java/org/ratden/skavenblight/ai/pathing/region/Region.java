@@ -109,6 +109,39 @@ public class Region {
     }
 
     /**
+     * Cells in this region that are NOT in {@code other} - one BitSet.andNot() per chunk this
+     * region touches, not a full re-scan. Used by TerritoryRegionMap's dirty-rescan merge
+     * detection (see docs/superpowers/specs/2026-07-30-region-merge-detection-design.md): the
+     * cells THIS region gained relative to the pre-rescan old region are exactly the cells worth
+     * checking for foreign ownership - a genuine merge's absorbed territory shows up entirely as
+     * "new" cells here, while an ordinary small change's delta stays small.
+     */
+    public Set<BlockPos> cellsNotIn(Region other) {
+        Set<BlockPos> delta = new HashSet<>();
+        for (Map.Entry<ChunkPos, BitSet> entry : this.chunkCells.entrySet()) {
+            ChunkPos chunk = entry.getKey();
+            BitSet newBits = (BitSet) entry.getValue().clone();
+            BitSet otherBits = other.chunkCells.get(chunk);
+            if (otherBits != null) {
+                newBits.andNot(otherBits);
+            }
+            for (int i = newBits.nextSetBit(0); i >= 0; i = newBits.nextSetBit(i + 1)) {
+                delta.add(posFromCellIndex(chunk, i));
+            }
+        }
+        return delta;
+    }
+
+    /** Exact inverse of cellIndex(BlockPos) - same chunk-local packing, run backward. */
+    private BlockPos posFromCellIndex(ChunkPos chunk, int index) {
+        int localY = index % height;
+        int remainder = index / height;
+        int localX = remainder / 16;
+        int localZ = remainder % 16;
+        return new BlockPos(chunk.getMinBlockX() + localX, minBuildHeight + localY, chunk.getMinBlockZ() + localZ);
+    }
+
+    /**
      * Copies this region's cell/boundary/bounds data into a NEW Region stamped with
      * {@code newId} instead of this one's own id. Used by TerritoryRegionMap's steady-state
      * dirty-region recompute to swap in a freshly-rescanned region's membership while keeping
