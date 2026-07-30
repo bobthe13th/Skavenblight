@@ -1,6 +1,7 @@
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -57,6 +58,16 @@ public class SiegeProject {
 
     public int getExpectedEntryCost() {
         return expectedEntryCost;
+    }
+
+    /**
+     * The full instruction map this project was built with, regardless of how much of it is
+     * already complete - see {@link #getRemainingInstructions} for the completion-filtered view.
+     * Added for task-8's orphaned-connector-cell test, which needs every position a mob could be
+     * standing on mid-crossing, not just what's left to build.
+     */
+    public Map<BlockPos, SiegeNode> getInstructions() {
+        return Collections.unmodifiableMap(instructions);
     }
 
 }

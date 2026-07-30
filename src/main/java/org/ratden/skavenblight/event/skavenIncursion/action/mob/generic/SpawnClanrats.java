@@ -105,30 +105,44 @@ public class SpawnClanrats {
         return null;
     }
 
-    private static boolean isSafeSpawnPos(ServerLevel level, BlockPos pos) {
-        net.minecraft.world.level.block.state.BlockState floorState = level.getBlockState(pos.below());
-
-        boolean isSolid = floorState.isSolidRender(level, pos.below());
-        boolean isNotWater = floorState.getFluidState().isEmpty();
-        boolean isNotLeaves = !floorState.is(net.minecraft.tags.BlockTags.LEAVES); // Requires standard block tags
-        boolean isNotLog = !floorState.is(net.minecraft.tags.BlockTags.LOGS);
-
+    private static boolean isSafeSpawnPos(
+            ServerLevel level,
+            BlockPos pos
+    ) {
         return level.getBlockState(pos).isAir()
                 && level.getBlockState(pos.above()).isAir()
-                && isSolid
-                && isNotWater
-                && isNotLeaves
-                && isNotLog;
+                && level.getBlockState(pos.below())
+                .isSolidRender(level, pos.below());
     }
 
-    private static BlockPos createFallbackSpawnPos(ServerLevel level, BlockPos sourcePos) {
-        // We are no longer forcing Blocks.DIRT or hollowing out Blocks.AIR here!
-        // Instead, we should just look for the nearest valid surface height.
-        BlockPos fallbackPos = level.getHeightmapPos(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sourcePos.offset(1, 0, 0));
+    private static BlockPos createFallbackSpawnPos(
+            ServerLevel level,
+            BlockPos sourcePos
+    ) {
+        BlockPos fallbackPos = sourcePos.offset(1, 0, 0);
+
+        level.setBlock(
+                fallbackPos.below(),
+                Blocks.DIRT.defaultBlockState(),
+                3
+        );
+
+        level.setBlock(
+                fallbackPos,
+                Blocks.AIR.defaultBlockState(),
+                3
+        );
+
+        level.setBlock(
+                fallbackPos.above(),
+                Blocks.AIR.defaultBlockState(),
+                3
+        );
 
         if (isSafeSpawnPos(level, fallbackPos)) {
             return fallbackPos;
         }
+
         return null;
     }
 

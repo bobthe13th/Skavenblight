@@ -1,0 +1,12 @@
+{
+  "wind": "chamon",
+  "tier": 1,
+  "casting_number": 40,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "projectile_launch",
+    "projectile_type": "arrow",
+    "speed": 2.5
+  },
+  "description_key": "spell.skavenblight.silver_arrows_of_arha.description"
+}

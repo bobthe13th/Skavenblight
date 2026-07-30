@@ -1,0 +1,16 @@
+{
+  "category": "skavenblight:dark_magic",
+  "id": "skavenblight:tzeentchs_curse",
+  "name": "entry.skavenblight.nexus_research.tzeentchs_curse.name",
+  "icon": "minecraft:nether_star",
+  "x": 1,
+  "y": 0,
+  "parents": [ { "entry": "dark_magic/overview" } ],
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "page.skavenblight.nexus_research.tzeentchs_curse.title",
+      "text": "page.skavenblight.nexus_research.tzeentchs_curse.text"
+    }
+  ]
+}

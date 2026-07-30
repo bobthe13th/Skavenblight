@@ -13,6 +13,8 @@ import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.entity.custom.wolfCat.WolfCat;
 import org.ratden.skavenblight.entity.custom.WolfRat;
 import org.ratden.skavenblight.event.skavenIncursion.director.ActiveIncursionManager;
+import org.ratden.skavenblight.event.skavenIncursion.debug.DebugIncursionAnchorTracker;
+import org.ratden.skavenblight.event.skavenIncursion.planning.source.ActiveIncursionSourceReservationRegistry;
 
 public class DebugCleanupCommands {
 
@@ -59,29 +61,77 @@ public class DebugCleanupCommands {
     private static int cleanupAll(
             CommandContext<CommandSourceStack> context
     ) {
-        CommandSourceStack source = context.getSource();
+        CommandSourceStack source =
+                context.getSource();
 
-        int removedWolfRats = cleanupWolfRats(source, false);
-        int removedWolfCats = cleanupWolfCats(source, false);
-        int removedVanillaMobs = cleanupVanillaMobs(source, false);
-        int removedSources = cleanupSources(source, false);
-        int removedIncursions = ActiveIncursionManager.clearIncursions();
+        ServerLevel level =
+                source.getLevel();
 
-        int totalRemoved = removedWolfRats
-                + removedWolfCats
-                + removedVanillaMobs
-                + removedSources
-                + removedIncursions;
+        int removedWolfRats =
+                cleanupWolfRats(
+                        source,
+                        false
+                );
+
+        int removedWolfCats =
+                cleanupWolfCats(
+                        source,
+                        false
+                );
+
+        int removedVanillaMobs =
+                cleanupVanillaMobs(
+                        source,
+                        false
+                );
+
+        int removedSources =
+                cleanupSources(
+                        source,
+                        false
+                );
+
+        int removedAnchors =
+                DebugIncursionAnchorTracker.removeAll(
+                        level
+                );
+
+        int removedIncursions =
+                ActiveIncursionManager.clearIncursions();
+
+        int removedReservationSnapshots =
+                ActiveIncursionSourceReservationRegistry.clear(
+                        level
+                );
+
+        int totalRemoved =
+                removedWolfRats
+                        + removedWolfCats
+                        + removedVanillaMobs
+                        + removedSources
+                        + removedAnchors
+                        + removedIncursions
+                        + removedReservationSnapshots;
 
         source.sendSuccess(
                 () -> Component.literal(
                         "Cleanup all complete."
-                                + "\nRemoved wolf rats: " + removedWolfRats
-                                + "\nRemoved wolf cats: " + removedWolfCats
-                                + "\nRemoved vanilla mobs: " + removedVanillaMobs
-                                + "\nRemoved tunnel sources: " + removedSources
-                                + "\nRemoved active incursions: " + removedIncursions
-                                + "\nTotal removed: " + totalRemoved
+                                + "\nRemoved wolf rats: "
+                                + removedWolfRats
+                                + "\nRemoved wolf cats: "
+                                + removedWolfCats
+                                + "\nRemoved vanilla mobs: "
+                                + removedVanillaMobs
+                                + "\nRemoved tunnel sources: "
+                                + removedSources
+                                + "\nRemoved debug anchors: "
+                                + removedAnchors
+                                + "\nRemoved active incursions: "
+                                + removedIncursions
+                                + "\nReleased incursion reservation snapshots: "
+                                + removedReservationSnapshots
+                                + "\nTotal removed or released: "
+                                + totalRemoved
                 ),
                 false
         );
@@ -92,16 +142,44 @@ public class DebugCleanupCommands {
     private static int clearIncursions(
             CommandContext<CommandSourceStack> context
     ) {
-        int removed = ActiveIncursionManager.clearIncursions();
+        CommandSourceStack source =
+                context.getSource();
 
-        context.getSource().sendSuccess(
+        ServerLevel level =
+                source.getLevel();
+
+        int removedIncursions =
+                ActiveIncursionManager.clearIncursions();
+
+        int removedAnchors =
+                DebugIncursionAnchorTracker.removeAll(
+                        level
+                );
+
+        int removedReservationSnapshots =
+                ActiveIncursionSourceReservationRegistry.clear(
+                        level
+                );
+
+        int totalRemoved =
+                removedIncursions
+                        + removedAnchors
+                        + removedReservationSnapshots;
+
+        source.sendSuccess(
                 () -> Component.literal(
-                        "Removed " + removed + " active incursions."
+                        "Cleared incursions."
+                                + "\nRemoved active incursions: "
+                                + removedIncursions
+                                + "\nRemoved debug anchors: "
+                                + removedAnchors
+                                + "\nReleased reservation snapshots: "
+                                + removedReservationSnapshots
                 ),
                 false
         );
 
-        return removed;
+        return totalRemoved;
     }
 
     private static int cleanupAllSkavenblightMobs(

@@ -1,0 +1,36 @@
+{
+  "category": "skavenblight:winds_of_magic_shyish",
+  "id": "skavenblight:petty_spells",
+  "name": "entry.skavenblight.nexus_research.winds_of_magic_shyish_petty_spells.name",
+  "icon": "minecraft:wither_rose",
+  "x": 1,
+  "y": 0,
+  "parents": [ { "entry": "winds_of_magic_shyish/overview" } ],
+  "pages": [
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.steal_life.name",
+      "text": "spell.skavenblight.steal_life.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.icy_grip_of_death.name",
+      "text": "spell.skavenblight.icy_grip_of_death.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.scythe_of_shyish.name",
+      "text": "spell.skavenblight.scythe_of_shyish.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.reap_soul.name",
+      "text": "spell.skavenblight.reap_soul.description"
+    },
+    {
+      "type": "modonomicon:text",
+      "title": "spell.skavenblight.chilling_grave.name",
+      "text": "spell.skavenblight.chilling_grave.description"
+    }
+  ]
+}

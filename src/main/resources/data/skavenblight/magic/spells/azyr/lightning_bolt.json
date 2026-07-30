@@ -1,0 +1,8 @@
+{
+  "wind": "azyr",
+  "tier": 0,
+  "casting_number": 30,
+  "casting_time": "half_action",
+  "effect": { "type": "damage", "amount": 6.0 },
+  "description_key": "spell.skavenblight.lightning_bolt.description"
+}

@@ -10,13 +10,17 @@ public class SkavenDebugCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
                 Commands.literal("skavendebug")
-                        .then(DebugDifficultyCommands.register())
                         .then(DebugCleanupCommands.register())
-                        .then(DebugSourceCommands.register())
-                        .then(DebugNexusCommands.register())
-                        .then(DebugMobCommands.register())
-                        .then(DebugPathingCommands.register())
+                        .then(DebugDifficultyCommands.register())
+                        .then(DebugIncursionCommands.register())
                         .then(DebugIncursionLoadTest.register())
+                        .then(DebugWindCommands.register())
+                        .then(DebugMagicCommands.register())
+                        .then(DebugMobCommands.register())
+                        .then(DebugNexusCommands.register())
+                        .then(DebugPathingCommands.register())
+                        .then(DebugSourceCommands.register())
+                        .then(DebugCorruptionCommands.register())
         );
     }
 }

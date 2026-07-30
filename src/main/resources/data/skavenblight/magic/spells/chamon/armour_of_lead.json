@@ -1,0 +1,13 @@
+{
+  "wind": "chamon",
+  "tier": 0,
+  "casting_number": 20,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:resistance",
+    "duration_ticks": 200,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.armour_of_lead.description"
+}

@@ -1,0 +1,21 @@
+{
+  "severity": "minor",
+  "entries": [
+    {
+      "weight": 3,
+      "effect": { "type": "damage", "amount": 1.0 }
+    },
+    {
+      "weight": 3,
+      "effect": { "type": "mob_effect", "effect": "minecraft:nausea", "duration_ticks": 100, "amplifier": 0 }
+    },
+    {
+      "weight": 2,
+      "effect": { "type": "mob_effect", "effect": "minecraft:weakness", "duration_ticks": 100, "amplifier": 0 }
+    },
+    {
+      "weight": 2,
+      "effect": { "type": "grant_corruption", "amount": 1 }
+    }
+  ]
+}

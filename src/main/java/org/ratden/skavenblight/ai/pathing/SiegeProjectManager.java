@@ -26,6 +26,14 @@ public class SiegeProjectManager {
     // any two points within it are guaranteed to fall in the same or an adjacent bucket.
     private static final int BUCKET_SIZE = 4;
 
+    // Default: territory-scale macro projects (no route-tree connector yet, or this region has
+    // none - see setMaxCandidateProjectLength's doc). Kept generous, matching the original
+    // single-flow-field design's own budget. Public (not package-private) because the caller that
+    // needs it - TerritoryRegionMap.rebuildRegionsAndGraph/recomputeDirtyRegions - lives in the
+    // ai.pathing.region sub-package, not this one.
+    public static final int DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH = 32;
+    private int maxCandidateProjectLength = DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH;
+
     private final List<SiegeProject> activeProjects = new ArrayList<>();
     private final List<SiegeProject> candidateProjects = new ArrayList<>();
     // Spatial index of every anchor evaluateMacroProjects() has fired on this calculation,
@@ -74,6 +82,37 @@ public class SiegeProjectManager {
         if (project != null) {
             this.activeProjects.add(project);
         }
+    }
+
+    /**
+     * Layers an ADDITIONAL active project on top of whatever {@code setActiveConnectorProject}
+     * already seeded for this pass, rather than replacing it - see
+     * TerritoryRegionMap.injectSharedConnectorProjects (Task 9 Step 0b) for the caller. A region
+     * can simultaneously be the route-tree CHILD of one connector (its own upstream project, set
+     * via setActiveConnectorProject) and the route-tree PARENT of one or more other connectors
+     * (each needing its own crossing project stacked here) - both must be present in
+     * {@code activeProjects} together when {@code injectActiveProjects} next consumes the list.
+     * Safe with the same "regions processed strictly sequentially" reasoning
+     * setActiveConnectorProject's own doc already relies on: every region's pass always starts
+     * with a setActiveConnectorProject clear+reseed, so nothing added here ever leaks into the
+     * NEXT region's pass.
+     */
+    public void addSharedConnectorProject(SiegeProject project) {
+        if (project != null) {
+            this.activeProjects.add(project);
+        }
+    }
+
+    /**
+     * Called once per region-scoped pass (TerritoryRegionMap, mirroring its existing
+     * setActiveConnectorProject call). Pass a short cap when this region already has a
+     * route-tree-assigned parent connector - long-range connectivity is that connector's job now,
+     * not this region's own reactive hitObstacle/evaluateMacroProjects search. Pass the default
+     * (or call with DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH) for a region with no route-tree
+     * connector yet, where local discovery is still the only way it connects to anything.
+     */
+    public void setMaxCandidateProjectLength(int maxLength) {
+        this.maxCandidateProjectLength = maxLength;
     }
 
     public void injectActiveProjects(TerrainAccess terrain,
@@ -177,7 +216,8 @@ public class SiegeProjectManager {
 
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
                 pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos),
-                pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE));
+                pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
+                this.maxCandidateProjectLength);
 
         if (!result.completed() || result.instructions().isEmpty()) return;
 
