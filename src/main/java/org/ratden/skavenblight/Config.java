@@ -91,6 +91,8 @@ public class Config {
     // --- Corruption Configs ---
     private static final ModConfigSpec.IntValue CORRUPTION_TICK_INTERVAL_TICKS = BUILDER.comment("How often (in ticks) each player's Tainted effect is refreshed and their Tome-of-Corruption carry drain is checked.")
             .defineInRange("corruptionTickIntervalTicks", 6000, 20, 72000);
+    private static final ModConfigSpec.IntValue DHAR_CAST_CORRUPTION = BUILDER.comment("Corruption Points granted per attempted Dhar (dark-tagged) spell cast, success or failure.")
+            .defineInRange("dharCastCorruption", 1, 0, 100);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -131,6 +133,7 @@ public class Config {
 
     // --- Corruption Public Variables ---
     public static int corruptionTickIntervalTicks;
+    public static int dharCastCorruption;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -171,6 +174,7 @@ public class Config {
 
         // Load Corruption Configs
         corruptionTickIntervalTicks = CORRUPTION_TICK_INTERVAL_TICKS.get();
+        dharCastCorruption = DHAR_CAST_CORRUPTION.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();
