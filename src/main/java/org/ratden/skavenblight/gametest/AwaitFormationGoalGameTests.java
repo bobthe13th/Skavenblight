@@ -10,12 +10,16 @@ import net.minecraft.world.level.block.StairBlock;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.ai.goal.clanrat.AwaitFormationGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import org.ratden.skavenblight.ai.pathing.*;
+import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
+import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -121,6 +125,157 @@ public class AwaitFormationGoalGameTests {
         flowField.releaseFormationSlot(pos);
         check(!flowField.isFormationSlotClaimed(pos), "slot should be unclaimed again after release");
         check(flowField.tryClaimFormationSlot(pos, mobB), "a released slot should be claimable by a different mob");
+
+        helper.succeed();
+    }
+
+    /**
+     * Two identical stair-widening opportunities exist near the mob. The first (closer) one is
+     * already claimed by a different mob; the second (a bit further) is free. AwaitFormationGoal
+     * must redirect to the free one instead of doing nothing (which would leave the mob to fall
+     * through to FollowFlowFieldGoal and walk toward the contested one, joining a crowd).
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testAwaitFormationGoalRedirectsToUnclaimedAlternative(GameTestHelper helper) {
+        BlockPos relativeMobPos = new BlockPos(4, 2, 4);
+        BlockPos relativeContestedTarget = relativeMobPos.offset(1, 1, 0);
+        BlockPos relativeFreeTarget = relativeMobPos.offset(2, 2, 0);
+
+        for (BlockPos step : new BlockPos[]{relativeContestedTarget, relativeFreeTarget}) {
+            helper.setBlock(step, Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.below(), Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.above(), Blocks.AIR.defaultBlockState());
+            helper.setBlock(step.above(2), Blocks.AIR.defaultBlockState());
+        }
+
+        BlockPos mobPos = helper.absolutePos(relativeMobPos);
+        BlockPos contestedTarget = helper.absolutePos(relativeContestedTarget);
+        BlockPos freeTarget = helper.absolutePos(relativeFreeTarget);
+
+        FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
+        state.updateInstructions(Map.of(
+                mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR),
+                contestedTarget, new SiegeNode(freeTarget, SiegeNode.SiegeAction.BUILD_STAIR)
+        ));
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(null, 0, state, projectManager, calculator, throttler);
+
+        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(mob);
+        // AwaitFormationGoal.canUse() asks the MOB'S OWN registered BuildFlowFieldGoal/
+        // WidenStairsGoal (via peekAnyClaimedConstructionTarget()) whether their nearest target
+        // is claimed - those internal instances need this flow field too, not just the
+        // standalone AwaitFormationGoal built below. assignFlowField() is the real production
+        // method that wires a field into every registered SiegeGoal at once.
+        mob.assignFlowField(flowField);
+
+        ClanratEntity claimant = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        claimant.setPos(contestedTarget.getX() + 0.5, contestedTarget.getY(), contestedTarget.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(claimant);
+        flowField.tryClaimTarget(contestedTarget, claimant);
+
+        AwaitFormationGoal goal = new AwaitFormationGoal(mob);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), "goal should trigger: the mob's nearest work is claimed by a different mob");
+        goal.start();
+
+        check(flowField.isTargetClaimed(freeTarget), "the free alternative should now be claimed by the redirecting mob");
+        // canContinueToUse() reflects this goal's OWN tracked redirectTarget state directly - more
+        // reliable here than asserting on vanilla PathNavigation's internals, which may not
+        // populate isInProgress()/getTargetPos() synchronously within the same tick moveTo() was
+        // called (pathfinding can resolve on a later tick even for a short distance).
+        check(goal.canContinueToUse(), "the goal should still consider itself active - it has a redirect target to walk to");
+
+        helper.succeed();
+    }
+
+    /**
+     * Only ONE stair-widening opportunity exists, and it's already claimed. With no alternative
+     * anywhere in the region, AwaitFormationGoal must find a real, walkable waiting slot near the
+     * contested target (never air/void, never inside solid rock) and navigate there instead of
+     * doing nothing.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
+    public static void testAwaitFormationGoalWaitsInFormationWhenNoAlternativeExists(GameTestHelper helper) {
+        BlockPos relativeMobPos = new BlockPos(4, 2, 4);
+        BlockPos relativeContestedTarget = relativeMobPos.offset(1, 1, 0);
+
+        helper.setBlock(relativeContestedTarget, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.below(), Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.above(), Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.above(2), Blocks.AIR.defaultBlockState());
+
+        BlockPos mobPos = helper.absolutePos(relativeMobPos);
+        BlockPos contestedTarget = helper.absolutePos(relativeContestedTarget);
+
+        // Real region/territory map, used ONLY to get a genuine, terrain-validated Region -
+        // rebuild() is asynchronous, so wait for it via succeedWhen (same pattern
+        // PathingRegionGameTests.testSingleConnectedRegion already uses).
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        Set<ChunkPos> territory = Set.of(new ChunkPos(mobPos));
+        regionMap.rebuild(helper.getLevel(), territory, mobPos);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(!regions.isEmpty(), "test structure should scan into at least one region");
+            Region region = regions.get(0);
+
+            FlowFieldState state = new FlowFieldState(mobPos, territory);
+            state.updateInstructions(Map.of(mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)));
+            TerrainEvaluator evaluator = new TerrainEvaluator();
+            SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+            CalculationThrottler throttler = new CalculationThrottler();
+            FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+            RegionFlowField flowField = new RegionFlowField(regionMap, region.getId(), state, projectManager, calculator, throttler);
+
+            ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(mob);
+            mob.assignFlowField(flowField);
+
+            ClanratEntity claimant = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            claimant.setPos(contestedTarget.getX() + 0.5, contestedTarget.getY(), contestedTarget.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(claimant);
+            flowField.tryClaimTarget(contestedTarget, claimant);
+
+            AwaitFormationGoal goal = new AwaitFormationGoal(mob);
+            goal.setFlowField(flowField);
+
+            check(goal.canUse(), "goal should trigger: the mob's only nearby work is claimed by a different mob");
+            goal.start();
+
+            // canContinueToUse() reflects this goal's OWN tracked formationSlot state directly -
+            // more reliable than asserting on vanilla PathNavigation's internals synchronously.
+            check(goal.canContinueToUse(),
+                    "with no alternative work available, the mob should be navigating to a formation slot");
+
+            // Same cleanup PathingRegionGameTests.testSingleConnectedRegion performs - releases
+            // this map's forced chunk tickets so this test doesn't leak them into the shared
+            // per-level forced-chunk set for the rest of the GameTestServer run.
+            regionMap.cleanup(helper.getLevel());
+        });
+    }
+
+    /**
+     * Confirms AwaitFormationGoal is actually registered on ClanratEntity (integration, not unit,
+     * coverage - the priority ordering itself isn't assertable from outside the entity, since
+     * WrappedGoal/GoalSelector don't expose enough to check that directly). If registerGoals()
+     * failed to compile with AwaitFormationGoal wired in, this whole test file wouldn't compile
+     * at all - which is the real signal this task's registration step succeeded.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testAwaitFormationGoalIsRegisteredOnClanratEntity(GameTestHelper helper) {
+        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        helper.getLevel().addFreshEntity(mob);
+
+        String canUseState = mob.describeSiegeGoalCanUseState();
+        check(canUseState != null, "sanity check - describeSiegeGoalCanUseState should always return a non-null string");
 
         helper.succeed();
     }

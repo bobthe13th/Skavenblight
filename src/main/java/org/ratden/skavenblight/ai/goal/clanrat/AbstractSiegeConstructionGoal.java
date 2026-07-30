@@ -55,7 +55,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
      * stalled for 16+ retry cycles while sitting 3.7 blocks from its own target, well past this
      * threshold, with no way to ever close that gap under its own power.
      */
-    protected static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
+    public static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;

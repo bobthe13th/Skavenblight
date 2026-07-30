@@ -34,9 +34,13 @@ import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.WrappedGoal;
 import net.minecraft.world.entity.player.Player;
+import org.ratden.skavenblight.ai.goal.clanrat.AwaitFormationGoal;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
 import org.ratden.skavenblight.network.WarpFluxNetwork;
+
+import java.util.Optional;
 
 public class ClanratEntity extends Monster implements GeoEntity {
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
@@ -77,15 +81,20 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(5, new DeployClimbableGoal(this));
         this.goalSelector.addGoal(6, new BuildFlowFieldGoal(this));
         this.goalSelector.addGoal(7, new WidenStairsGoal(this));
-        this.goalSelector.addGoal(8, new FollowFlowFieldGoal(this, 1.2D));
+        // Sits below the construction goals (only runs once they've already declined - a rat
+        // with real, unclaimed work of its own never reaches this) and above
+        // FollowFlowFieldGoal (pre-empts plain "walk toward the crowd" specifically for the
+        // case where the nearest work is claimed by someone else).
+        this.goalSelector.addGoal(8, new AwaitFormationGoal(this));
+        this.goalSelector.addGoal(9, new FollowFlowFieldGoal(this, 1.2D));
         // Only engages when isStranded() is true (region found but unreachable per the route
         // tree) - yields to the ordinary siege goals above, which naturally decline while
         // currentFlowField == null in the stranded case, and to WaterAvoidingRandomStrollGoal
         // below when not stranded.
-        this.goalSelector.addGoal(9, new StrandedGoal(this));
-        this.goalSelector.addGoal(10, new WaterAvoidingRandomStrollGoal(this, 1.0D));
-        this.goalSelector.addGoal(11, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(11, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(10, new StrandedGoal(this));
+        this.goalSelector.addGoal(11, new WaterAvoidingRandomStrollGoal(this, 1.0D));
+        this.goalSelector.addGoal(12, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(12, new RandomLookAroundGoal(this));
     }
 
     @Override
@@ -236,6 +245,25 @@ public class ClanratEntity extends Monster implements GeoEntity {
                 .reduce((a, b) -> a + " " + b)
                 .orElse(null);
         return result != null ? result : "<no siege construction goals registered>";
+    }
+
+    /**
+     * The nearest target either BuildFlowFieldGoal or WidenStairsGoal on this rat would want to
+     * build, if that target exists but is already claimed by a different, living mob. Used by
+     * AwaitFormationGoal to decide whether "someone else already has the spot I'd otherwise go
+     * queue at." Deliberately excludes SmartBreachGoal - breach/MINE contention is out of scope
+     * for formation-waiting (see docs/superpowers/plans/2026-07-30-formation-waiting-goal.md's
+     * Global Constraints).
+     */
+    public Optional<BlockPos> peekAnyClaimedConstructionTarget() {
+        for (WrappedGoal wrapped : this.goalSelector.getAvailableGoals()) {
+            if (wrapped.getGoal() instanceof AbstractSiegeConstructionGoal siegeGoal
+                    && (siegeGoal instanceof BuildFlowFieldGoal || siegeGoal instanceof WidenStairsGoal)) {
+                Optional<BlockPos> claimed = siegeGoal.peekClaimedTarget();
+                if (claimed.isPresent()) return claimed;
+            }
+        }
+        return Optional.empty();
     }
 
     /**
