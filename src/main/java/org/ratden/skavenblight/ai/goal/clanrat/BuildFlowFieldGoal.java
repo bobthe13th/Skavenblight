@@ -75,6 +75,14 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected void onChainComplete(ServerLevel level, BlockPos completedPos) {
+        // this.flowField can go null at any time via ClanratEntity.assignFlowField's periodic
+        // region-membership re-check (every 40 ticks), decoupled from whether this goal is
+        // mid-chain - see AbstractSiegeConstructionGoal's own default onChainComplete, which
+        // already guards against exactly this. This override never got that guard and crashed
+        // the server with an NPE on this exact race (confirmed via a real crash report: a
+        // successful build's onChainComplete ran the same tick the field was reassigned to null).
+        if (this.flowField == null) return;
+
         SiegeNode nextNode = this.flowField.getNextSiegeNode(level, completedPos);
         boolean isEndOfMacroProject = (nextNode == null || !isBuildAction(nextNode.action()));
 
