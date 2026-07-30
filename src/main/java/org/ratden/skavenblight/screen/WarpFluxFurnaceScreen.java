@@ -37,6 +37,7 @@ public class WarpFluxFurnaceScreen extends AbstractContainerScreen<WarpFluxFurna
 
         // Draw our custom Warp Flux tooltip
         renderEnergyAreaTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
+        renderProgressAreaTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
     }
 
     @Override
@@ -88,6 +89,28 @@ public class WarpFluxFurnaceScreen extends AbstractContainerScreen<WarpFluxFurna
 
             // Format: "5000 / 10000 Warp Flux"
             Component text = Component.literal(flux + " / " + maxFlux + " Warp Flux");
+            guiGraphics.renderTooltip(this.font, text, mouseX, mouseY);
+        }
+    }
+
+    private void renderProgressAreaTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y) {
+        // IMPORTANT: Match these numbers to the ARROW_X, ARROW_Y, and 14x14 dimensions!
+        int ARROW_X = 65;
+        int ARROW_Y = 34;
+        int arrowWidth = 14;
+        int arrowHeight = 14;
+
+        if (isMouseAboveArea(mouseX, mouseY, x, y, ARROW_X, ARROW_Y, arrowWidth, arrowHeight)) {
+            int progress = menu.getProgress();
+            int maxProgress = menu.getMaxProgress();
+
+            Component text;
+            if (progress > 0 && maxProgress > 0) {
+                int percent = (int) Math.min(100, Math.max(0, (long) progress * 100 / maxProgress));
+                text = Component.literal("Progress: " + percent + "%").withStyle(net.minecraft.ChatFormatting.GREEN);
+            } else {
+                text = Component.literal("Progress: Idle").withStyle(net.minecraft.ChatFormatting.GRAY);
+            }
             guiGraphics.renderTooltip(this.font, text, mouseX, mouseY);
         }
     }

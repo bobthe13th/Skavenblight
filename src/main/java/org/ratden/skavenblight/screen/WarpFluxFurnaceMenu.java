@@ -121,4 +121,14 @@ public class WarpFluxFurnaceMenu extends AbstractContainerMenu {
     public int getMaxFlux() {
         return 10000;
     }
+
+    // Gets the exact current progress from our synced data
+    public int getProgress() {
+        return this.data.get(0);
+    }
+
+    // Gets the max progress configured
+    public int getMaxProgress() {
+        return org.ratden.skavenblight.config.WarpFluxFurnaceConfig.BASE_SMELT_TICKS.get();
+    }
 }
