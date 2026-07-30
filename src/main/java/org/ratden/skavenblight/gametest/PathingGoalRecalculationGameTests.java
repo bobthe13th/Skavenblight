@@ -315,6 +315,50 @@ public class PathingGoalRecalculationGameTests {
     }
 
     /**
+     * Regression coverage for today's clear-space fix (see
+     * docs/superpowers/plans/2026-07-29-siege-project-floating-stair-fix.md, or the commit
+     * message on SiegeInteractionHandler.isSpaceClear): clanrats are 1.8 blocks tall
+     * (see ModEntities#CLANRAT), so a normal-height neighbor simply standing on the ground
+     * directly below a BUILD target already had its hitbox poking into that target's airspace
+     * under the old full-AABB-overlap check - permanently failing isSpaceClear in any crowded
+     * bottleneck even when the target cell itself was genuinely empty. The fix scopes the check
+     * to each entity's own blockPosition() (feet) instead. This proves both directions: a tall
+     * neighbor below the target no longer blocks it, but a mob whose feet are genuinely AT the
+     * target position still does.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testIsSpaceClearIgnoresTallNeighborBelowTarget(GameTestHelper helper) {
+        BlockPos relativeTarget = new BlockPos(4, 3, 4);
+        BlockPos relativeNeighborPos = relativeTarget.below();
+
+        helper.setBlock(relativeTarget, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeNeighborPos, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeNeighborPos.below(), Blocks.STONE.defaultBlockState());
+
+        BlockPos targetPos = helper.absolutePos(relativeTarget);
+        BlockPos neighborPos = helper.absolutePos(relativeNeighborPos);
+
+        ClanratEntity builder = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        builder.setPos(targetPos.getX() + 10.5, targetPos.getY(), targetPos.getZ() + 10.5);
+        helper.getLevel().addFreshEntity(builder);
+
+        ClanratEntity neighbor = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        neighbor.setPos(neighborPos.getX() + 0.5, neighborPos.getY(), neighborPos.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(neighbor);
+
+        check(SiegeInteractionHandler.isSpaceClear(helper.getLevel(), targetPos, builder),
+                "a normal-height (1.8-tall) neighbor standing directly below the target has its hitbox poking "
+                        + "into the target's airspace, but its FEET are at a different cell - isSpaceClear must "
+                        + "not treat that as occupying the target");
+
+        neighbor.setPos(targetPos.getX() + 0.5, targetPos.getY(), targetPos.getZ() + 0.5);
+        check(!SiegeInteractionHandler.isSpaceClear(helper.getLevel(), targetPos, builder),
+                "a mob actually standing (feet) at the target position must still block isSpaceClear");
+
+        helper.succeed();
+    }
+
+    /**
      * Task 7 (region-pathing-hardening): mechanical proof that
      * {@code SiegeProjectManager.setMaxCandidateProjectLength} actually bounds how far a candidate
      * line traced by {@code evaluateMacroProjects}/{@code SiegeLineTracer.trace} can reach - see

@@ -45,6 +45,18 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     protected SiegeNode.SiegeAction targetAction;
     protected boolean supportSolidAtClaim;
 
+    /**
+     * Every findTarget() override in this hierarchy (BuildFlowFieldGoal, WidenStairsGoal,
+     * SmartBreachGoal) requires the mob to be within this distance of a target before claiming
+     * it. Reused in canContinueToUse() below: this goal zeroes the mob's own horizontal velocity
+     * every tick (see tick()), so it cannot close a gap by itself - if crowd collision or a push
+     * has carried it further than this from its own claimed target, waiting for it to wander
+     * back on its own isn't a real possibility. Confirmed via a diagnostic dump: a claimant
+     * stalled for 16+ retry cycles while sitting 3.7 blocks from its own target, well past this
+     * threshold, with no way to ever close that gap under its own power.
+     */
+    protected static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
+
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
@@ -161,7 +173,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), 2.5D)) {
+                    && currentPos.closerThan(nextNode.pos(), MAX_TARGET_CLAIM_DISTANCE)) {
                 return Optional.of(nextNode);
             }
         }
@@ -203,6 +215,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
                 && this.actionTicks <= getActionDurationTicks()
                 && this.targetPos != null
                 && this.mob.level() instanceof ServerLevel serverLevel
+                && this.mob.blockPosition().closerThan(this.targetPos, MAX_TARGET_CLAIM_DISTANCE)
                 && isTargetStillValid(serverLevel, this.targetPos);
     }
 

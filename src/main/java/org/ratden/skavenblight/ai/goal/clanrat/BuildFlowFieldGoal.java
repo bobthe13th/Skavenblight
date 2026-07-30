@@ -33,7 +33,7 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
         return findEffectiveNode(BuildFlowFieldGoal::isBuildAction)
                 .filter(node -> isBuildAction(node.action()))
-                .filter(node -> serverLevel.getBlockState(node.pos()).canBeReplaced() && currentPos.closerThan(node.pos(), 2.5D))
+                .filter(node -> serverLevel.getBlockState(node.pos()).canBeReplaced() && currentPos.closerThan(node.pos(), MAX_TARGET_CLAIM_DISTANCE))
                 .map(node -> new Target(node.pos(), node.action(), computeApproachFacing(currentPos, node.pos())));
     }
 

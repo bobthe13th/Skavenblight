@@ -200,15 +200,29 @@ public class SiegeInteractionHandler {
         return flowField != null ? flowField.getRegionId() : null;
     }
 
+    /**
+     * Whether {@code pos} is clear enough to place a block into without entombing something -
+     * checked against each nearby entity's own {@code blockPosition()} (feet), not full AABB
+     * overlap. Clanrats are 1.8 blocks tall (see ModEntities#CLANRAT), so a mob simply standing
+     * on the ground one cell below/adjacent to the target already has its hitbox poking into
+     * this exact space without occupying it in any way that matters - full-AABB overlap treated
+     * that as "occupied" too, and in a crowded bottleneck there was almost always some tall
+     * neighbor's head in the way, permanently failing this check regardless of whether the
+     * target cell itself was ever actually stood in. Confirmed via a diagnostic dump: a claimant
+     * stalled 16+ cycles (of a 60-cycle budget) with the target genuinely empty.
+     */
     public static boolean isSpaceClear(ServerLevel level, BlockPos pos, LivingEntity builder) {
-        AABB box = new AABB(pos);
-        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box, entity -> entity != builder);
+        AABB searchBox = new AABB(pos).inflate(1.0D);
+        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                entity -> entity != builder && entity.blockPosition().equals(pos));
         return entities.isEmpty();
     }
 
+    /** Same feet-position scoping as {@link #isSpaceClear} - a tall neighbor whose head merely brushes {@code pos} has no reason to be shoved. */
     public static void pushOccupantsAway(ServerLevel level, BlockPos pos, PathfinderMob builder) {
-        AABB box = new AABB(pos);
-        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box);
+        AABB searchBox = new AABB(pos).inflate(1.0D);
+        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                entity -> entity.blockPosition().equals(pos));
         Vec3 center = Vec3.atCenterOf(pos);
 
         for (LivingEntity entity : entities) {
