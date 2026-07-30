@@ -263,6 +263,87 @@ public class AwaitFormationGoalGameTests {
     }
 
     /**
+     * region.contains() returns true for a provisionally-claimed-but-unbuilt connector cell too
+     * (same bitset as a genuinely walkable cell - see
+     * docs/superpowers/specs/2026-07-30-region-merge-detection-design.md's background
+     * invariants). This proves findFormationSlot() doesn't hand out such a cell as a "safe"
+     * waiting spot just because region.contains() says yes - it must also have real solid ground
+     * beneath it right now.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
+    public static void testFindFormationSlotRejectsUnbuiltConnectorCell(GameTestHelper helper) {
+        BlockPos relativeMobPos = new BlockPos(4, 2, 4);
+        BlockPos relativeContestedTarget = relativeMobPos.offset(1, 1, 0);
+        // findFormationSlot()'s ring search starts at FORMATION_MIN_RADIUS (4), not 0 - a cell
+        // right next to the mob is never even considered. This cell must sit at exactly that
+        // radius, at the very first position the ring scan visits (dx=-4, dz=-4 for r=4), so it's
+        // guaranteed to be the candidate under test rather than one of the many ordinary walkable
+        // floor cells the ring search would otherwise accept first: region-member (added below
+        // via addCell, exactly like registerConnector would), but genuinely open air underneath.
+        BlockPos relativeUnbuiltConnectorCell = relativeMobPos.offset(-4, 0, -4);
+        helper.setBlock(relativeUnbuiltConnectorCell, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeUnbuiltConnectorCell.below(), Blocks.AIR.defaultBlockState());
+
+        helper.setBlock(relativeContestedTarget, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.below(), Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.above(), Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeContestedTarget.above(2), Blocks.AIR.defaultBlockState());
+
+        BlockPos mobPos = helper.absolutePos(relativeMobPos);
+        BlockPos contestedTarget = helper.absolutePos(relativeContestedTarget);
+        BlockPos unbuiltConnectorCell = helper.absolutePos(relativeUnbuiltConnectorCell);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        Set<ChunkPos> territory = Set.of(new ChunkPos(mobPos));
+        regionMap.rebuild(helper.getLevel(), territory, mobPos);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            check(!regions.isEmpty(), "test structure should scan into at least one region");
+            Region region = regions.get(0);
+            // Provisionally claim the unbuilt connector cell into the region - exactly what
+            // RegionGraph.registerConnector does at connector-discovery time, before anything is
+            // actually built.
+            region.addCell(unbuiltConnectorCell);
+            check(region.contains(unbuiltConnectorCell),
+                    "sanity check - the provisionally-claimed cell must report contains()=true, "
+                            + "matching production's registerConnector behavior");
+
+            FlowFieldState state = new FlowFieldState(mobPos, territory);
+            state.updateInstructions(Map.of(mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)));
+            TerrainEvaluator evaluator = new TerrainEvaluator();
+            SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+            CalculationThrottler throttler = new CalculationThrottler();
+            FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+            RegionFlowField flowField = new RegionFlowField(regionMap, region.getId(), state, projectManager, calculator, throttler);
+
+            ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(mob);
+            mob.assignFlowField(flowField);
+
+            ClanratEntity claimant = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            claimant.setPos(contestedTarget.getX() + 0.5, contestedTarget.getY(), contestedTarget.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(claimant);
+            flowField.tryClaimTarget(contestedTarget, claimant);
+
+            AwaitFormationGoal goal = new AwaitFormationGoal(mob);
+            goal.setFlowField(flowField);
+
+            check(goal.canUse(), "goal should trigger: the mob's only nearby work is claimed by a different mob");
+            goal.start();
+
+            check(goal.canContinueToUse(), "the mob should still be seeking/holding a formation slot");
+            check(!flowField.isFormationSlotClaimed(unbuiltConnectorCell),
+                    "the unbuilt connector cell must NEVER be selected as a formation slot, even "
+                            + "though region.contains() reports it as a member");
+
+            regionMap.cleanup(helper.getLevel());
+        });
+    }
+
+    /**
      * Confirms AwaitFormationGoal is actually registered on ClanratEntity (integration, not unit,
      * coverage - the priority ordering itself isn't assertable from outside the entity, since
      * WrappedGoal/GoalSelector don't expose enough to check that directly). If registerGoals()

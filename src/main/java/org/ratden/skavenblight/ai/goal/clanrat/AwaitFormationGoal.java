@@ -136,6 +136,13 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
                     BlockPos candidate = searchOrigin.offset(dx, 0, dz);
                     if (!region.contains(candidate)) continue;
+                    // region.contains() alone isn't enough: a provisionally-claimed-but-unbuilt
+                    // connector cell reports true too (see RegionGraph.registerConnector and
+                    // docs/superpowers/specs/2026-07-30-region-merge-detection-design.md's
+                    // background invariants) - require real, current solid ground beneath the
+                    // candidate as well, the same live-terrain check
+                    // TerrainEvaluator.isWalkableTerrain uses for the identical reason.
+                    if (!this.mob.level().getBlockState(candidate.below()).blocksMotion()) continue;
                     if (this.flowField.isFormationSlotClaimed(candidate)) continue;
                     if (this.flowField.getInstructionMap().containsKey(candidate)) continue;
                     return Optional.of(candidate);
