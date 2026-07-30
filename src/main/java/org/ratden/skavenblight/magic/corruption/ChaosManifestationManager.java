@@ -55,7 +55,12 @@ public class ChaosManifestationManager extends SimpleJsonResourceReloadListener 
             LOGGER.warn("No chaos manifestation entries for severity {}", severity);
             return;
         }
-        int roll = level.getRandom().nextInt(ChaosManifestationTable.totalWeight(entries));
+        int totalWeight = ChaosManifestationTable.totalWeight(entries);
+        if (totalWeight <= 0) {
+            LOGGER.warn("Chaos manifestation entries for severity {} have zero total weight, skipping", severity);
+            return;
+        }
+        int roll = level.getRandom().nextInt(totalWeight);
         ChaosManifestationTable.pickWeighted(entries, roll).apply(level, target);
     }
 }

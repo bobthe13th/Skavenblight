@@ -62,6 +62,8 @@ public final class SpellCasting {
         if (!result.success()) {
             if (nearMonolith) {
                 ChaosManifestationManager.resolve(level, player, CorruptionTier.CATASTROPHIC);
+            } else if (spell.dark()) {
+                ChaosManifestationManager.resolve(level, player, Corruption.getTier(player));
             }
             return new Outcome(false, false, roll, total, 0);
         }

@@ -41,7 +41,7 @@ public class CleansingWardItem extends Item {
 
         PlayerMagicData data = serverPlayer.getData(ModAttachments.PLAYER_MAGIC.get());
         long now = serverLevel.getGameTime();
-        if (now - data.lastCleanseGameTime() < Config.cleanseCooldownTicks) {
+        if (data.lastCleanseGameTime() != 0 && now - data.lastCleanseGameTime() < Config.cleanseCooldownTicks) {
             serverPlayer.displayClientMessage(Component.literal("The Ward is spent. You must wait before it can cleanse you again."), true);
             return InteractionResultHolder.fail(stack);
         }

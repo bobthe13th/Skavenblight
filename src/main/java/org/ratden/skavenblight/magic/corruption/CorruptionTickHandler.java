@@ -51,6 +51,9 @@ public final class CorruptionTickHandler {
     }
 
     private static boolean isCarryingTome(ServerPlayer player) {
+        if (player.getOffhandItem().is(ModItems.TOME_OF_CORRUPTION.get())) {
+            return true;
+        }
         for (ItemStack stack : player.getInventory().items) {
             if (stack.is(ModItems.TOME_OF_CORRUPTION.get())) {
                 return true;

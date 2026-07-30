@@ -14,8 +14,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.block.entity.ChaosMonolithBlockEntity;
-import org.ratden.skavenblight.magic.corruption.ChaosManifestationManager;
-import org.ratden.skavenblight.magic.corruption.CorruptionTier;
 
 /**
  * Placeholder Chaos Monolith (WFRP Realms of Sorcery p.132-133): a tough, wound-tracked structure
@@ -54,7 +52,11 @@ public class ChaosMonolithBlock extends BaseEntityBlock {
             return;
         }
         if (level.getBlockEntity(pos) instanceof ChaosMonolithBlockEntity monolith) {
-            monolith.applyDamage(player);
+            boolean destroyed = monolith.applyDamage(player);
+            if (!destroyed) {
+                player.displayClientMessage(Component.literal(
+                        "The Monolith shudders. (" + monolith.getWounds() + " Wounds remaining)"), true);
+            }
         }
     }
 
@@ -69,6 +71,16 @@ public class ChaosMonolithBlock extends BaseEntityBlock {
         if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
             return InteractionResult.PASS;
         }
+        if (!(level.getBlockEntity(pos) instanceof ChaosMonolithBlockEntity monolith)) {
+            return InteractionResult.PASS;
+        }
+
+        long gameTime = serverLevel.getGameTime();
+        if (monolith.isReadOnCooldown(gameTime)) {
+            player.displayClientMessage(Component.literal(
+                    "The runes are quiet for now — their power is spent."), true);
+            return InteractionResult.CONSUME;
+        }
 
         int roll = serverLevel.getRandom().nextInt(100);
         if (roll < Config.monolithReadCorruptionChancePercent) {
@@ -80,6 +92,7 @@ public class ChaosMonolithBlock extends BaseEntityBlock {
             player.displayClientMessage(Component.literal(
                     "You resist the whispers of the runes... for now."), true);
         }
+        monolith.markRead(gameTime);
         return InteractionResult.CONSUME;
     }
 }

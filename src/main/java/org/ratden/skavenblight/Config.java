@@ -111,6 +111,8 @@ public class Config {
             .defineInRange("cleanseAmount", 15, 1, 1000);
     private static final ModConfigSpec.IntValue CLEANSE_COOLDOWN_TICKS = BUILDER.comment("Minimum ticks between a player's Cleansing Ward uses (default: one Minecraft day).")
             .defineInRange("cleanseCooldownTicks", 24000, 0, 1000000);
+    private static final ModConfigSpec.IntValue MONOLITH_READ_COOLDOWN_TICKS = BUILDER.comment("Minimum ticks between successful rune-reads on the same Chaos Monolith, regardless of who reads it (prevents spam-clicking one Monolith to instantly max Corruption).")
+            .defineInRange("monolithReadCooldownTicks", 1200, 0, 1000000);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -161,6 +163,7 @@ public class Config {
     public static int cleanseHyshRequirement;
     public static int cleanseAmount;
     public static int cleanseCooldownTicks;
+    public static int monolithReadCooldownTicks;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -211,6 +214,7 @@ public class Config {
         cleanseHyshRequirement = CLEANSE_HYSH_REQUIREMENT.get();
         cleanseAmount = CLEANSE_AMOUNT.get();
         cleanseCooldownTicks = CLEANSE_COOLDOWN_TICKS.get();
+        monolithReadCooldownTicks = MONOLITH_READ_COOLDOWN_TICKS.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();

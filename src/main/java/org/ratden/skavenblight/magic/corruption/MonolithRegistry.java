@@ -5,7 +5,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class MonolithRegistry {
 
-    private static final Map<ResourceKey<Level>, Set<BlockPos>> POSITIONS = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Set<BlockPos>> POSITIONS = new ConcurrentHashMap<>();
 
     private MonolithRegistry() {}
 

@@ -17,6 +17,7 @@ public class ChaosMonolithBlockEntity extends BlockEntity {
 
     private int wounds = Config.monolithMaxWounds;
     private int woundsSinceLastSummon = 0;
+    private long lastReadGameTime = Long.MIN_VALUE;
 
     public ChaosMonolithBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.CHAOS_MONOLITH.get(), pos, state);
@@ -74,11 +75,23 @@ public class ChaosMonolithBlockEntity extends BlockEntity {
         return wounds;
     }
 
+    /** True if this Monolith's runes were read too recently to be read again. */
+    public boolean isReadOnCooldown(long currentGameTime) {
+        return currentGameTime - lastReadGameTime < Config.monolithReadCooldownTicks;
+    }
+
+    /** Marks the runes as just having been read (success or resisted), starting the cooldown. */
+    public void markRead(long currentGameTime) {
+        lastReadGameTime = currentGameTime;
+        setChanged();
+    }
+
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
         tag.putInt("wounds", wounds);
         tag.putInt("woundsSinceLastSummon", woundsSinceLastSummon);
+        tag.putLong("lastReadGameTime", lastReadGameTime);
     }
 
     @Override
@@ -86,5 +99,6 @@ public class ChaosMonolithBlockEntity extends BlockEntity {
         super.loadAdditional(tag, registries);
         wounds = tag.contains("wounds") ? tag.getInt("wounds") : Config.monolithMaxWounds;
         woundsSinceLastSummon = tag.getInt("woundsSinceLastSummon");
+        lastReadGameTime = tag.getLong("lastReadGameTime");
     }
 }

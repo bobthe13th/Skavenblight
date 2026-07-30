@@ -180,6 +180,10 @@
   "spell.skavenblight.steal_life.name": "Steal Life",
   "spell.skavenblight.steal_life.description": "The caster draws the vital warmth from the target's body.",
   "spell.skavenblight.icy_grip_of_death.name": "Icy Grip of Death",
-  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl."
+  "spell.skavenblight.icy_grip_of_death.description": "A graveyard chill seizes the target's limbs, slowing them to a crawl.",
+  "spell.skavenblight.grasp_of_dhar.name": "Grasp of Dhar",
+  "spell.skavenblight.grasp_of_dhar.description": "A forbidden pull at the caster's own vitality, siphoned from the black side of Shyish. Requires Dhar to be unlocked.",
+
+  "effect.skavenblight.tainted": "Tainted"
 
 }
