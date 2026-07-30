@@ -34,7 +34,8 @@ public class SiegeInteractionHandler {
             Direction facing,
             SiegeNode.SiegeAction action,
             RegionFlowField flowField,
-            LivingEntity actor
+            LivingEntity actor,
+            boolean supportSolidAtClaim
     ) {
         if (action == SiegeNode.SiegeAction.WALK || action == SiegeNode.SiegeAction.LEAP) {
             return;
@@ -49,19 +50,20 @@ public class SiegeInteractionHandler {
             return;
         }
 
-        if ((action == SiegeNode.SiegeAction.BUILD_STAIR
-                || action == SiegeNode.SiegeAction.BUILD_PILLAR
-                || action == SiegeNode.SiegeAction.BUILD_SPIRAL)
-                && !level.getBlockState(pos.below()).blocksMotion()) {
-            // The support below was solid when this node was selected (see
-            // WidenStairsGoal.findTarget()/canHostStair, TerrainEvaluator.findGroundBelow), but
-            // placement happens getActionDurationTicks() + up to getMaxStalledTicks() ticks
-            // later - a different clanrat's concurrent MINE/headroom-clear action nearby can
-            // remove that support in the meantime. Placing anyway produces an unreachable
-            // floating step that nothing can climb to continue the chain, silently stalling the
-            // whole build (the reported "group places one floating stair and stops" bug).
-            // BUILD_BRIDGE/BUILD_LANDING are deliberately excluded - they're expected to have no
-            // support below at placement time (that's what they're for).
+        // supportSolidAtClaim (see AbstractSiegeConstructionGoal#supportSolidAtClaim) is only
+        // true when this target's support was ALREADY solid back when it was selected/claimed -
+        // never for a macro SiegeProject's next unbuilt chain step, whose support is the PREVIOUS
+        // step, built moments earlier (a placed stair/pillar/spiral is self-supporting for
+        // pathing purposes regardless of what ends up below it - see
+        // TerrainEvaluator.isWalkableTerrain's scaffold short-circuit). So this guard only fires
+        // for the actual race: support that WAS there got removed by a different clanrat's
+        // concurrent MINE/headroom-clear action sometime in the getActionDurationTicks() +
+        // getMaxStalledTicks() window between claim and execution. Placing anyway there would
+        // produce an unreachable floating step and silently stall the whole build (the reported
+        // "group places one floating stair and stops" bug) - but requiring support unconditionally
+        // (an earlier version of this guard did) wrongly blocked every legitimate mid-chain step,
+        // which never had support to begin with, causing construction to stall on turn one instead.
+        if (action.isClimbDependent() && supportSolidAtClaim && !level.getBlockState(pos.below()).blocksMotion()) {
             SiegeActivityLog.record(level.getGameTime(), actor, pos, action,
                     "aborted placement - support at " + pos.below().toShortString() + " no longer solid, would float",
                     regionIdOf(flowField));

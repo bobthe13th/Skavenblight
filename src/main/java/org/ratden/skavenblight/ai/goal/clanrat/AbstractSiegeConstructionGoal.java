@@ -43,6 +43,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     protected BlockPos targetPos;
     protected Direction facing;
     protected SiegeNode.SiegeAction targetAction;
+    protected boolean supportSolidAtClaim;
 
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
@@ -198,6 +199,14 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.targetAction = target.action();
         this.facing = target.facing() != null ? target.facing() : this.mob.getDirection();
         this.flowField.tryClaimTarget(this.targetPos, this.mob);
+
+        // Snapshot of whether solid ground already existed below a climb-dependent target at the
+        // moment it was claimed - see SiegeAction#isClimbDependent's javadoc for why "no support
+        // yet" must NOT by itself be treated as broken (a macro project's next unbuilt chain step
+        // always starts this way). Only a target that HAD support at claim time and lost it before
+        // execution is the actual race worth guarding against.
+        this.supportSolidAtClaim = this.targetAction.isClimbDependent()
+                && this.mob.level().getBlockState(this.targetPos.below()).blocksMotion();
     }
 
     @Override

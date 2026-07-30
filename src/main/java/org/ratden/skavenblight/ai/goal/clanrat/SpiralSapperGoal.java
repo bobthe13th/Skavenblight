@@ -137,7 +137,8 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
                         this.currentFacing.getOpposite(),
                         SiegeNode.SiegeAction.BUILD_STAIR,
                         this.flowField,
-                        this.mob
+                        this.mob,
+                        false
                 );
                 this.flowField.forceRecalculation(this.currentTarget);
                 this.stalledTicks = 0;
