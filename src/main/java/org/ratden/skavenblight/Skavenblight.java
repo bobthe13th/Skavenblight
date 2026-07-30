@@ -92,6 +92,8 @@ public class Skavenblight {
 
         ModSounds.register(modEventBus);
 
+        org.ratden.skavenblight.magic.corruption.ModMobEffects.register(modEventBus);
+
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
 

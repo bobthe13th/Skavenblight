@@ -88,6 +88,10 @@ public class Config {
     private static final ModConfigSpec.IntValue WIND_SOURCE_BLOCK_BONUS = BUILDER.comment("Baseline bonus per tagged wind_source block placed in a chunk (see TaggedBlockInfluence).")
             .defineInRange("windSourceBlockBonus", 15, 0, 1000);
 
+    // --- Corruption Configs ---
+    private static final ModConfigSpec.IntValue CORRUPTION_TICK_INTERVAL_TICKS = BUILDER.comment("How often (in ticks) each player's Tainted effect is refreshed and their Tome-of-Corruption carry drain is checked.")
+            .defineInRange("corruptionTickIntervalTicks", 6000, 20, 72000);
+
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
 
@@ -125,6 +129,9 @@ public class Config {
     // --- Wind Influence Public Variables ---
     public static int windSourceBlockBonus;
 
+    // --- Corruption Public Variables ---
+    public static int corruptionTickIntervalTicks;
+
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
     public static int wlCoilCostPerShot;
@@ -161,6 +168,9 @@ public class Config {
 
         // Load Wind Influence Configs
         windSourceBlockBonus = WIND_SOURCE_BLOCK_BONUS.get();
+
+        // Load Corruption Configs
+        corruptionTickIntervalTicks = CORRUPTION_TICK_INTERVAL_TICKS.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();

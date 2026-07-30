@@ -18,6 +18,7 @@ public class ModMagic {
     public static void register(IEventBus modEventBus) {
         ModAttachments.register(modEventBus);
         NeoForge.EVENT_BUS.addListener(ModMagic::onAddReloadListeners);
+        NeoForge.EVENT_BUS.addListener(org.ratden.skavenblight.magic.corruption.CorruptionTickHandler::onPlayerTick);
     }
 
     private static void onAddReloadListeners(AddReloadListenerEvent event) {
