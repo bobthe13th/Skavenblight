@@ -105,6 +105,12 @@ public class Config {
             .defineInRange("monolithCastingRadiusBlocks", 20, 1, 200);
     private static final ModConfigSpec.IntValue TOME_CARRY_CORRUPTION_PER_CHECK = BUILDER.comment("Corruption Points gained per corruptionTickIntervalTicks while a Tome of Corruption is anywhere in the player's inventory.")
             .defineInRange("tomeCarryCorruptionPerCheck", 1, 0, 100);
+    private static final ModConfigSpec.IntValue CLEANSE_HYSH_REQUIREMENT = BUILDER.comment("Minimum local Hysh Wind level required to use a Cleansing Ward.")
+            .defineInRange("cleanseHyshRequirement", 300, 0, 10000);
+    private static final ModConfigSpec.IntValue CLEANSE_AMOUNT = BUILDER.comment("Corruption Points removed by a single successful Cleansing Ward use.")
+            .defineInRange("cleanseAmount", 15, 1, 1000);
+    private static final ModConfigSpec.IntValue CLEANSE_COOLDOWN_TICKS = BUILDER.comment("Minimum ticks between a player's Cleansing Ward uses (default: one Minecraft day).")
+            .defineInRange("cleanseCooldownTicks", 24000, 0, 1000000);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -152,6 +158,9 @@ public class Config {
     public static int monolithReadCorruptionChancePercent;
     public static int monolithCastingRadiusBlocks;
     public static int tomeCarryCorruptionPerCheck;
+    public static int cleanseHyshRequirement;
+    public static int cleanseAmount;
+    public static int cleanseCooldownTicks;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -199,6 +208,9 @@ public class Config {
         monolithReadCorruptionChancePercent = MONOLITH_READ_CORRUPTION_CHANCE_PERCENT.get();
         monolithCastingRadiusBlocks = MONOLITH_CASTING_RADIUS_BLOCKS.get();
         tomeCarryCorruptionPerCheck = TOME_CARRY_CORRUPTION_PER_CHECK.get();
+        cleanseHyshRequirement = CLEANSE_HYSH_REQUIREMENT.get();
+        cleanseAmount = CLEANSE_AMOUNT.get();
+        cleanseCooldownTicks = CLEANSE_COOLDOWN_TICKS.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();

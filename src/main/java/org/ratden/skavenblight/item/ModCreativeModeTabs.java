@@ -54,6 +54,7 @@ public class ModCreativeModeTabs {
                         output.accept(ModItems.WARPSTONE_BOOTS);
 
                         output.accept(ModItems.TOME_OF_CORRUPTION);
+                        output.accept(ModItems.CLEANSING_WARD);
                     })).build());
 
 

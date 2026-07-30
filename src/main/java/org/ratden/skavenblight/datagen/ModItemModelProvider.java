@@ -63,6 +63,7 @@ public class ModItemModelProvider extends ItemModelProvider {
         basicItem(ModItems.DEBUG_FLOW_FIELD_READER.asItem());
         basicItem(ModBlocks.WARP_LIGHTNING_COIL.asItem());
         basicItem(ModItems.TOME_OF_CORRUPTION.get());
+        basicItem(ModItems.CLEANSING_WARD.get());
     }
 
 
