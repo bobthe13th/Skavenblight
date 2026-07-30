@@ -34,7 +34,8 @@ public class SiegeInteractionHandler {
             Direction facing,
             SiegeNode.SiegeAction action,
             RegionFlowField flowField,
-            LivingEntity actor
+            LivingEntity actor,
+            boolean supportSolidAtClaim
     ) {
         if (action == SiegeNode.SiegeAction.WALK || action == SiegeNode.SiegeAction.LEAP) {
             return;
@@ -46,6 +47,26 @@ public class SiegeInteractionHandler {
         }
 
         if (!level.getBlockState(pos).canBeReplaced()) {
+            return;
+        }
+
+        // supportSolidAtClaim (see AbstractSiegeConstructionGoal#supportSolidAtClaim) is only
+        // true when this target's support was ALREADY solid back when it was selected/claimed -
+        // never for a macro SiegeProject's next unbuilt chain step, whose support is the PREVIOUS
+        // step, built moments earlier (a placed stair/pillar/spiral is self-supporting for
+        // pathing purposes regardless of what ends up below it - see
+        // TerrainEvaluator.isWalkableTerrain's scaffold short-circuit). So this guard only fires
+        // for the actual race: support that WAS there got removed by a different clanrat's
+        // concurrent MINE/headroom-clear action sometime in the getActionDurationTicks() +
+        // getMaxStalledTicks() window between claim and execution. Placing anyway there would
+        // produce an unreachable floating step and silently stall the whole build (the reported
+        // "group places one floating stair and stops" bug) - but requiring support unconditionally
+        // (an earlier version of this guard did) wrongly blocked every legitimate mid-chain step,
+        // which never had support to begin with, causing construction to stall on turn one instead.
+        if (action.isClimbDependent() && supportSolidAtClaim && !level.getBlockState(pos.below()).blocksMotion()) {
+            SiegeActivityLog.record(level.getGameTime(), actor, pos, action,
+                    "aborted placement - support at " + pos.below().toShortString() + " no longer solid, would float",
+                    regionIdOf(flowField));
             return;
         }
 
@@ -179,15 +200,29 @@ public class SiegeInteractionHandler {
         return flowField != null ? flowField.getRegionId() : null;
     }
 
+    /**
+     * Whether {@code pos} is clear enough to place a block into without entombing something -
+     * checked against each nearby entity's own {@code blockPosition()} (feet), not full AABB
+     * overlap. Clanrats are 1.8 blocks tall (see ModEntities#CLANRAT), so a mob simply standing
+     * on the ground one cell below/adjacent to the target already has its hitbox poking into
+     * this exact space without occupying it in any way that matters - full-AABB overlap treated
+     * that as "occupied" too, and in a crowded bottleneck there was almost always some tall
+     * neighbor's head in the way, permanently failing this check regardless of whether the
+     * target cell itself was ever actually stood in. Confirmed via a diagnostic dump: a claimant
+     * stalled 16+ cycles (of a 60-cycle budget) with the target genuinely empty.
+     */
     public static boolean isSpaceClear(ServerLevel level, BlockPos pos, LivingEntity builder) {
-        AABB box = new AABB(pos);
-        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box, entity -> entity != builder);
+        AABB searchBox = new AABB(pos).inflate(1.0D);
+        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                entity -> entity != builder && entity.blockPosition().equals(pos));
         return entities.isEmpty();
     }
 
+    /** Same feet-position scoping as {@link #isSpaceClear} - a tall neighbor whose head merely brushes {@code pos} has no reason to be shoved. */
     public static void pushOccupantsAway(ServerLevel level, BlockPos pos, PathfinderMob builder) {
-        AABB box = new AABB(pos);
-        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box);
+        AABB searchBox = new AABB(pos).inflate(1.0D);
+        List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                entity -> entity.blockPosition().equals(pos));
         Vec3 center = Vec3.atCenterOf(pos);
 
         for (LivingEntity entity : entities) {

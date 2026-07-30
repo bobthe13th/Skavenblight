@@ -7,7 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.client.ChainLightningClientHandler;
+import org.ratden.skavenblight.client.ClientChainLightningHandler;
 import java.util.List;
 
 public record ChainLightningPayload(List<Integer> hitEntityIds) implements CustomPacketPayload {
@@ -27,6 +27,10 @@ public record ChainLightningPayload(List<Integer> hitEntityIds) implements Custo
     }
 
     public static void handleChainLightning(final ChainLightningPayload payload, final IPayloadContext context) {
-        context.enqueueWork(() -> ChainLightningClientHandler.spawnParticles(payload));
+        // Delegates to a client-only class instead of referencing Minecraft/ClientLevel here -
+        // see ClientChainLightningHandler's javadoc for why (this method's own bytecode must stay
+        // free of client-only symbols, or NeoForge's RuntimeDistCleaner refuses to load this
+        // class - and with it the whole mod - on a dedicated server).
+        context.enqueueWork(() -> ClientChainLightningHandler.handle(payload));
     }
 }

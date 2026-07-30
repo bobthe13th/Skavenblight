@@ -42,7 +42,20 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
 
     protected BlockPos targetPos;
     protected Direction facing;
-    private SiegeNode.SiegeAction targetAction;
+    protected SiegeNode.SiegeAction targetAction;
+    protected boolean supportSolidAtClaim;
+
+    /**
+     * Every findTarget() override in this hierarchy (BuildFlowFieldGoal, WidenStairsGoal,
+     * SmartBreachGoal) requires the mob to be within this distance of a target before claiming
+     * it. Reused in canContinueToUse() below: this goal zeroes the mob's own horizontal velocity
+     * every tick (see tick()), so it cannot close a gap by itself - if crowd collision or a push
+     * has carried it further than this from its own claimed target, waiting for it to wander
+     * back on its own isn't a real possibility. Confirmed via a diagnostic dump: a claimant
+     * stalled for 16+ retry cycles while sitting 3.7 blocks from its own target, well past this
+     * threshold, with no way to ever close that gap under its own power.
+     */
+    public static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
@@ -52,6 +65,41 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     @Override
     public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
+    }
+
+    /**
+     * Coordination-only: this goal's own findTarget() result, but ONLY if a valid target exists
+     * AND it's currently claimed by a different, living mob - i.e. "I have real work to do here,
+     * but someone else already has it." Empty in every other case (no target at all, or an
+     * unclaimed target this goal would just claim normally on its own next canUse() check) -
+     * callers only care about the specific "blocked by someone else" case. Pure read, same as
+     * findTarget()/canUse() - safe to call from outside this goal's own tick cycle (see
+     * AwaitFormationGoal, which calls this on sibling goals it doesn't own).
+     */
+    public Optional<BlockPos> peekClaimedTarget() {
+        if (this.flowField == null) return Optional.empty();
+        return findTarget()
+                .map(Target::pos)
+                .filter(pos -> this.flowField.isTargetClaimed(pos));
+    }
+
+    /**
+     * Diagnostic-only: this goal's own progress on its currently claimed target, or a fixed
+     * string if it doesn't hold one right now. Exists to answer "the claimant is alive and
+     * plausibly close enough - so why hasn't it finished?" - actionTicks/stalledTicks/
+     * nextAllowedActionTime are otherwise fully private to the goal instance, invisible to any
+     * external diagnostic (including PathingDebugFileWriter's claimant lookup).
+     */
+    public String describeState() {
+        if (this.targetPos == null) return "<no claimed target>";
+        long now = this.mob.level().getGameTime();
+        return String.format(
+                "targetPos=%s action=%s actionTicks=%d/%d stalledTicks=%d/%s flowFieldNull=%b "
+                        + "nextAllowedActionTime=%d(now=%d, %s) supportSolidAtClaim=%b",
+                this.targetPos.toShortString(), this.targetAction, this.actionTicks, getActionDurationTicks(),
+                this.stalledTicks, getMaxStalledTicks() > 0 ? String.valueOf(getMaxStalledTicks()) : "unbounded",
+                this.flowField == null, this.nextAllowedActionTime, now,
+                now < this.nextAllowedActionTime ? "IN COOLDOWN" : "clear", this.supportSolidAtClaim);
     }
 
     // =================================================================================
@@ -141,7 +189,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), 2.5D)) {
+                    && currentPos.closerThan(nextNode.pos(), MAX_TARGET_CLAIM_DISTANCE)) {
                 return Optional.of(nextNode);
             }
         }
@@ -183,6 +231,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
                 && this.actionTicks <= getActionDurationTicks()
                 && this.targetPos != null
                 && this.mob.level() instanceof ServerLevel serverLevel
+                && this.mob.blockPosition().closerThan(this.targetPos, MAX_TARGET_CLAIM_DISTANCE)
                 && isTargetStillValid(serverLevel, this.targetPos);
     }
 
@@ -198,6 +247,14 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.targetAction = target.action();
         this.facing = target.facing() != null ? target.facing() : this.mob.getDirection();
         this.flowField.tryClaimTarget(this.targetPos, this.mob);
+
+        // Snapshot of whether solid ground already existed below a climb-dependent target at the
+        // moment it was claimed - see SiegeAction#isClimbDependent's javadoc for why "no support
+        // yet" must NOT by itself be treated as broken (a macro project's next unbuilt chain step
+        // always starts this way). Only a target that HAD support at claim time and lost it before
+        // execution is the actual race worth guarding against.
+        this.supportSolidAtClaim = this.targetAction.isClimbDependent()
+                && this.mob.level().getBlockState(this.targetPos.below()).blocksMotion();
     }
 
     @Override

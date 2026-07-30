@@ -33,7 +33,7 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
         return findEffectiveNode(BuildFlowFieldGoal::isBuildAction)
                 .filter(node -> isBuildAction(node.action()))
-                .filter(node -> serverLevel.getBlockState(node.pos()).canBeReplaced() && currentPos.closerThan(node.pos(), 2.5D))
+                .filter(node -> serverLevel.getBlockState(node.pos()).canBeReplaced() && currentPos.closerThan(node.pos(), MAX_TARGET_CLAIM_DISTANCE))
                 .map(node -> new Target(node.pos(), node.action(), computeApproachFacing(currentPos, node.pos())));
     }
 
@@ -59,12 +59,13 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected boolean isTargetStillValid(ServerLevel level, BlockPos pos) {
-        return level.getBlockState(pos).canBeReplaced();
+        return level.getBlockState(pos).canBeReplaced()
+                && (!this.supportSolidAtClaim || level.getBlockState(pos.below()).blocksMotion());
     }
 
     @Override
     protected void execute(ServerLevel level, BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {
-        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField, this.mob);
+        SiegeInteractionHandler.constructSiegeBlock(level, pos, facing, action, this.flowField, this.mob, this.supportSolidAtClaim);
     }
 
     @Override
@@ -74,6 +75,14 @@ public class BuildFlowFieldGoal extends AbstractSiegeConstructionGoal {
 
     @Override
     protected void onChainComplete(ServerLevel level, BlockPos completedPos) {
+        // this.flowField can go null at any time via ClanratEntity.assignFlowField's periodic
+        // region-membership re-check (every 40 ticks), decoupled from whether this goal is
+        // mid-chain - see AbstractSiegeConstructionGoal's own default onChainComplete, which
+        // already guards against exactly this. This override never got that guard and crashed
+        // the server with an NPE on this exact race (confirmed via a real crash report: a
+        // successful build's onChainComplete ran the same tick the field was reassigned to null).
+        if (this.flowField == null) return;
+
         SiegeNode nextNode = this.flowField.getNextSiegeNode(level, completedPos);
         boolean isEndOfMacroProject = (nextNode == null || !isBuildAction(nextNode.action()));
 

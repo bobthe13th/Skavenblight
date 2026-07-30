@@ -75,7 +75,14 @@ separate a region's "natural" flood-fill bounds from its full addCell-inclusive 
 only the former for `localBounds`'s chunk-selection purposes. A parking-note comment recording this
 lives directly on `TerritoryRegionMap.reclaimConnectorCells`.
 
-## Finding B: duplicate `Region` objects at merge completion (unfixed, real bug)
+## Finding B: duplicate `Region` objects at merge completion (fixed)
+
+**Resolution (2026-07-30):** fixed by making `recomputeDirtyRegions`'s own
+`rescanned.size() != 1` check detect the merge directly (Option C below) - see
+docs/superpowers/specs/2026-07-30-region-merge-detection-design.md for the full design, and the
+`absorbedForeignRegion` check in `TerritoryRegionMap.recomputeDirtyRegions` for the shipped fix.
+The rest of this section (below) documents the finding as it stood before that fix, for the
+historical trace and empirical evidence - it is retained deliberately, not stale leftovers.
 
 Distinct from, and more serious than, Finding A. `recomputeDirtyRegions`'s fast path (the
 non-topology-changed branch) has no early `return` after processing a region id, unlike its
@@ -126,8 +133,9 @@ does. In short: confirmed reproducible in GameTest for a floor-support merge (vi
 reporting convention); confirmed-plausible for a production wall-break merge; not yet confirmed
 reachable via production's actual event path for a floor-support merge specifically.
 
-**Not fixed in this effort** - deliberately, because a correct fix requires a real design decision,
-not a small patch. Three options were identified:
+**Was not fixed in this effort** - deliberately, because a correct fix required a real design
+decision, not a small patch. Three options were identified (Option C is the one that later
+shipped - see the resolution note at the top of this section):
 
 - **Option A**: mirror the topology-changed branch's early-`return`-after-first-hit semantics onto
   the fast path, so at most one id per batch can complete a fast-path pass - but this changes
@@ -139,14 +147,17 @@ not a small patch. Three options were identified:
   publishing - correct in spirit, but non-trivial to implement efficiently and raises its own
   question of which id "wins" and what happens to the losing id's `regionStates`/
   `regionFlowFields`/`regionGraph` entries.
-- **Option C**: fix `rescanned.size() != 1`'s own merge-blindness directly - detect that a rescan's
-  single resulting piece is larger than the old region's own cell count by more than the region's
-  own dirty change could plausibly explain, and treat that as a topology change too. The most
-  principled option, but requires a reliable heuristic for "this rescan silently absorbed
-  something."
+- **Option C** (shipped): fix `rescanned.size() != 1`'s own merge-blindness directly - detect that
+  a rescan's single resulting piece is larger than the old region's own cell count by more than the
+  region's own dirty change could plausibly explain, and treat that as a topology change too. The
+  most principled option, and the reliable heuristic it needed turned out to be the delta-based
+  `absorbedForeignRegion` check: a rescan's cells that weren't in the old region, checked against
+  the current `RegionIndex` for foreign ownership (see
+  docs/superpowers/specs/2026-07-30-region-merge-detection-design.md).
 
-A parking-note comment recording this lives on `recomputeDirtyRegions`'s
-`boolean topologyChanged = rescanned.size() != 1;` line and on `reclaimConnectorCells`'s javadoc.
+A parking-note comment previously recorded this on `recomputeDirtyRegions`'s
+`boolean topologyChanged = rescanned.size() != 1;` line and on `reclaimConnectorCells`'s javadoc;
+both have since been updated to reflect the fix above.
 
 ## Finding C: other measured facts and conventions from individual task dispatches
 

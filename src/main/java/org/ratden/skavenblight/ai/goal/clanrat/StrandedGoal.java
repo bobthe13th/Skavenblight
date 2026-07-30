@@ -176,6 +176,6 @@ public class StrandedGoal extends Goal {
                 result.instructions().size(), result.endPos() != null ? result.endPos().toShortString() : "?");
 
         result.instructions().forEach((pos, node) ->
-                SiegeInteractionHandler.constructSiegeBlock(serverLevel, pos, mob.getDirection(), node.action(), null, this.mob));
+                SiegeInteractionHandler.constructSiegeBlock(serverLevel, pos, mob.getDirection(), node.action(), null, this.mob, false));
     }
 }

@@ -25,7 +25,7 @@ public class SmartBreachGoal extends AbstractSiegeConstructionGoal {
 
         return findEffectiveNode(SmartBreachGoal::isBreachAction)
                 .filter(node -> isBreachAction(node.action()))
-                .filter(node -> !serverLevel.getBlockState(node.pos()).isAir() && currentPos.closerThan(node.pos(), 2.5D))
+                .filter(node -> !serverLevel.getBlockState(node.pos()).isAir() && currentPos.closerThan(node.pos(), MAX_TARGET_CLAIM_DISTANCE))
                 .map(node -> new Target(node.pos(), node.action()));
     }
 
