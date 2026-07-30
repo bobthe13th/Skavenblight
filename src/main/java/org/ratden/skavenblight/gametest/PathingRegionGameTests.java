@@ -1350,10 +1350,88 @@ public class PathingRegionGameTests {
             // go up by 1 and this assertion's margin would shrink accordingly - a future fix
             // changing this number is expected, not a regression, and should not be "fixed" by
             // just raising the threshold without re-reading why it moved.
-            check(regionMap.getTopologyRebuildCount() <= 3,
+            // Post-fix: the merge-completing placement must now correctly register as a
+            // topology change (the whole point of this fix), so this bound is expected to be
+            // one higher than the pre-fix threshold, not the same number - see
+            // docs/superpowers/specs/2026-07-30-region-merge-detection-design.md for why this
+            // moving is the fix working, not a regression.
+            check(regionMap.getTopologyRebuildCount() <= 4,
                     "filling in one " + FILL_COLUMN_COUNT + "-block-wide connector triggered "
                             + regionMap.getTopologyRebuildCount()
                             + " full topology rebuilds - expected at most a handful, not one per block");
+
+            // The actual regression guard for Finding B: exactly one region should now cover
+            // both probes (no stale duplicate), and no connector should remain listed between
+            // ids that no longer represent distinct regions.
+            check(finalRegions.size() == 1,
+                    "expected the near and far regions to have fully merged into exactly one "
+                            + "region once the connector's gap closed - found " + finalRegions.size()
+                            + " regions instead (extra regions mean the merge was missed)");
+            check(nearProbeId != null && nearProbeId.equals(farProbeId),
+                    "near and far probes should resolve to the SAME region after a genuine merge - "
+                            + "nearProbeId=" + nearProbeId + " farProbeId=" + farProbeId);
+            check(finalConnectors.stream().noneMatch(c ->
+                            (c.regionA() == nearProbeId || c.regionB() == nearProbeId)
+                                    && (c.regionA() == farProbeId || c.regionB() == farProbeId)),
+                    "no connector should remain between the near and far region ids after they've "
+                            + "genuinely merged into one region - found a stale one");
+            regionMap.cleanup(helper.getLevel());
+        });
+    }
+
+    /**
+     * Confirms Task 2's merge-detection check doesn't over-trigger: an ordinary block change with
+     * no connector involved at all must still take the fast path (blockChangeRebuildCount
+     * increments, topologyRebuildCount does NOT), exactly as before this fix. Mirrors
+     * testConnectorCellsSurviveADirtyRegionRescan's geometry but WITHOUT a connector - a single
+     * region, one unrelated interior block change.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 8000, skyAccess = true)
+    public static void testOrdinaryChangeWithNoConnectorStillTakesFastPath(GameTestHelper helper) {
+        // Rebased onto anchorChunkFor's baseX/baseZ (like testConnectorCellsSurviveADirtyRegionRescan,
+        // whose geometry this mirrors) rather than deriving territory from nexusPos alone: GameTest
+        // does not place structures at 16-aligned world positions (see this class's own alignment
+        // proof), so nexusPos and an independently-computed unrelatedPos can straddle a chunk
+        // boundary depending on the run's placement offset. Since territory only ever covers the
+        // chunk(s) it's given, an unrelatedPos landing outside it resolves to no region at all
+        // (regionIdAt returns null for every neighbor), so onBlockChanged below would never mark
+        // any region dirty and tick() would return early forever - blockChangeRebuildCount stuck at
+        // 0, not because the fast path is broken but because the change was never even noticed.
+        // Anchoring both positions to the same single-chunk territory guarantees they're always in
+        // it.
+        ChunkAnchor anchor = anchorChunkFor(helper);
+        Set<ChunkPos> territory = Set.of(anchor.chunk());
+        int baseX = anchor.baseX();
+        int baseZ = anchor.baseZ();
+
+        BlockPos relativeNexusPos = new BlockPos(baseX + 4, 1, baseZ + 4);
+        helper.setBlock(relativeNexusPos, Blocks.STONE.defaultBlockState());
+        BlockPos nexusPos = helper.absolutePos(relativeNexusPos);
+
+        BlockPos unrelatedPos = helper.absolutePos(new BlockPos(baseX + 10, 2, baseZ + 10));
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        regionMap.rebuild(helper.getLevel(), territory, nexusPos);
+
+        boolean[] changeReported = {false};
+
+        helper.succeedWhen(() -> {
+            regionMap.tick(helper.getLevel());
+            check(!regionMap.isCalculating(), "region map still calculating");
+
+            if (!changeReported[0]) {
+                regionMap.onBlockChanged(unrelatedPos);
+                changeReported[0] = true;
+                check(false, "waiting for the dirty recompute to run");
+            }
+
+            check(regionMap.getBlockChangeRebuildCount() > 0,
+                    "expected the fast path to have run at least once by now (blockChangeRebuildCount="
+                            + regionMap.getBlockChangeRebuildCount() + ")");
+            check(regionMap.getTopologyRebuildCount() == 0,
+                    "an unrelated single-region change with no connector should never trigger a full "
+                            + "topology rebuild - topologyRebuildCount=" + regionMap.getTopologyRebuildCount());
+
             regionMap.cleanup(helper.getLevel());
         });
     }

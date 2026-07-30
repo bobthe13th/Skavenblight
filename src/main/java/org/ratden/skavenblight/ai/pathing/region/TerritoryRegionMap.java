@@ -550,9 +550,11 @@ public class TerritoryRegionMap {
             List<Region> rescanned = regionScanner.scan(snapshot, localBounds, oldRegion.getMin(),
                     snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
 
-            // PARKING NOTE (Task 9, not yet resolved): this check reliably flags a SPLIT
+            // HISTORICAL NOTE (Task 9 parking note, resolved by Task 2 - see
+            // docs/superpowers/specs/2026-07-30-region-merge-detection-design.md): the plain
+            // `rescanned.size() != 1` check below reliably flags a SPLIT
             // (rescanned.size() > 1 - more pieces than before) but silently MISSES a completing
-            // MERGE. When a connector's gap fully closes, rescanning EITHER old endpoint region's
+            // MERGE on its own. When a connector's gap fully closes, rescanning EITHER old endpoint region's
             // own localBounds (already inflated by addCell to cover the other endpoint's chunk -
             // see reclaimConnectorCells's own parking note) now finds exactly 1 piece: itself,
             // having absorbed what used to be the other region. rescanned.size() != 1 reads that
@@ -568,10 +570,13 @@ public class TerritoryRegionMap {
             // regionGraph/routeTree left completely stale (never rebuilt, since neither id
             // triggered rebuildRegionsAndGraph), and RegionIndex's last-write-wins tie-break
             // silently orphaning one of the two duplicates with no generation bump to signal it.
-            // This is a real, distinct, UNFIXED bug (not merely the topology-changed branch firing
-            // too often, which is reclaimConnectorCells's own, separate parking note) - see that
-            // method's javadoc for the full trace and why a fix wasn't attempted opportunistically
-            // here. Production reachability is NOT uniform across scenarios: confirmed-plausible
+            // This WAS a real, distinct bug (not merely the topology-changed branch firing
+            // too often, which is reclaimConnectorCells's own, separate parking note - see that
+            // method's javadoc for the full trace) - Task 2's `absorbedForeignRegion` check just
+            // below closes it by detecting exactly this "rescan came back as 1 piece, but that
+            // piece now contains cells the index still attributes to a DIFFERENT region id" signal
+            // and routing it into the topology-changed branch instead. Production reachability is
+            // NOT uniform across scenarios: confirmed-plausible
             // for a same-level WALL-break-type merge (the same-Y flanking cells on either side of
             // the wall were ALREADY indexed region members before the break, so production's real
             // neighborsAndSelf check succeeds immediately there), but NOT yet confirmed for a
@@ -587,7 +592,12 @@ public class TerritoryRegionMap {
             // and never reaches this method at all for that case. See
             // docs/pathing/region-pathing-hardening-findings.md's Finding B ("Production
             // reachability is scenario-dependent") for the full reconciliation.
-            boolean topologyChanged = rescanned.size() != 1;
+            boolean absorbedForeignRegion = rescanned.size() == 1 && rescanned.get(0).cellsNotIn(oldRegion).stream()
+                    .anyMatch(pos -> {
+                        Integer owner = regionIndex.regionIdAt(pos);
+                        return owner != null && owner != regionId;
+                    });
+            boolean topologyChanged = rescanned.size() != 1 || absorbedForeignRegion;
             if (!topologyChanged) {
                 // Same single region, just recompute its local field against the current route tree.
                 //
