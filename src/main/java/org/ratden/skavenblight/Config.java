@@ -101,6 +101,8 @@ public class Config {
             .defineInRange("monolithWoundsPerDaemonSummon", 50, 1, 10000);
     private static final ModConfigSpec.IntValue MONOLITH_READ_CORRUPTION_CHANCE_PERCENT = BUILDER.comment("Percent chance that reading a Chaos Monolith's runes grants Corruption Points (WFRP source: failing a Hard(-20%) Will Power Test).")
             .defineInRange("monolithReadCorruptionChancePercent", 60, 0, 100);
+    private static final ModConfigSpec.IntValue MONOLITH_CASTING_RADIUS_BLOCKS = BUILDER.comment("Radius in blocks around a Chaos Monolith where casting gets a bonus but any failure triggers a Catastrophic Chaos Manifestation (WFRP source: 100 feet, approximated at Minecraft scale).")
+            .defineInRange("monolithCastingRadiusBlocks", 20, 1, 200);
 
     // a list of strings that are treated as resource locations for items
     private static final ModConfigSpec.ConfigValue<List<? extends String>> ITEM_STRINGS = BUILDER.comment("A list of items to log on common setup.").defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), Config::validateItemName);
@@ -146,6 +148,7 @@ public class Config {
     public static int monolithDamagePerHit;
     public static int monolithWoundsPerDaemonSummon;
     public static int monolithReadCorruptionChancePercent;
+    public static int monolithCastingRadiusBlocks;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -191,6 +194,7 @@ public class Config {
         monolithDamagePerHit = MONOLITH_DAMAGE_PER_HIT.get();
         monolithWoundsPerDaemonSummon = MONOLITH_WOUNDS_PER_DAEMON_SUMMON.get();
         monolithReadCorruptionChancePercent = MONOLITH_READ_CORRUPTION_CHANCE_PERCENT.get();
+        monolithCastingRadiusBlocks = MONOLITH_CASTING_RADIUS_BLOCKS.get();
 
         // Load AI Configs
         territoryChunkRadius = TERRITORY_CHUNK_RADIUS.get();
