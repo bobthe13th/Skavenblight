@@ -81,12 +81,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                         LOGGER.info("[Skavenblight] {} stuck at {} (hasn't moved in ~{} ticks) - escape-hatch heading to {}",
                                 this.mob.getClass().getSimpleName(), this.mob.blockPosition().toShortString(), this.pathingUpdateTimer, escapePos.toShortString());
 
-                        this.mob.getNavigation().moveTo(
-                                escapePos.getX() + 0.5D,
-                                escapePos.getY(),
-                                escapePos.getZ() + 0.5D,
-                                this.speedModifier
-                        );
+                        moveOrHop(this.mob.blockPosition(), escapePos);
                         this.escapeHatchTicks = 60;
                         this.lastPosition = currentPosition;
                         return;
@@ -156,32 +151,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 this.occupiedLane = nextInChain;
             }
 
-            // A freshly-built BUILD_STAIR step landed on directly out of a macro project
-            // (see the class javadoc) sits diagonally up-and-across from the mob's own tile,
-            // approached across the same gap the staircase exists to cross - the tile at the
-            // mob's own Y in that direction has no floor (that's the gap), so
-            // WalkNodeEvaluator never generates an ascend node there at all: Navigation.moveTo
-            // silently returns a dead (0/1-node, not-in-progress) path with no error, no log,
-            // and no retry, which is why the rat never appeared "stuck" in the escape-hatch
-            // sense above - it was never navigating in the first place. Confirmed via
-            // GameTest diagnostics (StaircaseSiegeGroupGameTests): the target cell, its
-            // headroom, and the placed stair's BlockState were all correct; only
-            // Navigation.moveTo's own pathfind toward it ever failed. Bypass A* for this one
-            // short hop and drive it directly the way vanilla's own ad hoc jump behaviors do.
-            if (nextInChain.getY() > currentPos.getY() && this.mob.onGround()
-                    && nextInChain.closerThan(currentPos, 2.5)) {
-                this.mob.getJumpControl().jump();
-                this.mob.getMoveControl().setWantedPosition(
-                        nextInChain.getX() + 0.5D, nextInChain.getY(), nextInChain.getZ() + 0.5D, this.speedModifier);
-                return;
-            }
-
-            this.mob.getNavigation().moveTo(
-                    nextInChain.getX() + 0.5D,
-                    nextInChain.getY(),
-                    nextInChain.getZ() + 0.5D,
-                    this.speedModifier
-            );
+            moveOrHop(currentPos, nextInChain);
         }
     }
 
@@ -191,6 +161,48 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             this.flowField.releaseLane(this.occupiedLane, this.mob);
         }
         this.occupiedLane = null;
+    }
+
+    /**
+     * A freshly-built BUILD_STAIR step landed on directly out of a macro project (see the
+     * class javadoc) sits diagonally up-and-across from the mob's own tile, approached
+     * across the same gap the staircase exists to cross - the tile at the mob's own Y in
+     * that direction has no floor (that's the gap), so WalkNodeEvaluator never generates an
+     * ascend node there at all: Navigation.moveTo silently returns a dead (0/1-node,
+     * not-in-progress) path with no error, no log, and no retry. Confirmed via GameTest
+     * diagnostics (StaircaseSiegeGroupGameTests): the target cell, its headroom, and the
+     * placed stair's BlockState were all correct; only Navigation.moveTo's own pathfind
+     * toward it ever failed. Bypass A* for this one short hop and drive it directly the way
+     * vanilla's own ad hoc jump behaviors do.
+     *
+     * <p>Shared between the ordinary chain-following call site above and the escape-hatch
+     * above it - the escape-hatch used to call Navigation.moveTo directly, which hits this
+     * exact same wall for the identical reason (its own target can just as easily be a
+     * just-built stair one hop back across the same gap) with no error and no retry, ever.
+     *
+     * <p>A first version of this drove the hop via JumpControl.jump() + MoveControl -
+     * generic AI steering meant for opportunistic hops while already walking, not a
+     * deliberate, precisely-landing leap. Confirmed via repeated GameTest runs to land
+     * imprecisely often enough that a chain of ~10+ required hops (one staircase) rarely
+     * completed: short landings look "stuck" (falls right back onto the tile it left),
+     * off-target landings hand the next tick's flow-field lookup an unexpected cell, and
+     * some runs ended mid-arc at timeout. A direct one-tick velocity impulse - the same
+     * technique vanilla uses for its own deliberate leaps (Rabbit's hop, Goat's ram jump) -
+     * fully determines the arc up front instead of relying on continued AI steering while
+     * airborne, so its outcome doesn't depend on exactly when a later tick happens to sample
+     * the mob's position.
+     */
+    private void moveOrHop(BlockPos from, BlockPos to) {
+        if (to.getY() > from.getY() && this.mob.onGround() && to.closerThan(from, 2.5)) {
+            double flightTicks = 5.0D;
+            double vx = (to.getX() + 0.5D - this.mob.getX()) / flightTicks;
+            double vz = (to.getZ() + 0.5D - this.mob.getZ()) / flightTicks;
+            this.mob.setDeltaMovement(vx, 0.5D, vz);
+            this.mob.hasImpulse = true;
+            return;
+        }
+
+        this.mob.getNavigation().moveTo(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
     }
 
     private BlockPos findEscapePos(BlockPos startPos) {

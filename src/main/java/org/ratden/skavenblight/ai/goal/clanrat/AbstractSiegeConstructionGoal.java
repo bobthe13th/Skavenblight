@@ -57,6 +57,22 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
      */
     public static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
+    /**
+     * findEffectiveNode's own lookahead peek distance - deliberately separate from
+     * MAX_TARGET_CLAIM_DISTANCE above. The lookahead exists only to let a mob standing one
+     * ordinary WALK step short of real work skip the pointless extra tick of walking there
+     * first - i.e. it should never see further than a single legitimate adjacent
+     * interaction (orthogonal 1.0, diagonal ~1.41) would ever reach on its own. Reusing
+     * MAX_TARGET_CLAIM_DISTANCE (2.5, sized for tolerating crowd-shove during an ALREADY
+     * claimed build) here let the lookahead claim a target a full two flow-field hops away -
+     * confirmed via StaircaseSiegeGroupGameTests + a live debug-item observation: a rat
+     * still two cells back from a gap's ledge would build the far stair immediately, before
+     * ever walking onto the ledge itself, leaving the newly-built stair unreachable from
+     * where the rat actually stood. The lookahead was never meant to affect what gets
+     * targeted, only to smooth movement across a surface - this bounds it back to that.
+     */
+    private static final double LOOKAHEAD_SNAP_DISTANCE = 1.5D;
+
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
@@ -189,7 +205,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), MAX_TARGET_CLAIM_DISTANCE)) {
+                    && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {
                 return Optional.of(nextNode);
             }
         }
