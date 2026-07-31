@@ -3,3 +3,5 @@
 *.iml
 /.gradle/
 /run/
+/src/generated/
+/.worktrees/

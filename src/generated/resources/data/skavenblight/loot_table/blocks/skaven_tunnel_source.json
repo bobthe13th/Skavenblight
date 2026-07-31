@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
+        }
+      ],
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "skavenblight:skaven_tunnel_source"
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "skavenblight:blocks/skaven_tunnel_source"
+}

@@ -1,0 +1,13 @@
+{
+  "wind": "ghur",
+  "tier": 0,
+  "casting_number": 25,
+  "casting_time": "instant",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:weakness",
+    "duration_ticks": 100,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.cowering_beasts.description"
+}

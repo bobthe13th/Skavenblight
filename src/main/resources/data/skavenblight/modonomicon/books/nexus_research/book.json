@@ -1,0 +1,10 @@
+{
+  "name": "book.skavenblight.nexus_research.name",
+  "tooltip": "book.skavenblight.nexus_research.tooltip",
+  "model": "skavenblight:skavenblight_book",
+  "generate_book_item": false,
+  "custom_book_item": "skavenblight:skavenblight_book",
+  "show_progress": true,
+  "auto_add_read_conditions": true,
+  "book_text_color": 2828800
+}

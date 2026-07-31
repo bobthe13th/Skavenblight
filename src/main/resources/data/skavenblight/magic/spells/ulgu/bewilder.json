@@ -1,0 +1,13 @@
+{
+  "wind": "ulgu",
+  "tier": 0,
+  "casting_number": 20,
+  "casting_time": "instant",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:nausea",
+    "duration_ticks": 100,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.bewilder.description"
+}

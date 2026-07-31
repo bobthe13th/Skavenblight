@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:smelting",
+  "category": "misc",
+  "cookingtime": 200,
+  "experience": 0.25,
+  "group": "warpstone",
+  "ingredient": {
+    "item": "skavenblight:raw_warpstone"
+  },
+  "result": {
+    "count": 1,
+    "id": "skavenblight:fused_warpstone"
+  }
+}

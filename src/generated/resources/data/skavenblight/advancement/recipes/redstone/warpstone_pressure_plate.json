@@ -1,0 +1,32 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_fused_warpstone": {
+      "conditions": {
+        "items": [
+          {
+            "items": "skavenblight:fused_warpstone"
+          }
+        ]
+      },
+      "trigger": "minecraft:inventory_changed"
+    },
+    "has_the_recipe": {
+      "conditions": {
+        "recipe": "skavenblight:warpstone_pressure_plate"
+      },
+      "trigger": "minecraft:recipe_unlocked"
+    }
+  },
+  "requirements": [
+    [
+      "has_the_recipe",
+      "has_fused_warpstone"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "skavenblight:warpstone_pressure_plate"
+    ]
+  }
+}
