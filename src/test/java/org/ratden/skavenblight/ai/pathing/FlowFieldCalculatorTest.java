@@ -184,12 +184,17 @@ class FlowFieldCalculatorTest {
         BlockPos lockedB = new BlockPos(1, -62, -20);
         List<BlockPos> cycle = List.of(lockedA, unlocked, lockedB);
 
-        // Cost map alone would favor dropping `unlocked` anyway here (it's not the cheapest), but
-        // the real point is that neither locked position is even a candidate.
+        // `unlocked` is deliberately the CHEAPEST position, and `lockedB` the most expensive - a
+        // plain cost-only walk over the full cycle (what the old, buggy `lockedCount == 1` check
+        // falls through to here, since 2 != 1) would wrongly pick `lockedB` (highest cost) to
+        // drop, a locked cell it can never refill. The fix must restrict candidates to `unlocked`
+        // regardless of cost, since it's the only unlocked position in this 2-of-3-locked cycle -
+        // this is what actually distinguishes the fixed condition from the old one, rather than
+        // both happening to agree by coincidence.
         Map<BlockPos, Integer> costMap = new HashMap<>();
         costMap.put(lockedA, 1);
-        costMap.put(unlocked, 50);
-        costMap.put(lockedB, 1);
+        costMap.put(unlocked, 2);
+        costMap.put(lockedB, 100);
         Set<BlockPos> lockedPositions = Set.of(lockedA, lockedB);
 
         BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, costMap, lockedPositions);
