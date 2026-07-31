@@ -67,7 +67,7 @@ accidental shortcut through GameTest's own territory encasement).
 
 | File | Change |
 |---|---|
-| `src/main/resources/data/skavenblight/structure/pathing_test_giant.nbt` | New GameTest structure template, 64×64×32, generated (not hand-authored) — see Task 1. |
+| `src/main/resources/data/skavenblight/structure/pathing_test_giant.nbt` | New GameTest structure template, 96×64×96, generated (not hand-authored) — see Task 1. |
 | `src/main/java/org/ratden/skavenblight/gametest/StaircaseSiegeGroupGameTests.java` | New file: shared helpers + 4 `@GameTest` methods. |
 
 No existing files are modified.
@@ -125,18 +125,27 @@ import java.nio.file.Path;
  * ONE-SHOT, TEMPORARY generator for pathing_test_giant.nbt - run once via `./gradlew runServer`,
  * then delete this file (see docs/pathing/region-pathing-hardening-findings.md's Task 2 for why
  * this technique exists: /test create doesn't work headless, and no shipped vanilla/NeoForge
- * structure template is reusable). Builds a flat 64x64x32 platform (solid stone floor at
+ * structure template is reusable). Builds a flat 96x64x96 platform (solid stone floor at
  * template-relative y=0, open air above, matching pathing_test_tall's own shape) at a fixed,
  * force-loaded world position, captures it, and saves it as this mod's own structure template.
+ *
+ * <p>96 wide/deep, not just 64: Task 2's first two attempts (see that task's own report) found
+ * that a 64-wide template still left every one of the 4 GameTest methods in this plan with a gap
+ * that consumed too much of the template's own width relative to a single chunk (16 blocks) -
+ * whatever margin the test geometry kept from the template's edges, the region scan's own
+ * territory (however precisely computed) still ended up reaching the structure's own edge, where
+ * GameTest's un-suppressed side-wall encasement sits. 96 wide/deep gives every test in this plan's
+ * geometry (see Tasks 2-5) at least 16 blocks (one full chunk) of margin from every edge,
+ * regardless of GameTest's own non-chunk-aligned placement offset.
  */
 @EventBusSubscriber(modid = Skavenblight.MODID)
 public final class GenerateGiantPathingTestStructure {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    private static final int SIZE_X = 64;
+    private static final int SIZE_X = 96;
     private static final int SIZE_Y = 64;
-    private static final int SIZE_Z = 32;
+    private static final int SIZE_Z = 96;
     private static final BlockPos ORIGIN = new BlockPos(0, 5, 0);
 
     @SubscribeEvent
@@ -201,9 +210,11 @@ Ctrl+C).
 - [ ] **Step 3: Verify the file exists and is non-trivial**
 
 Run: check `src/main/resources/data/skavenblight/structure/pathing_test_giant.nbt` exists and is
-at least a few KB (a 64×64×32 mostly-air structure with instructions to place hundreds of stone
+at least a few KB (a 96×64×96 mostly-air structure with instructions to place thousands of stone
 blocks compresses well, but should still be nontrivially sized — an empty/failed capture would be
-suspiciously tiny, under 200 bytes).
+suspiciously tiny, under 200 bytes). If this file already exists from an earlier, smaller
+generation (64×64×32 — Task 1 was run once already before this size was revised upward, see this
+task's own commit message below), this run's output REPLACES it; that's expected, not an error.
 
 - [ ] **Step 4: Delete the temporary generator**
 
@@ -233,17 +244,28 @@ their own file.
 
 ```bash
 git add src/main/resources/data/skavenblight/structure/pathing_test_giant.nbt
-git commit -m "feat(gametest): generate pathing_test_giant structure template
+git commit -m "feat(gametest): resize pathing_test_giant to 96x64x96
 
-64x64x32 flat platform, generated via the same temporary-ServerStartedEvent-
-listener technique already used for pathing_test_tall (see
-docs/pathing/region-pathing-hardening-findings.md's Task 2) - /test create
-doesn't work headless. Wider AND taller than any existing template: every
-macro-project line trace moves exactly 1 block diagonally per step, so
-forcing RegionGraph's hop-chaining to engage (past MAX_PROJECT_LENGTH=32
-steps) needs the horizontal offset to match the vertical one, not just a
-taller template."
+Task 2's first two attempts (small-gap tests, not the chained-hop giant
+gap this template was originally sized for) found that even a 64-wide
+template still let the region scan's territory reach the structure's
+own edge - the encasement geometry GameTest leaves un-suppressed there
+(skyAccess only suppresses the roof) sits close enough that
+FlowFieldCalculator's cycle-breaking safeguard could end up sacrificing
+a real, locked BUILD_STAIR instruction in favor of a bogus one from that
+edge geometry, regardless of how precisely territory was restricted.
+96 wide/deep gives every test in this plan's geometry at least one full
+chunk (16 blocks) of margin from every edge, not just a bigger radius
+guess. Every macro-project line trace also still moves exactly 1 block
+diagonally per step, so forcing RegionGraph's hop-chaining to engage
+(past MAX_PROJECT_LENGTH=32 steps) needs the horizontal offset to match
+the vertical one, not just a taller template - unchanged from the
+original reasoning for this template's existence."
 ```
+
+If this is a re-run overwriting an earlier, smaller `pathing_test_giant.nbt` that was already
+committed, this commit will show as a modification to that same file path, not an addition - that
+is expected.
 
 ---
 
@@ -369,22 +391,29 @@ public class StaircaseSiegeGroupGameTests {
      * "bubble" around its conduit/endpoints - 2 chunks/32 blocks by default) down to the EXACT
      * chunks spanning {@code relativeFrom} to {@code relativeTo}, with no extra buffer.
      *
-     * <p>Discovered empirically (Task 2, first attempt): the default radius reaches WAY past this
-     * 32-wide, 2x2-chunk template's own footprint into GameTest's own auto-encasement geometry
-     * (side walls + a walkable ledge along their top, which {@code skyAccess = true} does NOT
-     * suppress - see {@code PathingRegionGameTests}' class javadoc for the mechanism). That's a
-     * REAL, separately-scanned Region purely because it's genuinely walkable terrain the region
-     * scanner has no way to know is a test-framework artifact rather than intended geometry - and
-     * in that specific geometry, {@code FlowFieldCalculator}'s cycle-breaking safeguard (which
-     * exists to stop mobs looping forever on a genuine flow-field cycle) can end up choosing to
-     * drop the real, locked, genuinely-needed {@code BUILD_STAIR} instruction instead of the bogus
-     * encasement-ledge one, since cost alone can't tell "real" apart from "test-framework
-     * artifact". No reasonable amount of margin between this test's OWN geometry and the
-     * template's edges fixes this - the template is only 2x2 chunks total, so ANY position's
-     * default 2-chunk-radius bubble necessarily extends past it. The fix is precision, not margin:
-     * only include the chunks this test's own geometry actually needs, so the scan never reaches
-     * the encasement at all. {@code WarpFluxNetwork#getTerritoryChunks} returns the live, mutable
-     * backing set (not a defensive copy) specifically so this kind of direct test-side override is
+     * <p>Discovered empirically (Task 2, first two attempts): the default radius reaches past a
+     * template's own footprint into GameTest's own auto-encasement geometry (side walls + a
+     * walkable ledge along their top, which {@code skyAccess = true} does NOT suppress - see
+     * {@code PathingRegionGameTests}' class javadoc for the mechanism). That's a REAL,
+     * separately-scanned Region purely because it's genuinely walkable terrain the region scanner
+     * has no way to know is a test-framework artifact rather than intended geometry - and in that
+     * geometry, {@code FlowFieldCalculator}'s cycle-breaking safeguard (which exists to stop mobs
+     * looping forever on a genuine flow-field cycle) can end up choosing to drop the real, locked,
+     * genuinely-needed {@code BUILD_STAIR} instruction instead of the bogus encasement-ledge one,
+     * since cost alone can't tell "real" apart from "test-framework artifact".
+     *
+     * <p>This override alone is NOT sufficient on a template whose gap already consumes most of
+     * the template's own width (confirmed the hard way on the original 32-wide, 2x2-chunk
+     * `pathing_test_tall`, and again on an initial 64-wide `pathing_test_giant`): however precisely
+     * the territory is computed, it still has to span the gap, and if the gap is a large fraction
+     * of the template's own size, that span reaches the template's edge regardless. The real fix
+     * had two parts together: (1) this precise override, so the territory is never bigger than it
+     * needs to be, AND (2) a template generously larger than any single test's gap (see Task 1's
+     * `pathing_test_giant`, 96x64x96, and every test's own geometry in Tasks 2-5, each kept at
+     * least 16 blocks/one chunk from every template edge) - so the minimal territory this override
+     * computes has genuine room to stay clear of the encasement. Neither alone was enough; both
+     * together are. {@code WarpFluxNetwork#getTerritoryChunks} returns the live, mutable backing
+     * set (not a defensive copy) specifically so this kind of direct test-side override is
      * possible without needing a new production API - confirmed by reading the field itself.
      *
      * <p>Must be called before the next level tick reaches {@code WarpFluxNetwork#tick}'s
@@ -491,12 +520,12 @@ public class StaircaseSiegeGroupGameTests {
         });
     }
 
-    @GameTest(template = "pathing_test_tall", batch = BATCH, timeoutTicks = 6000, skyAccess = true)
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 6000, skyAccess = true)
     public static void testSingleRatBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
-        BlockPos relativeGroundSpawn = new BlockPos(6, 2, 6);
-        BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(40, 16, 26);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
         WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
@@ -534,12 +563,18 @@ short-circuited by a stale `getNetworkAt` check.
 
 If the network DID form and the rebuild DID run, but the rat still walks to the base of the
 platform and then never gains elevation: check the log for a `FlowFieldCalculator` line reading
-"Broke flow-field cycle... dropped ... (BUILD_STAIR, locked=true)" at a position near the
-template's own edge or above its own build height — that's `restrictTerritoryToMinimalArea` not
-actually taking effect before the network's first tick (the override must happen synchronously,
-immediately after `placeNexusAndConduit`, in the same method body — see that helper's own doc).
-Confirm `network` is non-null (i.e. `placeNexusAndConduit`'s `getNetworkAt` lookup actually found
-the network `addConduit` just created) before assuming the restriction call itself is wrong.
+"Broke flow-field cycle... dropped ... (BUILD_STAIR, locked=true)". First confirm `network` is
+non-null and that `restrictTerritoryToMinimalArea` is actually called (immediately after
+`placeNexusAndConduit`, same method body, before any tick passes — see that helper's own doc for
+why the ordering matters). If it IS being called correctly and this still happens, compute the
+dropped position's coordinates RELATIVE to this test's own structure origin (logged in the
+`succeedWhen` failure message) rather than assuming the override itself is broken — if that
+relative position sits at or beyond this template's own edge (0 or 95 on X/Z, for the 96-wide
+`pathing_test_giant`), the actual cause is this test's OWN geometry not keeping the required
+one-chunk (16-block) margin from every template edge, not the override mechanism — re-check the
+exact coordinates in this task's own Step 1 code against that margin requirement before suspecting
+anything else. This exact failure mode (leaked position sitting exactly at the template's own
+edge) is what happened on this task's first two attempts, on two different, smaller templates.
 
 - [ ] **Step 4: Commit**
 
@@ -564,12 +599,16 @@ shortcut.
 Also restricts the network's territory to the exact chunks this test's
 geometry needs (WarpFluxNetwork#getTerritoryChunks returns the live
 mutable set, not a copy) instead of relying on updateTerritory's default
-radius - found empirically that the default 2-chunk bubble reaches past
-this 32-wide (2x2-chunk) template's own footprint into GameTest's own
-auto-encasement ledge regardless of margin from this test's own
-geometry, and FlowFieldCalculator's cycle-breaking safeguard can end up
-sacrificing the real, locked BUILD_STAIR instruction instead of the
-bogus encasement one in that specific geometry."
+radius, AND keeps this test's own geometry at least one full chunk (16
+blocks) from every edge of the (96x64x96) pathing_test_giant template -
+found empirically, across three attempts, that neither alone is enough:
+a template whose gap consumes most of its own width still reaches
+GameTest's own un-suppressed side-wall encasement no matter how
+precisely territory is computed, and FlowFieldCalculator's
+cycle-breaking safeguard can end up sacrificing the real, locked
+BUILD_STAIR instruction instead of the bogus encasement one when it
+does. Both together - precise territory AND a template genuinely larger
+than the gap - close the gap this hazard needs to reach through."
 ```
 
 ---
@@ -591,12 +630,12 @@ single-file staircase, none permanently stalling, none shoving another off mid-c
 Add to `StaircaseSiegeGroupGameTests` (same file, after `testSingleRatBuildsStaircaseAcrossSmallGap`):
 
 ```java
-    @GameTest(template = "pathing_test_tall", batch = BATCH, timeoutTicks = 8000, skyAccess = true)
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 8000, skyAccess = true)
     public static void testSmallGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
-        BlockPos relativeGroundSpawn = new BlockPos(6, 2, 6);
-        BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(40, 16, 26);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
         WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
@@ -658,12 +697,12 @@ might not trigger.
 Add to `StaircaseSiegeGroupGameTests`:
 
 ```java
-    @GameTest(template = "pathing_test_tall", batch = BATCH, timeoutTicks = 12000, skyAccess = true)
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 12000, skyAccess = true)
     public static void testLargeGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
-        BlockPos relativeGroundSpawn = new BlockPos(6, 2, 6);
-        BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(40, 16, 26);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
         WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
@@ -675,9 +714,10 @@ Add to `StaircaseSiegeGroupGameTests`:
     }
 ```
 
-Same geometry again (including the same territory restriction); 10 rats spaced 2 apart along Z starting at relative Z=6 span Z=6..24, still
-comfortably inside the template's 0-31 Z range and clear of the platform's own Z=4..8 footprint
-margin.
+Same geometry again (including the same territory restriction); 10 rats spaced 2 apart along Z
+starting at relative Z=26 span Z=26..44, still at least 16 blocks (one chunk) clear of both the
+Z=0 edge and the Z=95 edge of the 96-deep `pathing_test_giant` template, and clear of the
+platform's own Z=24..28 footprint.
 
 - [ ] **Step 2: Compile check**
 
@@ -725,8 +765,8 @@ Add to `StaircaseSiegeGroupGameTests`:
     public static void testLargeGroupBuildsChainedStaircaseAcrossGiantGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
-        BlockPos relativeGroundSpawn = new BlockPos(6, 2, 6);
-        BlockPos relativeNexusPos = new BlockPos(50, 46, 6);
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(70, 46, 26);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
         WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
@@ -738,15 +778,17 @@ Add to `StaircaseSiegeGroupGameTests`:
     }
 ```
 
-Geometry: ground spawn at relative (6, 2, 6), nexus platform centered at relative (50, 46, 6) — a
-diagonal offset of dx=44, dy=44, dz=0, forcing at least 2 chained macro-project hops (32 + 12
-steps). Same `restrictTerritoryToMinimalArea` call as every other test in this file — no
+Geometry: ground spawn at relative (26, 2, 26) (the same point Tasks 2-4 use), nexus platform
+centered at relative (70, 46, 26) — a diagonal offset of dx=44, dy=44, dz=0, forcing at least 2
+chained macro-project hops (32 + 12 steps). Margins on the 96-wide/deep `pathing_test_giant`: 26
+blocks from the ground spawn to the X=0/Z=0 edges, and 23 blocks from the nexus platform's own far
+edge (X=72) to the X=95 edge — both above the one-chunk (16-block) minimum every test in this file
+needs (see `restrictTerritoryToMinimalArea`'s own doc for why margin alone, without also being
+precise about which chunks are included, still wasn't enough on a smaller template). Same
+`restrictTerritoryToMinimalArea` call as every other test in this file — no
 `Config.territoryChunkRadius` mutation needed here (an earlier version of this task tried bumping
-the radius instead; `restrictTerritoryToMinimalArea`'s own doc, added while fixing Task 2, covers
-why precision beats a bigger radius: it computes the exact chunk range from the real absolute
-positions via `helper.absolutePos`, so it's correct regardless of GameTest's own non-chunk-aligned
-placement offset, without needing to guess a "safe enough" radius or touch a shared static config
-field at all).
+the radius instead; that alone didn't fix the underlying issue either, since the radius was never
+the real lever - see the same doc).
 
 The stairs-count threshold (20) is lower than a literal "half of 44" would suggest, because one of
 the ~44 steps legitimately becomes a synthetic `BUILD_LANDING` (not a stair block) at the
