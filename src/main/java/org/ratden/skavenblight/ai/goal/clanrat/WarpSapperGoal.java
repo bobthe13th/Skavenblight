@@ -80,7 +80,9 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     public void start() {
         this.state = SapperState.APPROACHING;
         this.actionTicks = 0;
-        this.flowField.tryClaimTarget(this.targetMinePos, this.mob);
+        if (this.flowField != null) {
+            this.flowField.tryClaimTarget(this.targetMinePos, this.mob);
+        }
     }
 
     @Override
@@ -107,7 +109,9 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
                         LOGGER.info("[Skavenblight] {} giving up approaching warp-charge target {} after {} ticks - never got within range",
                                 this.mob.getClass().getSimpleName(), this.targetMinePos.toShortString(), this.actionTicks);
                         this.nextAllowedStartTime = this.mob.level().getGameTime() + GIVE_UP_COOLDOWN_TICKS;
-                        this.flowField.releaseTarget(this.targetMinePos);
+                        if (this.flowField != null) {
+                            this.flowField.releaseTarget(this.targetMinePos);
+                        }
                         this.targetMinePos = null;
                         this.state = SapperState.SEARCHING;
                         return;
@@ -165,7 +169,9 @@ public class WarpSapperGoal extends Goal implements SiegeGoal {
     @Override
     public void stop() {
         if (this.targetMinePos != null) {
-            this.flowField.releaseTarget(this.targetMinePos);
+            if (this.flowField != null) {
+                this.flowField.releaseTarget(this.targetMinePos);
+            }
         }
         this.targetMinePos = null;
         this.state = SapperState.SEARCHING;
