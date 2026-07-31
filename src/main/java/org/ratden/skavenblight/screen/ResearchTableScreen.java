@@ -130,6 +130,9 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderDetailPane(guiGraphics);
         renderTooltip(guiGraphics, mouseX, mouseY);
+
+        renderWindMeterTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
+        renderProgressBarTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
     }
 
     @Override
@@ -248,6 +251,41 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
 
         return new PreviewState(spell, selected.nameKey, selected.descriptionKey, known, tierLocked,
                 windSufficient, windLevel, needsCatalyst, catalystOk, isActiveResearch, canBegin, blockReason);
+    }
+
+    private void renderWindMeterTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y) {
+        PreviewState preview = computePreviewState();
+        if (preview.spell == null || preview.known) {
+            return;
+        }
+
+        if (isMouseAboveArea(mouseX, mouseY, x, y, METER_X, METER_Y, METER_W, METER_H)) {
+            int current = Math.max(0, preview.windLevel);
+            int required = Math.max(1, Math.round(ResearchFormulas.requiredWindLevel(preview.spell.tier(), Config.researchWindThreshold)));
+            Component text = Component.literal("Wind Level: " + current + " / " + required);
+            guiGraphics.renderTooltip(this.font, text, mouseX, mouseY);
+        }
+    }
+
+    private void renderProgressBarTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y) {
+        if (isMouseAboveArea(mouseX, mouseY, x, y, PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H)) {
+            int progress = this.menu.getProgress();
+            int max = Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE;
+
+            Component text;
+            if (progress > 0 && max > 0) {
+                int percent = (int) Math.min(100, Math.max(0, (long) progress * 100 / max));
+                text = Component.literal("Research Progress: " + percent + "%").withStyle(net.minecraft.ChatFormatting.GREEN);
+            } else {
+                text = Component.literal("Research Progress: Idle").withStyle(net.minecraft.ChatFormatting.GRAY);
+            }
+            guiGraphics.renderTooltip(this.font, text, mouseX, mouseY);
+        }
+    }
+
+    private boolean isMouseAboveArea(int mouseX, int mouseY, int x, int y, int offsetX, int offsetY, int width, int height) {
+        return mouseX >= (x + offsetX) && mouseX <= (x + offsetX) + width &&
+                mouseY >= (y + offsetY) && mouseY <= (y + offsetY) + height;
     }
 
     private record PreviewState(

@@ -1,0 +1,3 @@
+## 2026-07-31 - Tooltips for Complex Machine Gauges
+**Learning:** In highly customized Minecraft screens like the Research Table or Warp Flux Furnace, standard visual-only gauges (meters and progress bars) can feel vague and confusing. By adding detailed hover tooltips displaying numerical state values (like "Wind Level: 720 / 500" or "Research Progress: 45%"), we bridge the gap between abstraction and actionable feedback, boosting accessibility for screen readers and neurodivergent players.
+**Action:** Always map the exact render dimensions of custom progress bars/energy tanks in `renderBg` to `isMouseAboveArea` checks to render highly specific numerical tooltips in custom Screens.
