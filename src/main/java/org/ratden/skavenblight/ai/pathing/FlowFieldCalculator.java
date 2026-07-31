@@ -1,11 +1,15 @@
 package org.ratden.skavenblight.ai.pathing;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import org.ratden.skavenblight.Config;
+import org.slf4j.Logger;
 
 import java.util.*;
 
 public class FlowFieldCalculator {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     // How many consecutive MINE steps the core Dijkstra step (processOrthogonalNeighbors) may
     // chain before a branch is abandoned. Mirrors SiegeProjectManager's own mineProjectLength
@@ -204,6 +208,8 @@ public class FlowFieldCalculator {
     }
 
     private void finalizeCalculation(FlowFieldState state) {
+        breakMutualCycles();
+
         // Atomic snapshot update
         this.liveDebugMap = Map.copyOf(nextInstructionMap);
 
@@ -211,6 +217,58 @@ public class FlowFieldCalculator {
 
         state.updateInstructions(new HashMap<>(nextInstructionMap));
         projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());
+    }
+
+    // Every ordinary core-flood write (processOrthogonalNeighbors) is gated by
+    // "totalCost < nextCostMap.getOrDefault(...)", which guarantees a monotonically-improving,
+    // acyclic predecessor tree rooted at the target - the same guarantee any correct Dijkstra
+    // gives. Project-instruction writes (SiegeProjectManager.injectActiveProjects/
+    // evaluateSingleLine) bypass that guard entirely: they write whole chains of positions
+    // straight into nextInstructionMap with no cost comparison, because a macro-project's
+    // positions usually don't have a competing nextCostMap entry to compare against yet. That's
+    // normally harmless, but if two independently-produced chains (e.g. a persisted region
+    // connector's own instructions and a plain terrain-driven line evaluated nearby) each end up
+    // writing an adjacent pair of positions that point AT EACH OTHER, the result is a direct
+    // 2-cell cycle: a mob standing on either cell gets shuttled back and forth forever and never
+    // reaches a real build/walk step. Confirmed via a live dump (2026-07-30): clanrats piling up
+    // directly under a floating nexus, FollowFlowFieldGoal ping-ponging between two positions one
+    // block apart in Y, matching PathingDebugFileWriter's own "LOOP DETECTED - revisited X" trace.
+    // Rather than chase every possible producer of a bad pair (multiple have already been found
+    // and partially fixed in this exact connector/macro-project area - see CLAUDE.md gotchas),
+    // enforce the tree invariant once, here, at the single point every source's output converges,
+    // right before publishing. Logs full detail (which side was locked to a project) so the next
+    // occurrence's server log pinpoints the actual producer instead of requiring another manual
+    // dump autopsy.
+    private void breakMutualCycles() {
+        Set<BlockPos> lockedPositions = projectManager.getLockedPositions();
+        Set<BlockPos> handled = new HashSet<>();
+        List<BlockPos> toDrop = new ArrayList<>();
+
+        for (Map.Entry<BlockPos, SiegeNode> entry : nextInstructionMap.entrySet()) {
+            BlockPos pos = entry.getKey();
+            if (handled.contains(pos)) continue;
+
+            BlockPos next = entry.getValue().pos();
+            if (next.equals(pos)) continue; // a region's own local Dijkstra objective self-references - expected, not a cycle
+
+            SiegeNode nextsInstruction = nextInstructionMap.get(next);
+            if (nextsInstruction == null || !nextsInstruction.pos().equals(pos)) continue;
+
+            handled.add(pos);
+            handled.add(next);
+            toDrop.add(pos);
+            toDrop.add(next);
+
+            LOGGER.warn("[Pathfinder] Broke mutual flow-field cycle between {} ({}, locked={}) and {} ({}, locked={}) - "
+                            + "both instructions dropped so mobs fall back to local breach instead of looping forever",
+                    pos.toShortString(), entry.getValue().action(), lockedPositions.contains(pos),
+                    next.toShortString(), nextsInstruction.action(), lockedPositions.contains(next));
+        }
+
+        for (BlockPos pos : toDrop) {
+            nextInstructionMap.remove(pos);
+            nextCostMap.remove(pos);
+        }
     }
 
     /** Size of nextCostMap at the end of the last pass - the real budget-gated counter, distinct from the published instruction map's size (see field doc above). */
