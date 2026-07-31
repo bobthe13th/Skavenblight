@@ -241,34 +241,46 @@ public class FlowFieldCalculator {
     // dump autopsy.
     private void breakMutualCycles() {
         Set<BlockPos> lockedPositions = projectManager.getLockedPositions();
-        Set<BlockPos> handled = new HashSet<>();
-        List<BlockPos> toDrop = new ArrayList<>();
 
-        for (Map.Entry<BlockPos, SiegeNode> entry : nextInstructionMap.entrySet()) {
+        for (BlockPos pos : detectMutualCyclePositions(nextInstructionMap)) {
+            SiegeNode node = nextInstructionMap.get(pos);
+            LOGGER.warn("[Pathfinder] Broke mutual flow-field cycle: {} ({}, locked={}) pointed at {} - "
+                            + "dropped so mobs fall back to local breach instead of looping forever",
+                    pos.toShortString(), node.action(), lockedPositions.contains(pos), node.pos().toShortString());
+
+            nextInstructionMap.remove(pos);
+            nextCostMap.remove(pos);
+        }
+    }
+
+    /**
+     * Finds every position in {@code instructionMap} that forms a direct A-points-to-B,
+     * B-points-right-back-to-A cycle. Split out from {@link #breakMutualCycles()} as a pure,
+     * dependency-free function (no logging, no locked-position lookup, no instance state) so it's
+     * unit-testable against a plain fixture map instead of requiring a fully-constructed
+     * FlowFieldCalculator - see FlowFieldCalculatorTest.
+     */
+    static Set<BlockPos> detectMutualCyclePositions(Map<BlockPos, SiegeNode> instructionMap) {
+        Set<BlockPos> handled = new HashSet<>();
+        Set<BlockPos> cyclePositions = new HashSet<>();
+
+        for (Map.Entry<BlockPos, SiegeNode> entry : instructionMap.entrySet()) {
             BlockPos pos = entry.getKey();
             if (handled.contains(pos)) continue;
 
             BlockPos next = entry.getValue().pos();
             if (next.equals(pos)) continue; // a region's own local Dijkstra objective self-references - expected, not a cycle
 
-            SiegeNode nextsInstruction = nextInstructionMap.get(next);
+            SiegeNode nextsInstruction = instructionMap.get(next);
             if (nextsInstruction == null || !nextsInstruction.pos().equals(pos)) continue;
 
             handled.add(pos);
             handled.add(next);
-            toDrop.add(pos);
-            toDrop.add(next);
-
-            LOGGER.warn("[Pathfinder] Broke mutual flow-field cycle between {} ({}, locked={}) and {} ({}, locked={}) - "
-                            + "both instructions dropped so mobs fall back to local breach instead of looping forever",
-                    pos.toShortString(), entry.getValue().action(), lockedPositions.contains(pos),
-                    next.toShortString(), nextsInstruction.action(), lockedPositions.contains(next));
+            cyclePositions.add(pos);
+            cyclePositions.add(next);
         }
 
-        for (BlockPos pos : toDrop) {
-            nextInstructionMap.remove(pos);
-            nextCostMap.remove(pos);
-        }
+        return cyclePositions;
     }
 
     /** Size of nextCostMap at the end of the last pass - the real budget-gated counter, distinct from the published instruction map's size (see field doc above). */
