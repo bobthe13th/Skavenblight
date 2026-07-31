@@ -184,10 +184,33 @@ public class TerrainEvaluator {
 
         BlockState state = terrain.getBlockState(node.pos());
         return switch (node.action()) {
-            case MINE -> !state.blocksMotion() || isWalkableScaffold(state);
+            // determineMacroAction picks MINE when ANY of foot (node.pos() itself), head
+            // (node.pos().above()), or ceiling (node.pos().above(2), only checked for a
+            // vertical/diagonal step) blocks motion - not only the foot cell. Checking foot
+            // alone here let a mine action approaching an overhang from below (e.g. a diagonal
+            // staircase clipping a platform's own solid floor edge one or two blocks above the
+            // foot) be reported "already completed" on its very first evaluation whenever the
+            // foot happened to already be open air, even though the actual obstruction - the
+            // overhang itself - had never been touched. getNextSiegeNode then substituted a
+            // synthetic "walk up" instruction pointing at a position with no instruction of its
+            // own at all, silently skipping past a still-solid obstruction and leaving the mob
+            // with nowhere further to go. Checking all three cells this way is a superset of
+            // determineMacroAction's own trigger conditions (harmless when ceiling/head were
+            // never actually blocking - those checks then just trivially pass), so it can only
+            // make completion detection stricter, never looser, than before this fix. Confirmed
+            // via StaircaseSiegeGroupGameTests: a diagonal connector line approaching an elevated
+            // platform produced exactly this MINE-marked-complete-with-nothing-mined sequence.
+            case MINE -> (!state.blocksMotion() || isWalkableScaffold(state))
+                    && isOpenOrWalkable(terrain, node.pos().above())
+                    && isOpenOrWalkable(terrain, node.pos().above(2));
             case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
             default -> false;
         };
+    }
+
+    private boolean isOpenOrWalkable(TerrainAccess terrain, BlockPos pos) {
+        BlockState state = terrain.getBlockState(pos);
+        return !state.blocksMotion() || isWalkableScaffold(state);
     }
 
     // =================================================================================
