@@ -246,7 +246,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.targetPos = target.pos();
         this.targetAction = target.action();
         this.facing = target.facing() != null ? target.facing() : this.mob.getDirection();
-        this.flowField.tryClaimTarget(this.targetPos, this.mob);
+        if (this.flowField != null) {
+            this.flowField.tryClaimTarget(this.targetPos, this.mob);
+        }
 
         // Snapshot of whether solid ground already existed below a climb-dependent target at the
         // moment it was claimed - see SiegeAction#isClimbDependent's javadoc for why "no support
@@ -290,7 +292,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
                 // Release here, not just in stop() - this nulls targetPos directly, so by the
                 // time stop() naturally runs (canContinueToUse() sees targetPos == null on the
                 // next tick) there'd be nothing left for it to release.
-                this.flowField.releaseTarget(this.targetPos);
+                if (this.flowField != null) {
+                    this.flowField.releaseTarget(this.targetPos);
+                }
                 this.targetPos = null;
                 return;
             }
@@ -306,7 +310,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
 
     @Override
     public void stop() {
-        this.flowField.releaseTarget(this.targetPos);
+        if (this.flowField != null) {
+            this.flowField.releaseTarget(this.targetPos);
+        }
         this.targetPos = null;
         this.facing = null;
         this.targetAction = null;
