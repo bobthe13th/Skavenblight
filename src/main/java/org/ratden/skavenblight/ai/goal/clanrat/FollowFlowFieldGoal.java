@@ -156,6 +156,26 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 this.occupiedLane = nextInChain;
             }
 
+            // A freshly-built BUILD_STAIR step landed on directly out of a macro project
+            // (see the class javadoc) sits diagonally up-and-across from the mob's own tile,
+            // approached across the same gap the staircase exists to cross - the tile at the
+            // mob's own Y in that direction has no floor (that's the gap), so
+            // WalkNodeEvaluator never generates an ascend node there at all: Navigation.moveTo
+            // silently returns a dead (0/1-node, not-in-progress) path with no error, no log,
+            // and no retry, which is why the rat never appeared "stuck" in the escape-hatch
+            // sense above - it was never navigating in the first place. Confirmed via
+            // GameTest diagnostics (StaircaseSiegeGroupGameTests): the target cell, its
+            // headroom, and the placed stair's BlockState were all correct; only
+            // Navigation.moveTo's own pathfind toward it ever failed. Bypass A* for this one
+            // short hop and drive it directly the way vanilla's own ad hoc jump behaviors do.
+            if (nextInChain.getY() > currentPos.getY() && this.mob.onGround()
+                    && nextInChain.closerThan(currentPos, 2.5)) {
+                this.mob.getJumpControl().jump();
+                this.mob.getMoveControl().setWantedPosition(
+                        nextInChain.getX() + 0.5D, nextInChain.getY(), nextInChain.getZ() + 0.5D, this.speedModifier);
+                return;
+            }
+
             this.mob.getNavigation().moveTo(
                     nextInChain.getX() + 0.5D,
                     nextInChain.getY(),
