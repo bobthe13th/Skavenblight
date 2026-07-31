@@ -1,0 +1,11 @@
+{
+  "parent": "skavenblight:block/spawn_tunnel_small_inactive",
+  "overrides": [
+    {
+      "model": "skavenblight:block/spawn_tunnel_small_active",
+      "predicate": {
+        "skavenblight:is_active": 1.0
+      }
+    }
+  ]
+}

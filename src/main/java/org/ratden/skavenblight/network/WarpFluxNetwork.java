@@ -1,0 +1,309 @@
+package org.ratden.skavenblight.network;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import org.ratden.skavenblight.block.custom.WarpFluxConduitBlock;
+import org.ratden.skavenblight.block.entity.WarpstoneNexusEntity;
+import org.ratden.skavenblight.block.entity.WarpFluxStorageBlockEntity;
+import org.ratden.skavenblight.capability.ModCapabilities;
+import org.ratden.skavenblight.capability.custom.IWarpFluxStorage;
+import java.util.*;
+
+public class WarpFluxNetwork {
+    private final UUID networkId;
+
+    private final Set<BlockPos> conduits = new HashSet<>();
+    private final Set<BlockPos> endpoints = new HashSet<>();
+    private final Set<ChunkPos> territoryChunks = new HashSet<>();
+
+    // Gates the region-map bootstrap in tick() - see the comment there. 0 means "attempt on the
+    // very next tick", so a brand-new network still bootstraps immediately.
+    private static final long REGION_BOOTSTRAP_RETRY_TICKS = 100;
+    private long nextRegionBootstrapTick = 0;
+
+    public WarpFluxNetwork() {
+        this.networkId = UUID.randomUUID();
+    }
+
+    public WarpFluxNetwork(UUID networkId) {
+        this.networkId = networkId;
+    }
+
+    public UUID getId() { return this.networkId; }
+    public Set<BlockPos> getConduits() { return this.conduits; }
+    public Set<BlockPos> getEndpoints() { return this.endpoints; }
+
+    public void addConduit(BlockPos pos) { this.conduits.add(pos); }
+    public void addEndpoint(BlockPos pos) { this.endpoints.add(pos); }
+
+    /**
+     * True if this network has at least one endpoint whose block entity is a
+     * {@code WarpstoneNexusEntity}. A network with no nexus at all (e.g. a battery + consumer
+     * left over after conduits were rearranged) has nothing for the siege/pathing system to
+     * target - see {@link #tick}, which uses this to stay fully dormant until a nexus is added.
+     */
+    public boolean isValid(ServerLevel level) {
+        for (BlockPos pos : endpoints) {
+            if (level.getBlockEntity(pos) instanceof WarpstoneNexusEntity) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void tick(ServerLevel level) {
+        // No nexus endpoint - no power transfer, no region-map bootstrap or tick. Stay dormant
+        // (cheap: just this one endpoint scan) until a nexus is added to this network.
+        if (!isValid(level)) return;
+
+        List<EndpointData> generators = new ArrayList<>();
+        List<EndpointData> batteries = new ArrayList<>();
+        List<EndpointData> consumers = new ArrayList<>();
+
+        // 1. Categorize
+        for (BlockPos pos : endpoints) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be == null) continue;
+
+            IWarpFluxStorage storage = level.getCapability(ModCapabilities.WARP_FLUX, pos, null);
+            if (storage == null) continue;
+
+            EndpointData data = new EndpointData(pos, storage);
+
+            if (be instanceof WarpstoneNexusEntity) {
+                generators.add(data);
+            } else if (be instanceof WarpFluxStorageBlockEntity) {
+                batteries.add(data);
+            } else {
+                consumers.add(data);
+            }
+        }
+
+        // 2. Sort Consumers (Emptiest machines first)
+        consumers.sort(Comparator.comparingDouble(s ->
+                s.storage().getMaxFlux() == 0 ? 1.0 : (double) s.storage().getFlux() / s.storage().getMaxFlux()
+        ));
+
+        // 3. Transfer Power
+        transferPower(generators, consumers, level);
+        transferPower(batteries, consumers, level);
+        transferPower(generators, batteries, level);
+
+        // Self-healing bootstrap: nothing else ever kicks off the very first region scan, so a
+        // freshly-created (or freshly-loaded) network would otherwise never produce a region
+        // graph at all, and no mob would ever get a flow field. The first tick where this network
+        // has both a nexus endpoint AND an empty region index triggers one full rebuild; once
+        // regions exist this check is a no-op forever, and steady-state terrain changes are
+        // handled by TerritoryRegionMap.tick's own dirty-region tracking.
+        // The retry interval matters only for the failure case: a rebuild that captured no chunk
+        // columns yet (common on the first ticks after a world load, since the region map's forced
+        // chunk tickets don't take effect instantly) finds 0 regions, which leaves this condition
+        // true. Without the interval that retries a full-territory TerrainSnapshot.refresh - a
+        // MAIN-THREAD call - on literally every tick until it succeeds.
+        if (!generators.isEmpty()
+                && this.regionMap.getRegionIndex().getRegions().isEmpty()
+                && !this.regionMap.isCalculating()
+                && level.getGameTime() >= this.nextRegionBootstrapTick) {
+            this.nextRegionBootstrapTick = level.getGameTime() + REGION_BOOTSTRAP_RETRY_TICKS;
+            // Defensive copy, NOT the live field: rebuild() hands this set to a background thread
+            // (RegionScanner.scan iterates it, and every FlowFieldState keeps a reference for its
+            // bounds check), while updateTerritory() clears and refills this same HashSet on the
+            // main thread whenever a conduit is placed or broken. Sharing it risks a
+            // ConcurrentModificationException mid-rebuild, or - worse because it's silent - a
+            // transiently empty set, which FlowFieldState.isOutOfBounds treats as "global scope,
+            // no bounds check at all".
+            this.regionMap.rebuild(level, Set.copyOf(this.territoryChunks), generators.get(0).pos());
+        }
+
+        // This ticks the region map tied to this network.
+        this.regionMap.tick(level);
+    }
+    public void scanForEndpoints(ServerLevel level) {
+        this.endpoints.clear();
+        for (BlockPos conduitPos : this.conduits) {
+            for (Direction dir : Direction.values()) {
+                BlockPos neighborPos = conduitPos.relative(dir);
+                if (!this.conduits.contains(neighborPos)) {
+                    // Check if the adjacent block has our custom capability
+                    IWarpFluxStorage storage = level.getCapability(ModCapabilities.WARP_FLUX, neighborPos, dir.getOpposite());
+                    if (storage != null) {
+                        this.endpoints.add(neighborPos);
+                    }
+                }
+            }
+        }
+    }
+
+    public Set<ChunkPos> getTerritoryChunks() {
+        return this.territoryChunks;
+    }
+
+    /**
+     * Generates a "bubble" of valid chunks around the base's infrastructure.
+     * @param chunkRadius The number of extra chunks to buffer outward from the base.
+     */
+    public void updateTerritory(int chunkRadius) {
+        this.territoryChunks.clear();
+
+        // We combine conduits and endpoints just in case a network
+        // is incredibly small (e.g., just a Nexus and a Battery).
+        Set<BlockPos> allBaseBlocks = new HashSet<>();
+        allBaseBlocks.addAll(this.conduits);
+        allBaseBlocks.addAll(this.endpoints);
+
+        for (BlockPos pos : allBaseBlocks) {
+            ChunkPos centerChunk = new ChunkPos(pos);
+
+            // Flood the area around this chunk based on the configured radius
+            for (int x = -chunkRadius; x <= chunkRadius; x++) {
+                for (int z = -chunkRadius; z <= chunkRadius; z++) {
+                    this.territoryChunks.add(new ChunkPos(centerChunk.x + x, centerChunk.z + z));
+                }
+            }
+        }
+    }
+
+    private void transferPower(List<EndpointData> sources, List<EndpointData> destinations, ServerLevel level) {
+        for (EndpointData dest : destinations) {
+            int needed = dest.storage().getMaxFlux() - dest.storage().getFlux();
+            if (needed <= 0) continue;
+
+            for (EndpointData src : sources) {
+                int available = src.storage().extractFlux(Integer.MAX_VALUE, true);
+                if (available <= 0) continue;
+
+                int accepted = dest.storage().receiveFlux(available, false);
+                if (accepted > 0) {
+                    src.storage().extractFlux(accepted, false);
+
+                    // Power successfully moved! Find and light up the exact path.
+                    triggerPathGlow(src.pos(), dest.pos(), accepted, level);
+                }
+
+                if (dest.storage().getFlux() >= dest.storage().getMaxFlux()) {
+                    break;
+                }
+            }
+        }
+    }
+
+    private void triggerPathGlow(BlockPos start, BlockPos end, int fluxAmount, ServerLevel level) {
+        Queue<BlockPos> queue = new LinkedList<>();
+        Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
+
+        for (Direction dir : Direction.values()) {
+            BlockPos adj = start.relative(dir);
+            if (this.conduits.contains(adj)) {
+                queue.add(adj);
+                cameFrom.put(adj, start);
+            }
+        }
+
+        BlockPos endConduit = null;
+
+        // BFS to find shortest path
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.poll();
+
+            boolean touchesEnd = false;
+            for (Direction dir : Direction.values()) {
+                if (current.relative(dir).equals(end)) {
+                    touchesEnd = true;
+                    break;
+                }
+            }
+
+            if (touchesEnd) {
+                endConduit = current;
+                break;
+            }
+
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = current.relative(dir);
+                if (this.conduits.contains(neighbor) && !cameFrom.containsKey(neighbor)) {
+                    cameFrom.put(neighbor, current);
+                    queue.add(neighbor);
+                }
+            }
+        }
+
+        // Trace the path backwards and update the block states
+        if (endConduit != null) {
+            BlockPos current = endConduit;
+            int maxNetworkCapacity = 1;
+
+            BlockPos nextBlockInPath = end;
+
+            while (current != null && !current.equals(start)) {
+                BlockPos previousBlockInPath = cameFrom.get(current); // Where power comes FROM
+
+                // 1. Tell BlockEntity to glow (Handles intensity)
+                BlockEntity be = level.getBlockEntity(current);
+                if (be instanceof org.ratden.skavenblight.block.entity.WarpFluxConduitBlockEntity conduitEntity) {
+                    conduitEntity.triggerTransferGlow(fluxAmount, maxNetworkCapacity);
+                }
+
+                // 2. Set the block states for directional flow arms
+                BlockState state = level.getBlockState(current);
+                BlockState originalState = state; // Track state to prevent laggy block updates if already glowing
+
+                // Activate arm pointing to the NEXT block (Consumer or next conduit)
+                Direction dirToNext = getDirectionTo(current, nextBlockInPath);
+                if (dirToNext != null) state = setDirectionActive(state, dirToNext, true);
+
+                // Activate arm pointing to the PREVIOUS block (Generator or previous conduit)
+                Direction dirToPrev = getDirectionTo(current, previousBlockInPath);
+                if (dirToPrev != null) state = setDirectionActive(state, dirToPrev, true);
+
+                // Only trigger a block update if the state actually changed!
+                if (state != originalState) {
+                    level.setBlock(current, state, 3);
+                }
+
+
+
+                // Move backwards up the chain
+                nextBlockInPath = current;
+                current = previousBlockInPath;
+            }
+        }
+    }
+
+    private Direction getDirectionTo(BlockPos from, BlockPos to) {
+        for (Direction dir : Direction.values()) {
+            if (from.relative(dir).equals(to)) return dir;
+        }
+        return null;
+    }
+
+    private BlockState setDirectionActive(BlockState state, Direction dir, boolean active) {
+        if (!(state.getBlock() instanceof WarpFluxConduitBlock)) return state;
+        return switch (dir) {
+            case NORTH -> state.setValue(WarpFluxConduitBlock.NORTH_ACTIVE, active);
+            case SOUTH -> state.setValue(WarpFluxConduitBlock.SOUTH_ACTIVE, active);
+            case EAST -> state.setValue(WarpFluxConduitBlock.EAST_ACTIVE, active);
+            case WEST -> state.setValue(WarpFluxConduitBlock.WEST_ACTIVE, active);
+            case UP -> state.setValue(WarpFluxConduitBlock.UP_ACTIVE, active);
+            case DOWN -> state.setValue(WarpFluxConduitBlock.DOWN_ACTIVE, active);
+        };
+    }
+    private final org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap regionMap =
+            new org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap();
+
+    public org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap getRegionMap() {
+        return this.regionMap;
+    }
+
+    /**
+     * Call this whenever your base territory expands or shrinks, or a new nexus becomes active,
+     * so the region graph gets rebuilt against the current layout.
+     */
+    public void rebuildRegionMap(ServerLevel level, BlockPos nexusPos) {
+        this.regionMap.rebuild(level, this.getTerritoryChunks(), nexusPos);
+    }
+    private record EndpointData(BlockPos pos, IWarpFluxStorage storage) {}
+}

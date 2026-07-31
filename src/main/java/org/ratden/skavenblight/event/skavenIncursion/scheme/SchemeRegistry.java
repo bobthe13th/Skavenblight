@@ -1,0 +1,29 @@
+package org.ratden.skavenblight.event.skavenIncursion.scheme;
+
+import org.ratden.skavenblight.event.skavenIncursion.scheme.tutorial.TutorialScheme;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class SchemeRegistry {
+
+    private static final Map<String, SkavenScheme> SCHEMES = new HashMap<>();
+
+    static {
+        register(new TutorialScheme());
+    }
+
+    private static void register(SkavenScheme scheme) {
+        SCHEMES.put(scheme.getId(), scheme);
+    }
+
+    public static SkavenScheme getScheme(String schemeId) {
+        SkavenScheme scheme = SCHEMES.get(schemeId);
+
+        if (scheme == null) {
+            return SCHEMES.get("tutorial");
+        }
+
+        return scheme;
+    }
+}

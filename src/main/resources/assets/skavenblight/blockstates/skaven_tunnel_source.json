@@ -1,0 +1,13 @@
+{
+  "variants": {
+    "source_state=active": {
+      "model": "skavenblight:block/active_skaven_tunnel"
+    },
+    "source_state=dormant": {
+      "model": "skavenblight:block/dormant_skaven_tunnel"
+    },
+    "source_state=collapsed": {
+      "model": "skavenblight:block/collapsed_skaven_tunnel"
+    }
+  }
+}

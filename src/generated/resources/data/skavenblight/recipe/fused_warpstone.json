@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "skavenblight:block_of_warpstone"
+    }
+  ],
+  "result": {
+    "count": 9,
+    "id": "skavenblight:fused_warpstone"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "wind": "shyish",
+  "tier": 1,
+  "casting_number": 30,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:slowness",
+    "duration_ticks": 300,
+    "amplifier": 2
+  },
+  "description_key": "spell.skavenblight.chilling_grave.description"
+}

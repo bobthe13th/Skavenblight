@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "skavenblight:warpstone_nexus"
+    },
+    {
+      "item": "skavenblight:fused_warpstone"
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "skavenblight:active_warpstone_nexus"
+  }
+
+}

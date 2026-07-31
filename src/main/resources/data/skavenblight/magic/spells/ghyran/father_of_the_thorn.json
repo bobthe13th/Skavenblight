@@ -1,0 +1,13 @@
+{
+  "wind": "ghyran",
+  "tier": 1,
+  "casting_number": 40,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:resistance",
+    "duration_ticks": 800,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.father_of_the_thorn.description"
+}

@@ -1,0 +1,13 @@
+{
+  "wind": "aqshy",
+  "tier": 1,
+  "casting_number": 40,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:strength",
+    "duration_ticks": 600,
+    "amplifier": 1
+  },
+  "description_key": "spell.skavenblight.flaming_sword_of_rhuin.description"
+}

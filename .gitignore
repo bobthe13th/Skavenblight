@@ -3,3 +3,6 @@
 *.iml
 /.gradle/
 /run/
+/src/generated/
+/.worktrees/
+/gametest_output.log

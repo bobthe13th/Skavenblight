@@ -1,0 +1,6 @@
+// 1.21.1	2026-07-10T17:50:24.5278902	Tags for minecraft:block mod id skavenblight
+64cf98cd8fd09c3c9383aa822b8a514ea3b31672 data/minecraft/tags/block/fences.json
+282669dabd33661ba4f888018ae44372aabb6933 data/minecraft/tags/block/fence_gates.json
+077e584f9d9339020c4278a38f539517caa1eaea data/minecraft/tags/block/mineable/pickaxe.json
+98146993dedc67c62d47e5a9a25891dc7e98d138 data/minecraft/tags/block/needs_diamond_tool.json
+ebf4ed8c427a8f72fd237e67bd7babe078f5ae0e data/minecraft/tags/block/walls.json

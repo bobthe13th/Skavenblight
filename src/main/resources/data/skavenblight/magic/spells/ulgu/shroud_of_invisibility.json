@@ -1,0 +1,13 @@
+{
+  "wind": "ulgu",
+  "tier": 0,
+  "casting_number": 30,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:invisibility",
+    "duration_ticks": 200,
+    "amplifier": 0
+  },
+  "description_key": "spell.skavenblight.shroud_of_invisibility.description"
+}

@@ -1,0 +1,13 @@
+{
+  "variants": {
+    "type=bottom": {
+      "model": "skavenblight:block/warpstone_slab"
+    },
+    "type=double": {
+      "model": "skavenblight:block/block_of_warpstone"
+    },
+    "type=top": {
+      "model": "skavenblight:block/warpstone_slab_top"
+    }
+  }
+}

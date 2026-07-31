@@ -1,0 +1,13 @@
+{
+  "wind": "shyish",
+  "tier": 0,
+  "casting_number": 25,
+  "casting_time": "half_action",
+  "effect": {
+    "type": "mob_effect",
+    "effect": "minecraft:slowness",
+    "duration_ticks": 200,
+    "amplifier": 1
+  },
+  "description_key": "spell.skavenblight.icy_grip_of_death.description"
+}
