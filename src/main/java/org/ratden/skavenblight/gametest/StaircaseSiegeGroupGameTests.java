@@ -271,4 +271,55 @@ public class StaircaseSiegeGroupGameTests {
 
         awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 7);
     }
+
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 8000, skyAccess = true)
+    public static void testSmallGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
+        NexusTracker.clearActiveNexus(helper.getLevel());
+
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(40, 16, 26);
+
+        buildElevatedPlatform(helper, relativeNexusPos, 5);
+        carveGroundBeneathPlatform(helper, relativeGroundSpawn.getY() - 1, relativeNexusPos, 5);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
+
+        List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 4, 2);
+
+        awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 7);
+    }
+
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 12000, skyAccess = true)
+    public static void testLargeGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
+        NexusTracker.clearActiveNexus(helper.getLevel());
+
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(40, 16, 26);
+
+        buildElevatedPlatform(helper, relativeNexusPos, 5);
+        carveGroundBeneathPlatform(helper, relativeGroundSpawn.getY() - 1, relativeNexusPos, 5);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
+
+        List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 10, 2);
+
+        awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 7);
+    }
+
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 20000, skyAccess = true)
+    public static void testLargeGroupBuildsChainedStaircaseAcrossGiantGap(GameTestHelper helper) {
+        NexusTracker.clearActiveNexus(helper.getLevel());
+
+        BlockPos relativeGroundSpawn = new BlockPos(26, 2, 26);
+        BlockPos relativeNexusPos = new BlockPos(70, 46, 26);
+
+        buildElevatedPlatform(helper, relativeNexusPos, 5);
+        carveGroundBeneathPlatform(helper, relativeGroundSpawn.getY() - 1, relativeNexusPos, 5);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
+
+        List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 10, 2);
+
+        awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 20);
+    }
 }
