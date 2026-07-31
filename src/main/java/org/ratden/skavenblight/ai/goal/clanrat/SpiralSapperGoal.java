@@ -81,7 +81,9 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
     public void start() {
         this.stalledTicks = 0;
         this.claimedPos = this.mob.blockPosition().immutable();
-        this.flowField.tryClaimTarget(this.claimedPos, this.mob);
+        if (this.flowField != null) {
+            this.flowField.tryClaimTarget(this.claimedPos, this.mob);
+        }
         this.currentFacing = this.mob.getDirection();
         this.transitionTo(SapperState.MINE_CEILING);
     }
@@ -152,7 +154,9 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
                             this.mob.getClass().getSimpleName(), this.currentTarget.toShortString(), this.stalledTicks);
                     this.nextAllowedStartTime = level.getGameTime() + GIVE_UP_COOLDOWN_TICKS;
                     if (this.claimedPos != null) {
-                        this.flowField.releaseTarget(this.claimedPos);
+                        if (this.flowField != null) {
+                            this.flowField.releaseTarget(this.claimedPos);
+                        }
                         this.claimedPos = null;
                     }
                     this.transitionTo(SapperState.WAITING);
@@ -199,7 +203,9 @@ public class SpiralSapperGoal extends Goal implements SiegeGoal {
             SiegeActionAnimator.clearMiningAnimation(this.mob.level(), this.mob, this.currentTarget);
         }
         if (this.claimedPos != null) {
-            this.flowField.releaseTarget(this.claimedPos);
+            if (this.flowField != null) {
+                this.flowField.releaseTarget(this.claimedPos);
+            }
             this.claimedPos = null;
         }
         this.currentTarget = null;
