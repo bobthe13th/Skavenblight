@@ -43,16 +43,18 @@ accidental shortcut through GameTest's own territory encasement).
   same way real block placement does. The shared conduit-placement helper (Task 2) MUST verify the
   network was actually created and, if not, call `WarpFluxGridManager.get(level).addConduit(level, pos)`
   directly as a fallback — still real production code, just invoked explicitly.
-- Keep all built geometry at least 6 blocks from every template edge on every test. GameTest's own
+- Every test method MUST call `restrictTerritoryToMinimalArea` (Task 2) immediately after
+  `placeNexusAndConduit`, before spawning any rats or letting any level tick pass. GameTest's own
   encasement (side walls + a floor beneath the full territory bounding box) sits just outside the
-  structure's own footprint and is a real, separately-scanned Region — geometry too close to the
-  edge risks the encasement providing an accidental shortcut connector, which is exactly what the
-  stair-count secondary assertion (Task 2) exists to catch, but keeping margin avoids relying on
-  that safety net to do all the work.
-- `Config.territoryChunkRadius` (a plain `public static int` field, default 2, valid range 0-8) is
-  mutable at runtime — restore it to its original value in a `finally` block wherever a task
-  changes it, exactly matching the `Config.minimumSettleDelayMs` restore pattern already used in
-  `PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount`.
+  structure's own footprint and is a real, separately-scanned Region — `WarpFluxNetwork`'s default
+  `updateTerritory` radius (2 chunks/32 blocks) reaches past it regardless of how much margin this
+  test's own geometry keeps from the template edges, since these templates are only 2x2 (or, for
+  `pathing_test_giant`, 4x2) chunks total. Discovered empirically during Task 2's first attempt:
+  `FlowFieldCalculator`'s cycle-breaking safeguard can end up sacrificing the real, locked
+  `BUILD_STAIR` instruction instead of the bogus encasement one when the scan reaches that geometry
+  - precision (an exact minimal territory) fixes this at the source; margin alone cannot, and the
+  stair-count secondary assertion is a check on the OUTCOME, not a substitute for avoiding the
+  scan-contamination in the first place.
 - Follow existing code style in `org.ratden.skavenblight.gametest`: `@GameTestHolder(Skavenblight.MODID)`
   + `@PrefixGameTestTemplate(false)` on the class, the package-private `check(boolean, String)`
   helper already defined in `PathingRegionGameTests` (imported via static import) instead of raw
@@ -251,10 +253,13 @@ taller template."
 - Create: `src/main/java/org/ratden/skavenblight/gametest/StaircaseSiegeGroupGameTests.java`
 
 **Interfaces:**
-- Produces (used by Tasks 3-5): `buildElevatedPlatform`, `placeNexusAndConduit`, `spawnClanrats`,
-  `countStairsInZone`, `awaitArrivalAndStaircase` — all private static methods on
-  `StaircaseSiegeGroupGameTests`, signatures fixed below. Later tasks call these exactly as
-  declared here; do not rename or change parameter order.
+- Produces (used by Tasks 3-5): `buildElevatedPlatform`, `placeNexusAndConduit` (returns
+  `WarpFluxNetwork`), `restrictTerritoryToMinimalArea`, `spawnClanrats`, `countStairsInZone`,
+  `awaitArrivalAndStaircase` — all private static methods on `StaircaseSiegeGroupGameTests`,
+  signatures fixed below. Later tasks call these exactly as declared here, in the order shown in
+  this task's own test method (`placeNexusAndConduit` then immediately
+  `restrictTerritoryToMinimalArea`, before spawning any rats) — do not rename methods, change
+  parameter order, or reorder those two calls relative to each other.
 
 **Why:** Establishes the file, the shared terrain/spawn/assertion helpers every later test reuses,
 and the simplest possible real end-to-end proof: one rat, one small diagonal gap, real region
@@ -272,19 +277,22 @@ import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
-import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.block.ModBlocks;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
 import org.ratden.skavenblight.network.WarpFluxGridManager;
+import org.ratden.skavenblight.network.WarpFluxNetwork;
 import org.ratden.skavenblight.world.NexusTracker;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 
@@ -337,8 +345,11 @@ public class StaircaseSiegeGroupGameTests {
      * {@code helper.setBlock} didn't trigger that callback the same way real placement does
      * (structure-paste update flags can skip it), falls back to calling
      * {@code WarpFluxGridManager.addConduit} directly - still real production code either way.
+     * Returns the resulting network so the caller can restrict its territory (see
+     * {@link #restrictTerritoryToMinimalArea}) before any level tick lets it bootstrap a region
+     * scan.
      */
-    private static void placeNexusAndConduit(GameTestHelper helper, BlockPos relativeNexusPos) {
+    private static WarpFluxNetwork placeNexusAndConduit(GameTestHelper helper, BlockPos relativeNexusPos) {
         helper.setBlock(relativeNexusPos, ModBlocks.ACTIVE_WARPSTONE_NEXUS.get().defaultBlockState());
         BlockPos relativeConduitPos = relativeNexusPos.relative(Direction.EAST);
         helper.setBlock(relativeConduitPos, ModBlocks.WARP_FLUX_CONDUIT.get().defaultBlockState());
@@ -349,6 +360,57 @@ public class StaircaseSiegeGroupGameTests {
         if (manager.getNetworkAt(absoluteConduitPos) == null) {
             manager.addConduit(level, absoluteConduitPos);
         }
+        return manager.getNetworkAt(absoluteConduitPos);
+    }
+
+    /**
+     * Overrides {@code network}'s territory (normally auto-computed by
+     * {@code WarpFluxNetwork#updateTerritory} as a {@code Config.territoryChunkRadius}-chunk
+     * "bubble" around its conduit/endpoints - 2 chunks/32 blocks by default) down to the EXACT
+     * chunks spanning {@code relativeFrom} to {@code relativeTo}, with no extra buffer.
+     *
+     * <p>Discovered empirically (Task 2, first attempt): the default radius reaches WAY past this
+     * 32-wide, 2x2-chunk template's own footprint into GameTest's own auto-encasement geometry
+     * (side walls + a walkable ledge along their top, which {@code skyAccess = true} does NOT
+     * suppress - see {@code PathingRegionGameTests}' class javadoc for the mechanism). That's a
+     * REAL, separately-scanned Region purely because it's genuinely walkable terrain the region
+     * scanner has no way to know is a test-framework artifact rather than intended geometry - and
+     * in that specific geometry, {@code FlowFieldCalculator}'s cycle-breaking safeguard (which
+     * exists to stop mobs looping forever on a genuine flow-field cycle) can end up choosing to
+     * drop the real, locked, genuinely-needed {@code BUILD_STAIR} instruction instead of the bogus
+     * encasement-ledge one, since cost alone can't tell "real" apart from "test-framework
+     * artifact". No reasonable amount of margin between this test's OWN geometry and the
+     * template's edges fixes this - the template is only 2x2 chunks total, so ANY position's
+     * default 2-chunk-radius bubble necessarily extends past it. The fix is precision, not margin:
+     * only include the chunks this test's own geometry actually needs, so the scan never reaches
+     * the encasement at all. {@code WarpFluxNetwork#getTerritoryChunks} returns the live, mutable
+     * backing set (not a defensive copy) specifically so this kind of direct test-side override is
+     * possible without needing a new production API - confirmed by reading the field itself.
+     *
+     * <p>Must be called before the next level tick reaches {@code WarpFluxNetwork#tick}'s
+     * self-healing bootstrap (i.e. immediately after {@link #placeNexusAndConduit}, synchronously,
+     * within the same {@code @GameTest} method body) - the bootstrap takes a defensive
+     * {@code Set.copyOf} snapshot of whatever territory is present at that moment.
+     */
+    private static void restrictTerritoryToMinimalArea(GameTestHelper helper, WarpFluxNetwork network,
+                                                         BlockPos relativeFrom, BlockPos relativeTo) {
+        ChunkPos chunkFrom = new ChunkPos(helper.absolutePos(relativeFrom));
+        ChunkPos chunkTo = new ChunkPos(helper.absolutePos(relativeTo));
+
+        int minX = Math.min(chunkFrom.x, chunkTo.x);
+        int maxX = Math.max(chunkFrom.x, chunkTo.x);
+        int minZ = Math.min(chunkFrom.z, chunkTo.z);
+        int maxZ = Math.max(chunkFrom.z, chunkTo.z);
+
+        Set<ChunkPos> minimalTerritory = new HashSet<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                minimalTerritory.add(new ChunkPos(x, z));
+            }
+        }
+
+        network.getTerritoryChunks().clear();
+        network.getTerritoryChunks().addAll(minimalTerritory);
     }
 
     /**
@@ -437,7 +499,8 @@ public class StaircaseSiegeGroupGameTests {
         BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
-        placeNexusAndConduit(helper, relativeNexusPos);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
 
         List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 1, 2);
 
@@ -469,6 +532,15 @@ way this task's `placeNexusAndConduit` fallback assumed — confirm the fallback
 (`manager.addConduit(level, absoluteConduitPos)`) is actually being reached and not silently
 short-circuited by a stale `getNetworkAt` check.
 
+If the network DID form and the rebuild DID run, but the rat still walks to the base of the
+platform and then never gains elevation: check the log for a `FlowFieldCalculator` line reading
+"Broke flow-field cycle... dropped ... (BUILD_STAIR, locked=true)" at a position near the
+template's own edge or above its own build height — that's `restrictTerritoryToMinimalArea` not
+actually taking effect before the network's first tick (the override must happen synchronously,
+immediately after `placeNexusAndConduit`, in the same method body — see that helper's own doc).
+Confirm `network` is non-null (i.e. `placeNexusAndConduit`'s `getNetworkAt` lookup actually found
+the network `addConduit` just created) before assuming the restriction call itself is wrong.
+
 - [ ] **Step 4: Commit**
 
 ```bash
@@ -487,7 +559,17 @@ discovers the network and assigns its flow field - exactly like live
 gameplay. Pass condition is two-part: physical arrival at the nexus AND
 a minimum stair-block count in the crossing zone, so the test can't
 silently pass via some other action or an accidental encasement
-shortcut."
+shortcut.
+
+Also restricts the network's territory to the exact chunks this test's
+geometry needs (WarpFluxNetwork#getTerritoryChunks returns the live
+mutable set, not a copy) instead of relying on updateTerritory's default
+radius - found empirically that the default 2-chunk bubble reaches past
+this 32-wide (2x2-chunk) template's own footprint into GameTest's own
+auto-encasement ledge regardless of margin from this test's own
+geometry, and FlowFieldCalculator's cycle-breaking safeguard can end up
+sacrificing the real, locked BUILD_STAIR instruction instead of the
+bogus encasement one in that specific geometry."
 ```
 
 ---
@@ -517,7 +599,8 @@ Add to `StaircaseSiegeGroupGameTests` (same file, after `testSingleRatBuildsStai
         BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
-        placeNexusAndConduit(helper, relativeNexusPos);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
 
         List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 4, 2);
 
@@ -525,7 +608,7 @@ Add to `StaircaseSiegeGroupGameTests` (same file, after `testSingleRatBuildsStai
     }
 ```
 
-Identical geometry to Task 2's test (same platform, same gap) — only the rat count differs (4
+Identical geometry to Task 2's test (same platform, same gap, same territory restriction) — only the rat count differs (4
 instead of 1), and the timeout is larger to give a queued-up group more real ticks to fully cross
 one at a time.
 
@@ -583,7 +666,8 @@ Add to `StaircaseSiegeGroupGameTests`:
         BlockPos relativeNexusPos = new BlockPos(20, 16, 6);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
-        placeNexusAndConduit(helper, relativeNexusPos);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
 
         List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 10, 2);
 
@@ -591,7 +675,7 @@ Add to `StaircaseSiegeGroupGameTests`:
     }
 ```
 
-Same geometry again; 10 rats spaced 2 apart along Z starting at relative Z=6 span Z=6..24, still
+Same geometry again (including the same territory restriction); 10 rats spaced 2 apart along Z starting at relative Z=6 span Z=6..24, still
 comfortably inside the template's 0-31 Z range and clear of the platform's own Z=4..8 footprint
 margin.
 
@@ -645,28 +729,24 @@ Add to `StaircaseSiegeGroupGameTests`:
         BlockPos relativeNexusPos = new BlockPos(50, 46, 6);
 
         buildElevatedPlatform(helper, relativeNexusPos, 5);
-        placeNexusAndConduit(helper, relativeNexusPos);
+        WarpFluxNetwork network = placeNexusAndConduit(helper, relativeNexusPos);
+        restrictTerritoryToMinimalArea(helper, network, relativeGroundSpawn, relativeNexusPos);
 
-        int originalTerritoryChunkRadius = Config.territoryChunkRadius;
-        Config.territoryChunkRadius = 5;
-        try {
-            List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 10, 2);
-            awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 20);
-        } finally {
-            Config.territoryChunkRadius = originalTerritoryChunkRadius;
-        }
+        List<ClanratEntity> rats = spawnClanrats(helper, relativeGroundSpawn, 10, 2);
+
+        awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 20);
     }
 ```
 
 Geometry: ground spawn at relative (6, 2, 6), nexus platform centered at relative (50, 46, 6) — a
 diagonal offset of dx=44, dy=44, dz=0, forcing at least 2 chained macro-project hops (32 + 12
-steps). `Config.territoryChunkRadius` is temporarily raised to 5 (80 blocks) so the network's
-territory comfortably covers both platforms regardless of GameTest's own non-chunk-aligned
-placement offset (a 44-block span could span up to 4 chunk boundaries depending on alignment; 5
-chunks of radius leaves generous margin), then restored in the `finally` block per this plan's
-Global Constraints — note the restore happens whether or not `awaitArrivalAndStaircase` throws
-(a timeout), matching the exact `Config.minimumSettleDelayMs` try/finally pattern already used in
-`PathingRegionGameTests`.
+steps). Same `restrictTerritoryToMinimalArea` call as every other test in this file — no
+`Config.territoryChunkRadius` mutation needed here (an earlier version of this task tried bumping
+the radius instead; `restrictTerritoryToMinimalArea`'s own doc, added while fixing Task 2, covers
+why precision beats a bigger radius: it computes the exact chunk range from the real absolute
+positions via `helper.absolutePos`, so it's correct regardless of GameTest's own non-chunk-aligned
+placement offset, without needing to guess a "safe enough" radius or touch a shared static config
+field at all).
 
 The stairs-count threshold (20) is lower than a literal "half of 44" would suggest, because one of
 the ~44 steps legitimately becomes a synthetic `BUILD_LANDING` (not a stair block) at the
@@ -685,13 +765,11 @@ Run: `./gradlew runGameTestServer`
 Expected: `testLargeGroupBuildsChainedStaircaseAcrossGiantGap` passes, all 10 rats arrive at the
 elevated nexus platform, no NEW failures beyond the two pre-existing known ones.
 
-If the region never connects (rats stay stranded on the ground floor forever): check
-`Config.territoryChunkRadius` actually took effect before the network's first tick (the field must
-be set BEFORE `placeNexusAndConduit`/the first level tick after placement, not after — the network's
-`updateTerritory` call happens synchronously inside `addConduit`, so setting the radius after
-placing the conduit is too late). If needed, move the `Config.territoryChunkRadius` assignment
-before `placeNexusAndConduit` instead of after, keeping the rest of the try/finally structure the
-same.
+If the region never connects (rats stay stranded on the ground floor forever): confirm `network` is
+non-null and that `restrictTerritoryToMinimalArea` is called immediately after
+`placeNexusAndConduit`, before `spawnClanrats` — same ordering requirement as every other test in
+this file (see that helper's own doc for why the timing matters: the override must land before the
+network's first tick reaches its self-healing bootstrap).
 
 - [ ] **Step 4: Commit**
 
