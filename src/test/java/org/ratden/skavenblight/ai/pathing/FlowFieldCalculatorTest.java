@@ -149,22 +149,52 @@ class FlowFieldCalculatorTest {
     // Still exercised for real by breakMutualCycles() - see FlowFieldCalculator.
 
     @Test
-    void pickCyclePositionToDrop_keepsTheSoleLockedPosition() {
+    void pickCyclePositionToDrop_keepsTheSoleLockedPositionEvenWhenItsThePricierOne() {
         BlockPos upper = new BlockPos(1, -60, -20);
         BlockPos lower = new BlockPos(1, -61, -20);
         List<BlockPos> cycle = List.of(upper, lower);
 
-        // Cost map alone would suggest dropping `upper` (cheaper `lower` would be kept anyway),
-        // but locking takes priority: `lower` is an active project's claimed cell and must never
-        // be dropped, since the core flood skips locked positions and could never refill it.
+        // `lower` is both the LOCKED position AND the more expensive one - plain cost logic alone
+        // would drop `lower` (higher cost), but locking must override cost: `lower` is an active
+        // project's claimed cell and must never be dropped, since the core flood skips locked
+        // positions and could never refill it. Confirms locking actually overrides cost rather
+        // than merely agreeing with it.
         Map<BlockPos, Integer> costMap = new HashMap<>();
-        costMap.put(upper, 5);
-        costMap.put(lower, 1);
+        costMap.put(upper, 1);
+        costMap.put(lower, 5);
         Set<BlockPos> lockedPositions = Set.of(lower);
 
         BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, costMap, lockedPositions);
 
         assertEquals(upper, dropped);
+    }
+
+    @Test
+    void pickCyclePositionToDrop_keepsAllLockedPositionsWhenSomeButNotAllAreLocked() {
+        // A 3-cycle where TWO positions belong to different active projects' locked cells and the
+        // third is unlocked - realistic once SiegeProjectManager holds multiple concurrent
+        // activeProjects contributing to the same shared lockedPositions set, and Finding B's
+        // any-length cycle detection means a cycle can legitimately span more than one of them.
+        // lockedCount (2) is neither 0 nor == cyclePositions.size() (3), so the fix's
+        // "at least one but not all locked" branch must kick in - a naive `lockedCount == 1` check
+        // would miss this entirely and let the plain cost walk consider (and possibly drop) a
+        // locked position.
+        BlockPos lockedA = new BlockPos(1, -60, -20);
+        BlockPos unlocked = new BlockPos(1, -61, -20);
+        BlockPos lockedB = new BlockPos(1, -62, -20);
+        List<BlockPos> cycle = List.of(lockedA, unlocked, lockedB);
+
+        // Cost map alone would favor dropping `unlocked` anyway here (it's not the cheapest), but
+        // the real point is that neither locked position is even a candidate.
+        Map<BlockPos, Integer> costMap = new HashMap<>();
+        costMap.put(lockedA, 1);
+        costMap.put(unlocked, 50);
+        costMap.put(lockedB, 1);
+        Set<BlockPos> lockedPositions = Set.of(lockedA, lockedB);
+
+        BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, costMap, lockedPositions);
+
+        assertEquals(unlocked, dropped);
     }
 
     @Test
@@ -195,5 +225,24 @@ class FlowFieldCalculatorTest {
         BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, new HashMap<>(), Set.of());
 
         assertEquals(third, dropped);
+    }
+
+    @Test
+    void pickCyclePositionToDrop_fallsBackToCostWhenEveryPositionIsLocked() {
+        // If every position in the cycle is locked, there's no unlocked alternative to prefer -
+        // the cycle still has to be broken, so this falls through to the plain cost/tiebreak walk
+        // over the full set rather than deadlocking with nothing eligible to drop.
+        BlockPos upper = new BlockPos(1, -60, -20);
+        BlockPos lower = new BlockPos(1, -61, -20);
+        List<BlockPos> cycle = List.of(upper, lower);
+
+        Map<BlockPos, Integer> costMap = new HashMap<>();
+        costMap.put(upper, 9);
+        costMap.put(lower, 2);
+        Set<BlockPos> lockedPositions = Set.of(upper, lower);
+
+        BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, costMap, lockedPositions);
+
+        assertEquals(upper, dropped);
     }
 }

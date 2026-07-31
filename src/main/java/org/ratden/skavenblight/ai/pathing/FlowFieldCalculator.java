@@ -285,7 +285,8 @@ public class FlowFieldCalculator {
 
             BlockPos toDrop = pickCyclePositionToDrop(cycle, nextCostMap, lockedPositions);
             SiegeNode droppedNode = nextInstructionMap.get(toDrop);
-            boolean singleLockedPreference = cycle.stream().filter(lockedPositions::contains).count() == 1;
+            long lockedCount = cycle.stream().filter(lockedPositions::contains).count();
+            boolean lockedPreference = lockedCount > 0 && lockedCount < cycle.size();
 
             warnedThisPass.add(toDrop);
             if (!lastPassWarnedPositions.contains(toDrop)) {
@@ -294,8 +295,9 @@ public class FlowFieldCalculator {
                                 + "dropped so mobs fall back to local breach instead of looping forever",
                         cycle.size(), toDrop.toShortString(), droppedNode.action(), lockedPositions.contains(toDrop),
                         droppedNode.pos().toShortString(), cycle.size() - 1,
-                        singleLockedPreference
-                                ? "kept the sole locked position in this cycle, dropped a non-locked one"
+                        lockedPreference
+                                ? "kept every locked position in this cycle (" + lockedCount + " of " + cycle.size()
+                                        + "), dropped one of the non-locked ones"
                                 : "dropped the higher-cost position (or, on an absent/tied cost, the one encountered later while walking the cycle)");
             }
 
@@ -311,16 +313,26 @@ public class FlowFieldCalculator {
      * break it. Removing any one node from a cycle is sufficient - see {@link #breakMutualCycles()}
      * - so this only needs to pick the least-bad one to sacrifice:
      * <ol>
-     *     <li>if exactly one of the cycle's positions is locked (an active SiegeProject's own
-     *     claimed cell - see {@code SiegeProjectManager.getLockedPositions}), keep it and drop
-     *     from the rest: the core flood skips locked positions entirely, so a locked cell dropped
-     *     here could never be refilled by a later pass.</li>
-     *     <li>otherwise, keep whichever position is cheaper in {@code costMap} and drop the
-     *     higher-cost one. A macro-project chain's interior positions legitimately have no
-     *     {@code costMap} entry at all (see {@code nextCostMap}'s own field doc) - an absent cost
-     *     is treated the same as a tie. On a tie (or an absent cost on either side), drop
-     *     whichever position was encountered LATER while walking the cycle, keeping the first one
-     *     encountered - an arbitrary but deterministic tie-break.</li>
+     *     <li>if AT LEAST ONE of the cycle's positions is locked (an active SiegeProject's own
+     *     claimed cell - see {@code SiegeProjectManager.getLockedPositions}) but NOT EVERY
+     *     position is locked, restrict the candidates to the non-locked ones and keep every locked
+     *     position: the core flood skips locked positions entirely, so a locked cell dropped here
+     *     could never be refilled by a later pass. This isn't limited to exactly one locked
+     *     position - {@code SiegeProjectManager} can hold several concurrent {@code
+     *     activeProjects} at once, all contributing to the same shared {@code lockedPositions}
+     *     set, and a single any-length cycle (see {@link #detectMutualCyclePositions}) can span
+     *     cells locked by more than one of them; every one of those locked cells must survive, not
+     *     just "the" locked one.</li>
+     *     <li>if EVERY position in the cycle is locked, there's no unlocked alternative to prefer,
+     *     so fall through to the cost/tiebreak logic below over the full cycle regardless of lock
+     *     state - the cycle still has to be broken somehow.</li>
+     *     <li>otherwise (including the "every position locked" fallback above), keep whichever
+     *     position is cheaper in {@code costMap} and drop the higher-cost one. A macro-project
+     *     chain's interior positions legitimately have no {@code costMap} entry at all (see
+     *     {@code nextCostMap}'s own field doc) - an absent cost is treated the same as a tie. On a
+     *     tie (or an absent cost on either side), drop whichever position was encountered LATER
+     *     while walking the cycle, keeping the first one encountered - an arbitrary but
+     *     deterministic tie-break.</li>
      * </ol>
      * Split out as a pure, dependency-free static function so it's unit-testable without a
      * fully-constructed FlowFieldCalculator - see FlowFieldCalculatorTest.
@@ -332,7 +344,7 @@ public class FlowFieldCalculator {
                                              Set<BlockPos> lockedPositions) {
         List<BlockPos> candidates = cyclePositions;
         long lockedCount = cyclePositions.stream().filter(lockedPositions::contains).count();
-        if (lockedCount == 1) {
+        if (lockedCount > 0 && lockedCount < cyclePositions.size()) {
             candidates = new ArrayList<>(cyclePositions);
             candidates.removeIf(lockedPositions::contains);
         }
