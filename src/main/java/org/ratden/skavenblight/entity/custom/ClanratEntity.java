@@ -8,6 +8,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.*;
 import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
@@ -52,6 +53,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
     private long lastKnownGeneration = -1;
     private int territoryCheckCooldown = 0;
     private BlockPos strandedHeading = null;
+    // See recoverFromStuckAirborne()'s own doc for what these track.
+    private int consecutiveAirborneTicks = 0;
+    private Vec3 airbornePositionAnchor = null;
 
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
@@ -97,9 +101,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(12, new RandomLookAroundGoal(this));
     }
 
-    private int consecutiveAirborneTicks = 0;
-    private net.minecraft.world.phys.Vec3 airbornePositionAnchor = null;
-
     /**
      * Recovers from a narrow but real physics edge case found via GameTest diagnostics (Task 2,
      * clanrat-gap-crossing-pathing-fix-plan): landing a climb right at a stair block's own
@@ -121,7 +122,7 @@ public class ClanratEntity extends Monster implements GeoEntity {
             return;
         }
 
-        net.minecraft.world.phys.Vec3 pos = this.position();
+        Vec3 pos = this.position();
         if (this.airbornePositionAnchor == null || this.airbornePositionAnchor.distanceToSqr(pos) > 4.0) {
             // Genuinely traveling (a real fall, a real leap in progress) - not the stuck case
             // this guards against. Re-anchor and restart the count from here.
@@ -134,7 +135,7 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         this.consecutiveAirborneTicks = 0;
         this.airbornePositionAnchor = null;
-        this.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+        this.setDeltaMovement(Vec3.ZERO);
         // Force a clean landing at the mob's own current X/Z: walk straight down from here to the
         // first solid ground, rather than guessing at any particular flow-field cell - whatever
         // goal is active next tick re-resolves its own target fresh from wherever this leaves it.

@@ -38,6 +38,15 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
 
     public void setFlowField(RegionFlowField flowField) {
         this.flowField = flowField;
+        // ClanratEntity.customServerAiStep only ever calls this when the region/generation
+        // genuinely changed (it early-returns otherwise - see its own short-circuit check), so
+        // every call here means lastHopOrigin's "unchanged since last hop" comparison would be
+        // comparing against a hop requested under a DIFFERENT field entirely. Left stale, a mob
+        // that happened to be at the same blockPosition when a rebuild swapped fields in (e.g.
+        // briefly preempted by a higher-priority goal at the moment of reassignment) would trip
+        // the repeat-hop nudge on its very first hop under the new field, not a genuine stuck
+        // repeat.
+        this.lastHopOrigin = null;
     }
 
     @Override
