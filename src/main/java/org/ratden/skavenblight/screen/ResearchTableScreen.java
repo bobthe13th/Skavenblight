@@ -130,6 +130,73 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderDetailPane(guiGraphics);
         renderTooltip(guiGraphics, mouseX, mouseY);
+
+        PreviewState preview = computePreviewState();
+        renderWindMeterTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos, preview);
+        renderProgressBarTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos, preview);
+    }
+
+    private void renderWindMeterTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, PreviewState preview) {
+        if (preview.spell == null || preview.known) {
+            return;
+        }
+
+        if (mouseX >= (x + METER_X) && mouseX <= (x + METER_X) + METER_W &&
+                mouseY >= (y + METER_Y) && mouseY <= (y + METER_Y) + METER_H) {
+
+            Spell spell = preview.spell;
+            Wind wind = spell.wind();
+            int current = Math.max(0, preview.windLevel);
+            int required = Math.max(1, Math.round(ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold)));
+
+            List<Component> tooltip = new ArrayList<>();
+            tooltip.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_title", wind.getLoreName())
+                    .withStyle(style -> style.withColor(wind.getColor())));
+            tooltip.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_value", current, required)
+                    .withStyle(net.minecraft.ChatFormatting.GRAY));
+
+            if (preview.windSufficient) {
+                float multiplier = ResearchFormulas.speedMultiplier(current, required,
+                        Config.researchWindBonusReference, Config.researchWindMaxBonusMultiplier);
+                if (multiplier > 1.0f) {
+                    int speedPercent = Math.round((multiplier - 1.0f) * 100);
+                    tooltip.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_bonus", speedPercent)
+                            .withStyle(net.minecraft.ChatFormatting.GREEN));
+                } else {
+                    tooltip.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_sufficient")
+                            .withStyle(net.minecraft.ChatFormatting.GREEN));
+                }
+            } else {
+                tooltip.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_insufficient")
+                        .withStyle(net.minecraft.ChatFormatting.RED));
+            }
+
+            guiGraphics.renderComponentTooltip(this.font, tooltip, mouseX, mouseY);
+        }
+    }
+
+    private void renderProgressBarTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, PreviewState preview) {
+        if (preview.spell == null || preview.known) {
+            return;
+        }
+
+        if (mouseX >= (x + PROGRESS_X) && mouseX <= (x + PROGRESS_X) + PROGRESS_W &&
+                mouseY >= (y + PROGRESS_Y) && mouseY <= (y + PROGRESS_Y) + PROGRESS_H) {
+
+            int progress = this.menu.getProgress();
+            int maxProgress = Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE;
+
+            Component text;
+            if (progress > 0 && maxProgress > 0) {
+                int percent = (int) Math.min(100, Math.max(0, (long) progress * 100 / maxProgress));
+                text = Component.translatable("gui.skavenblight.research_table.tooltip.progress", percent)
+                        .withStyle(net.minecraft.ChatFormatting.GREEN);
+            } else {
+                text = Component.translatable("gui.skavenblight.research_table.tooltip.progress_idle")
+                        .withStyle(net.minecraft.ChatFormatting.GRAY);
+            }
+            guiGraphics.renderTooltip(this.font, text, mouseX, mouseY);
+        }
     }
 
     @Override
