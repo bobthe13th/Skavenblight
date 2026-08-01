@@ -234,6 +234,35 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         if (this.flowField == null || this.mob.level().getGameTime() < this.nextAllowedActionTime) {
             return false;
         }
+        // A mob mid-leap (FollowFlowFieldGoal's own MoveControl/JumpControl-driven climb across
+        // a gap - see its own moveOrHop/nudgeAcross) is still within MAX_TARGET_CLAIM_DISTANCE of
+        // its NEXT target well before it lands, since that distance (2.5) is sized for
+        // post-claim crowd tolerance, not for "is this mob currently mid-air and in the middle of
+        // a completely different goal's own in-progress motion." Without this guard, a
+        // construction goal outranking FollowFlowFieldGoal in priority (see
+        // ClanratEntity.registerGoals) can preempt an in-progress leap the instant its own
+        // distance check is satisfied - confirmed via GameTest diagnostics: BuildFlowFieldGoal
+        // claiming and starting its target while the mob was still airborne, mid-climb, at a
+        // transient off-chain position. tick() then unconditionally zeroes the mob's own
+        // horizontal velocity every tick (see below), killing the leap's own momentum before it
+        // ever crosses the gap it was aimed at - the mob falls back roughly where it started, and
+        // the whole cycle repeats.
+        //
+        // A first version of this guard checked bare onGround() - wrong, and confirmed so by a
+        // full-suite regression: onGround() defaults false on any entity that hasn't yet had a
+        // real physics tick run against it, which describes every synthetic unit-style GameTest
+        // in this codebase (SiegeConstructionActionsGameTests, PathingGoalRecalculationGameTests)
+        // that positions a mob via setPos() - a raw teleport, not a tick - and calls canUse()
+        // immediately after. Bare onGround() blocked every one of those unconditionally, not just
+        // the genuine mid-climb case. Checking actual upward velocity instead is the correct
+        // discriminator: a real in-progress climb has this.mob.getDeltaMovement().y well above
+        // zero (JumpControl.jump()'s own impulse, sustained by MoveControl's JUMPING state until
+        // landing - see FollowFlowFieldGoal.tryClimb()'s own doc), while every synthetic test
+        // mob's delta movement is Vec3.ZERO (setPos() never touches velocity), so this correctly
+        // never fires for them regardless of their (meaningless, never-computed) onGround() value.
+        if (!this.mob.onGround() && this.mob.getDeltaMovement().y > 1.0E-2) {
+            return false;
+        }
         // Skip a target another mob's construction goal already claimed - without this, every
         // mob near a bottleneck independently arrives at the same "next" instruction and all
         // converge on the identical block simultaneously instead of spreading across whatever

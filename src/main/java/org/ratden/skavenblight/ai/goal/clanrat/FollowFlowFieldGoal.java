@@ -29,6 +29,17 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
     // actually advanced since the last 10-tick request cycle, independent of whether vanilla's
     // own Navigation considers the resulting path "in progress" or "done".
     private BlockPos lastHopOrigin = null;
+    // Set the moment a climb (jump()+setWantedPosition) is launched toward a given target;
+    // cleared once the mob's own blockPosition() actually reaches or passes that target's Y, or
+    // after climbGiveUpTicks of no progress. While set, moveOrHop/nudgeAcross's climb branch
+    // does NOT re-issue jump()/setWantedPosition for it - see their shared tryClimb() for why
+    // re-issuing mid-arc, every 10-tick cycle, is actively harmful rather than merely redundant.
+    private BlockPos activeClimbTarget = null;
+    // Counts 10-tick CYCLES (this field only increments inside tick()'s own 10-tick-gated
+    // block), not raw ticks - 20 cycles is 200 ticks, a generous safety-net window since
+    // onGround() becoming true (the normal exit) should resolve this well before then.
+    private int climbCyclesElapsed = 0;
+    private static final int CLIMB_GIVE_UP_CYCLES = 20;
 
     public FollowFlowFieldGoal(PathfinderMob mob, double speedModifier) {
         this.mob = mob;
@@ -82,6 +93,24 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
 
         if (--this.pathingUpdateTimer <= 0) {
             this.pathingUpdateTimer = 10;
+
+            // If a climb is already in flight, wait it out completely before touching anything
+            // else this cycle - do NOT re-resolve the flow field target at all. An earlier
+            // version re-resolved targetNode/nextInChain fresh every cycle and only checked
+            // afterward whether the newly-resolved target matched activeClimbTarget - but that
+            // resolution is itself derived from the mob's own (still-bouncing, not yet settled)
+            // blockPosition(), so it could resolve to a subtly different node from one cycle to
+            // the next even for what was conceptually "the same" climb, defeating the equality
+            // check and causing a fresh jump()+setWantedPosition every cycle anyway - confirmed
+            // via GameTest diagnostics as the actual reason the yRot instability persisted even
+            // after tryClimb's own repeat-guard was added. Checking activeClimbTarget FIRST, before
+            // any fresh resolution, means an in-progress climb is fully decoupled from whatever the
+            // flow field would resolve to if asked again right now.
+            if (this.activeClimbTarget != null) {
+                tryClimb(this.activeClimbTarget);
+                return;
+            }
+
             Vec3 currentPosition = this.mob.position();
 
             if (this.lastPosition != null && this.mob.getNavigation().isInProgress()) {
@@ -262,13 +291,70 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
      * single call here, gated on being grounded, is enough to carry the whole arc.
      */
     private void moveOrHop(BlockPos from, BlockPos to) {
-        if (to.getY() > from.getY() && this.mob.onGround() && to.closerThan(from, 2.5)) {
-            this.mob.getJumpControl().jump();
-            this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
+        if (to.getY() > from.getY() && to.closerThan(from, 2.5) && tryClimb(to)) {
             return;
         }
 
         this.mob.getNavigation().moveTo(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
+    }
+
+    /**
+     * Launches (or continues waiting out) a climb toward {@code to}, returning whether a climb
+     * is in progress for it (whether just launched now, or already launched on an earlier cycle
+     * and not yet resolved) - the caller should do nothing else in either case.
+     *
+     * <p>A first version of this re-issued jump()+setWantedPosition every 10-tick cycle as long
+     * as onGround() read false, on the assumption that "still airborne" meant "still safe to
+     * re-aim." Confirmed via GameTest diagnostics this was actively harmful: a mob mid-bounce
+     * (see ClanratEntity.recoverFromStuckAirborne's own doc for that separate, now-fixed failure
+     * mode) has its integer blockPosition() flip between adjacent Y values tick to tick, so
+     * onGround() itself reads inconsistently between one 10-tick cycle and the next - re-issuing
+     * MoveControl.setWantedPosition each time it happened to read true recomputed a fresh heading
+     * from wherever the mob's continuous position currently was, and at these short (&lt;2.5
+     * block) distances that heading computation (atan2 of a near-zero X/Z difference) is
+     * numerically unstable: the logged yRot swung wildly - 332 deg, then 347, then 9, then 353 -
+     * cycle to cycle, meaning the mob was being relaunched on a near-random new heading every 10
+     * ticks before any single arc could ever complete, never making consistent net progress.
+     * Tracking the climb as in-progress for a specific target - independent of the mob's own
+     * noisy position - and simply doing nothing further until it resolves (lands past the target
+     * Y, or times out) lets exactly one arc play out at a time.
+     */
+    private boolean tryClimb(BlockPos to) {
+        if (this.activeClimbTarget != null && this.activeClimbTarget.equals(to)) {
+            if (this.mob.blockPosition().getY() >= to.getY()) {
+                // Succeeded - the mob's own integer Y now matches or exceeds the target's.
+                this.activeClimbTarget = null;
+                this.climbCyclesElapsed = 0;
+                return false;
+            }
+            if (this.mob.onGround()) {
+                // Landed (whether it settled short on its own, or ClanratEntity's own
+                // recoverFromStuckAirborne force-landed it - see that method's doc) without
+                // reaching the target - this specific attempt is over, one way or another. Clear
+                // the tracking so the next cycle evaluates fresh rather than waiting out the
+                // give-up timeout below for an arc that has already, observably, ended.
+                this.activeClimbTarget = null;
+                this.climbCyclesElapsed = 0;
+                return false;
+            }
+            if (++this.climbCyclesElapsed >= CLIMB_GIVE_UP_CYCLES) {
+                // Safety net only - shouldn't normally trigger, since onGround() above already
+                // catches every real landing. Guards against onGround() somehow never reading
+                // true again for this mob (would otherwise wait forever).
+                this.activeClimbTarget = null;
+                this.climbCyclesElapsed = 0;
+                return false;
+            }
+            return true; // still airborne, mid-arc - let it play out, don't re-launch
+        }
+
+        if (!this.mob.onGround()) return false;
+
+        this.mob.getJumpControl().jump();
+        this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
+        this.activeClimbTarget = to;
+        this.climbCyclesElapsed = 0;
+        return true;
     }
 
     /**
@@ -281,17 +367,16 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
      * reproduce the identical degenerate outcome.
      */
     private void nudgeAcross(BlockPos from, BlockPos to) {
+        if (to.getY() > from.getY() && to.closerThan(from, 2.5)) {
+            tryClimb(to);
+            return;
+        }
+
         // Only ever issue a fresh command while grounded - MoveControl's own JUMPING operation
         // (see its tick()) already owns steering for the rest of the arc once started, and
         // calling setWantedPosition again mid-air would just reset its internal operation state
         // without adding anything useful.
         if (!this.mob.onGround()) return;
-
-        if (to.getY() > from.getY() && to.closerThan(from, 2.5)) {
-            this.mob.getJumpControl().jump();
-            this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
-            return;
-        }
 
         this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
     }
