@@ -94,7 +94,9 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
     public void start() {
         this.actionTicks = 0;
         this.stalledTicks = 0;
-        this.flowField.tryClaimTarget(this.targetWallPos, this.mob);
+        if (this.flowField != null) {
+            this.flowField.tryClaimTarget(this.targetWallPos, this.mob);
+        }
         checkOverhang();
     }
 
@@ -180,7 +182,9 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
                             LOGGER.info("[Skavenblight] {} giving up placing ladder at {} after {} stalled ticks - space never cleared",
                                     this.mob.getClass().getSimpleName(), placePos.toShortString(), this.stalledTicks);
                             this.nextAllowedStartTime = serverLevel.getGameTime() + GIVE_UP_COOLDOWN_TICKS;
-                            this.flowField.releaseTarget(this.targetWallPos);
+                            if (this.flowField != null) {
+                                this.flowField.releaseTarget(this.targetWallPos);
+                            }
                             this.targetWallPos = null;
                             this.state = ClimbState.SEARCHING;
                             return;
@@ -213,7 +217,9 @@ public class DeployClimbableGoal extends Goal implements SiegeGoal {
             SiegeActionAnimator.clearMiningAnimation(this.mob.level(), this.mob, this.mob.blockPosition().above(2));
         }
         if (this.targetWallPos != null) {
-            this.flowField.releaseTarget(this.targetWallPos);
+            if (this.flowField != null) {
+                this.flowField.releaseTarget(this.targetWallPos);
+            }
         }
         this.targetWallPos = null;
         this.state = ClimbState.SEARCHING;

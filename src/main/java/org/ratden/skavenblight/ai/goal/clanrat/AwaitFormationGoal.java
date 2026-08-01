@@ -77,7 +77,9 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
         Optional<BlockPos> alternative = findUnclaimedAlternative(serverLevel);
         if (alternative.isPresent()) {
             this.redirectTarget = alternative.get();
-            this.flowField.tryClaimTarget(this.redirectTarget, this.mob);
+            if (this.flowField != null) {
+                this.flowField.tryClaimTarget(this.redirectTarget, this.mob);
+            }
             this.mob.getNavigation().moveTo(
                     this.redirectTarget.getX() + 0.5D, this.redirectTarget.getY(), this.redirectTarget.getZ() + 0.5D, 1.0D);
             return;
@@ -85,7 +87,9 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
 
         findFormationSlot().ifPresent(slot -> {
             this.formationSlot = slot;
-            this.flowField.tryClaimFormationSlot(this.formationSlot, this.mob);
+            if (this.flowField != null) {
+                this.flowField.tryClaimFormationSlot(this.formationSlot, this.mob);
+            }
             this.mob.getNavigation().moveTo(
                     this.formationSlot.getX() + 0.5D, this.formationSlot.getY(), this.formationSlot.getZ() + 0.5D, 1.0D);
         });
@@ -93,6 +97,8 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
 
     /** Nearest unclaimed climb-type (stair/pillar/spiral) node anywhere in this rat's own region, by straight-line distance. */
     private Optional<BlockPos> findUnclaimedAlternative(ServerLevel level) {
+        RegionFlowField field = this.flowField;
+        if (field == null) return Optional.empty();
         BlockPos mobPos = this.mob.blockPosition();
         // getInstructionMap() is keyed by STANDING position ("from here, do this"), not by the
         // target the action would build - the actual build position is each SiegeNode's own
@@ -101,11 +107,11 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
         // current position), never a genuine alternative target - caught by
         // testAwaitFormationGoalRedirectsToUnclaimedAlternative failing to find a target one hop
         // further away than the contested one.
-        return this.flowField.getInstructionMap().values().stream()
+        return field.getInstructionMap().values().stream()
                 .filter(node -> node.action().isClimbDependent())
                 .map(SiegeNode::pos)
                 .distinct()
-                .filter(pos -> !this.flowField.isTargetClaimed(pos))
+                .filter(pos -> !field.isTargetClaimed(pos))
                 .filter(pos -> level.getBlockState(pos).canBeReplaced())
                 .min(Comparator.comparingDouble(pos -> pos.distSqr(mobPos)));
     }
@@ -125,9 +131,11 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
      * about "the formation" as a shared object.
      */
     private Optional<BlockPos> findFormationSlot() {
-        Region region = this.flowField.getOwner() == null ? null
-                : this.flowField.getOwner().getRegionIndex().getRegions().stream()
-                        .filter(r -> r.getId() == this.flowField.getRegionId())
+        RegionFlowField field = this.flowField;
+        if (field == null) return Optional.empty();
+        Region region = field.getOwner() == null ? null
+                : field.getOwner().getRegionIndex().getRegions().stream()
+                        .filter(r -> r.getId() == field.getRegionId())
                         .findFirst().orElse(null);
         if (region == null) return Optional.empty();
 
@@ -145,8 +153,8 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
                     // candidate as well, the same live-terrain check
                     // TerrainEvaluator.isWalkableTerrain uses for the identical reason.
                     if (!this.mob.level().getBlockState(candidate.below()).blocksMotion()) continue;
-                    if (this.flowField.isFormationSlotClaimed(candidate)) continue;
-                    if (this.flowField.getInstructionMap().containsKey(candidate)) continue;
+                    if (field.isFormationSlotClaimed(candidate)) continue;
+                    if (field.getInstructionMap().containsKey(candidate)) continue;
                     return Optional.of(candidate);
                 }
             }
@@ -179,10 +187,15 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
                 this.nextRecheckTime = now + RECHECK_INTERVAL_TICKS;
                 Optional<BlockPos> alternative = findUnclaimedAlternative(serverLevel);
                 if (alternative.isPresent()) {
-                    this.flowField.releaseFormationSlot(this.formationSlot);
+                    RegionFlowField field = this.flowField;
+                    if (field != null) {
+                        field.releaseFormationSlot(this.formationSlot);
+                    }
                     this.formationSlot = null;
                     this.redirectTarget = alternative.get();
-                    this.flowField.tryClaimTarget(this.redirectTarget, this.mob);
+                    if (field != null) {
+                        field.tryClaimTarget(this.redirectTarget, this.mob);
+                    }
                     this.mob.getNavigation().moveTo(
                             this.redirectTarget.getX() + 0.5D, this.redirectTarget.getY(), this.redirectTarget.getZ() + 0.5D, 1.0D);
                 }

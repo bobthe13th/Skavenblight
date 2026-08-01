@@ -8,6 +8,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.*;
 import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
@@ -52,6 +53,9 @@ public class ClanratEntity extends Monster implements GeoEntity {
     private long lastKnownGeneration = -1;
     private int territoryCheckCooldown = 0;
     private BlockPos strandedHeading = null;
+    // See recoverFromStuckAirborne()'s own doc for what these track.
+    private int consecutiveAirborneTicks = 0;
+    private Vec3 airbornePositionAnchor = null;
 
     protected static final RawAnimation IDLE = RawAnimation.begin().thenLoop("animation.clanrat.idle");
     protected static final RawAnimation WALK = RawAnimation.begin().thenLoop("animation.clanrat.walk");
@@ -97,9 +101,59 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(12, new RandomLookAroundGoal(this));
     }
 
+    /**
+     * Recovers from a narrow but real physics edge case found via GameTest diagnostics (Task 2,
+     * clanrat-gap-crossing-pathing-fix-plan): landing a climb right at a stair block's own
+     * collision boundary can leave the mob perpetually airborne, bouncing in a tight, never-
+     * settling loop (onGround() staying false indefinitely) rather than landing cleanly. Both
+     * FollowFlowFieldGoal's own repeated-hop detection and BuildFlowFieldGoal's construction
+     * animation are victims of this, not the cause - the mob's own siege goals keep ping-ponging
+     * control between "not grounded yet, can't build" and "resolves to a build action, hand off
+     * from Follow", each briefly re-triggering the other's own state resets, so neither ever gets
+     * a stable multi-tick window to recover on its own. This runs every tick (ahead of the
+     * territoryCheckCooldown gate below, which most ticks skip) specifically because it must
+     * survive goal-selector switches between the Follow/Build/Widen/Breach goals, none of which
+     * individually see the whole airborne duration.
+     */
+    private void recoverFromStuckAirborne() {
+        if (this.onGround()) {
+            this.consecutiveAirborneTicks = 0;
+            this.airbornePositionAnchor = null;
+            return;
+        }
+
+        Vec3 pos = this.position();
+        if (this.airbornePositionAnchor == null || this.airbornePositionAnchor.distanceToSqr(pos) > 4.0) {
+            // Genuinely traveling (a real fall, a real leap in progress) - not the stuck case
+            // this guards against. Re-anchor and restart the count from here.
+            this.airbornePositionAnchor = pos;
+            this.consecutiveAirborneTicks = 0;
+            return;
+        }
+
+        if (++this.consecutiveAirborneTicks < 100) return;
+
+        this.consecutiveAirborneTicks = 0;
+        this.airbornePositionAnchor = null;
+        this.setDeltaMovement(Vec3.ZERO);
+        // Force a clean landing at the mob's own current X/Z: walk straight down from here to the
+        // first solid ground, rather than guessing at any particular flow-field cell - whatever
+        // goal is active next tick re-resolves its own target fresh from wherever this leaves it.
+        BlockPos above = BlockPos.containing(pos.x, pos.y, pos.z);
+        BlockPos ground = above;
+        for (int i = 0; i < 8; i++) {
+            BlockPos below = ground.below();
+            if (this.level().getBlockState(below).blocksMotion()) break;
+            ground = below;
+        }
+        this.setPos(pos.x, ground.getY(), pos.z);
+    }
+
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
+
+        recoverFromStuckAirborne();
 
         if (--this.territoryCheckCooldown > 0) return;
         this.territoryCheckCooldown = 40;

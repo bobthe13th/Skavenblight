@@ -57,6 +57,22 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
      */
     public static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
+    /**
+     * findEffectiveNode's own lookahead peek distance - deliberately separate from
+     * MAX_TARGET_CLAIM_DISTANCE above. The lookahead exists only to let a mob standing one
+     * ordinary WALK step short of real work skip the pointless extra tick of walking there
+     * first - i.e. it should never see further than a single legitimate adjacent
+     * interaction (orthogonal 1.0, diagonal ~1.41) would ever reach on its own. Reusing
+     * MAX_TARGET_CLAIM_DISTANCE (2.5, sized for tolerating crowd-shove during an ALREADY
+     * claimed build) here let the lookahead claim a target a full two flow-field hops away -
+     * confirmed via StaircaseSiegeGroupGameTests + a live debug-item observation: a rat
+     * still two cells back from a gap's ledge would build the far stair immediately, before
+     * ever walking onto the ledge itself, leaving the newly-built stair unreachable from
+     * where the rat actually stood. The lookahead was never meant to affect what gets
+     * targeted, only to smooth movement across a surface - this bounds it back to that.
+     */
+    private static final double LOOKAHEAD_SNAP_DISTANCE = 1.5D;
+
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
@@ -189,7 +205,7 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
             SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), MAX_TARGET_CLAIM_DISTANCE)) {
+                    && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {
                 return Optional.of(nextNode);
             }
         }
@@ -216,6 +232,35 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     @Override
     public boolean canUse() {
         if (this.flowField == null || this.mob.level().getGameTime() < this.nextAllowedActionTime) {
+            return false;
+        }
+        // A mob mid-leap (FollowFlowFieldGoal's own MoveControl/JumpControl-driven climb across
+        // a gap - see its own moveOrHop/nudgeAcross) is still within MAX_TARGET_CLAIM_DISTANCE of
+        // its NEXT target well before it lands, since that distance (2.5) is sized for
+        // post-claim crowd tolerance, not for "is this mob currently mid-air and in the middle of
+        // a completely different goal's own in-progress motion." Without this guard, a
+        // construction goal outranking FollowFlowFieldGoal in priority (see
+        // ClanratEntity.registerGoals) can preempt an in-progress leap the instant its own
+        // distance check is satisfied - confirmed via GameTest diagnostics: BuildFlowFieldGoal
+        // claiming and starting its target while the mob was still airborne, mid-climb, at a
+        // transient off-chain position. tick() then unconditionally zeroes the mob's own
+        // horizontal velocity every tick (see below), killing the leap's own momentum before it
+        // ever crosses the gap it was aimed at - the mob falls back roughly where it started, and
+        // the whole cycle repeats.
+        //
+        // A first version of this guard checked bare onGround() - wrong, and confirmed so by a
+        // full-suite regression: onGround() defaults false on any entity that hasn't yet had a
+        // real physics tick run against it, which describes every synthetic unit-style GameTest
+        // in this codebase (SiegeConstructionActionsGameTests, PathingGoalRecalculationGameTests)
+        // that positions a mob via setPos() - a raw teleport, not a tick - and calls canUse()
+        // immediately after. Bare onGround() blocked every one of those unconditionally, not just
+        // the genuine mid-climb case. Checking actual upward velocity instead is the correct
+        // discriminator: a real in-progress climb has this.mob.getDeltaMovement().y well above
+        // zero (JumpControl.jump()'s own impulse, sustained by MoveControl's JUMPING state until
+        // landing - see FollowFlowFieldGoal.tryClimb()'s own doc), while every synthetic test
+        // mob's delta movement is Vec3.ZERO (setPos() never touches velocity), so this correctly
+        // never fires for them regardless of their (meaningless, never-computed) onGround() value.
+        if (!this.mob.onGround() && this.mob.getDeltaMovement().y > 1.0E-2) {
             return false;
         }
         // Skip a target another mob's construction goal already claimed - without this, every
@@ -246,7 +291,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
         this.targetPos = target.pos();
         this.targetAction = target.action();
         this.facing = target.facing() != null ? target.facing() : this.mob.getDirection();
-        this.flowField.tryClaimTarget(this.targetPos, this.mob);
+        if (this.flowField != null) {
+            this.flowField.tryClaimTarget(this.targetPos, this.mob);
+        }
 
         // Snapshot of whether solid ground already existed below a climb-dependent target at the
         // moment it was claimed - see SiegeAction#isClimbDependent's javadoc for why "no support
@@ -290,7 +337,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
                 // Release here, not just in stop() - this nulls targetPos directly, so by the
                 // time stop() naturally runs (canContinueToUse() sees targetPos == null on the
                 // next tick) there'd be nothing left for it to release.
-                this.flowField.releaseTarget(this.targetPos);
+                if (this.flowField != null) {
+                    this.flowField.releaseTarget(this.targetPos);
+                }
                 this.targetPos = null;
                 return;
             }
@@ -306,7 +355,9 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
 
     @Override
     public void stop() {
-        this.flowField.releaseTarget(this.targetPos);
+        if (this.flowField != null) {
+            this.flowField.releaseTarget(this.targetPos);
+        }
         this.targetPos = null;
         this.facing = null;
         this.targetAction = null;

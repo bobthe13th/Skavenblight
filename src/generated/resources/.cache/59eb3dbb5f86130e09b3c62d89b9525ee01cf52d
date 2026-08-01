@@ -1,8 +1,10 @@
-// 1.21.1	2026-07-29T10:07:06.6874751	Loot Tables
+// 1.21.1	2026-07-31T13:45:43.1552499	Loot Tables
 251f40f1eb84465d761d334dfa086058514201b9 data/skavenblight/loot_table/blocks/active_warpstone_nexus.json
 c5b4a4a7f0c635a827fcee2a0cd1c34fbada073e data/skavenblight/loot_table/blocks/alchemical_laboratory.json
 89dd87f6fd684cfcac00fa6e18d5b6e86556badb data/skavenblight/loot_table/blocks/basic_warp_flux_storage.json
 3b89374e00e666d484e2679c4570a1d74f52c973 data/skavenblight/loot_table/blocks/block_of_warpstone.json
+4dc93472b21cd48d52d1e4f627946c3ed6f4cd2c data/skavenblight/loot_table/blocks/debug_front_anchor.json
+af85dab3e72bfd7c0c72db0e2eae607551212287 data/skavenblight/loot_table/blocks/debug_source_group_anchor.json
 fc2b45d5774ce980dc3ba5a85a3d21fface13f0f data/skavenblight/loot_table/blocks/piston_spike_trap.json
 6d95344ed863092592d52fb30da9327a8cbc25d9 data/skavenblight/loot_table/blocks/skaven_tunnel_source.json
 4285c2f4d8ddcb3e6f865e6d1cb22c4c53020365 data/skavenblight/loot_table/blocks/spawn_tunnel_small.json
