@@ -24,6 +24,11 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
     private Vec3 lastPosition = null;
     private int escapeHatchTicks = 0;
     private BlockPos occupiedLane = null;
+    // The mob's own blockPosition() at the moment the most recent WALK-type hop was requested
+    // (see the field's use in tick() below) - tracks whether the mob's INTEGER block position
+    // actually advanced since the last 10-tick request cycle, independent of whether vanilla's
+    // own Navigation considers the resulting path "in progress" or "done".
+    private BlockPos lastHopOrigin = null;
 
     public FollowFlowFieldGoal(PathfinderMob mob, double speedModifier) {
         this.mob = mob;
@@ -49,6 +54,11 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
         this.lastPosition = this.mob.position();
         this.escapeHatchTicks = 0;
         this.pathingUpdateTimer = 0;
+        // Deliberately NOT resetting lastHopOrigin here: this goal gets briefly preempted and
+        // immediately resumed far more often than its own 10-tick cadence would suggest (every
+        // time the flow field resolves to a non-WALK action at the mob's current cell, control
+        // hands to a construction goal and back) - resetting on every restart would defeat the
+        // repeat-hop detection below, which specifically needs to persist across those restarts.
     }
 
     @Override
@@ -109,6 +119,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             // nothing to route around, so a rat stalls at the very first obstacle needing a
             // multi-block detour instead of actually pathing in.
             if (targetNode == null) {
+                this.lastHopOrigin = null;
                 BlockPos heading = this.flowField.getWildernessHeadingTarget(currentPos);
                 this.mob.getNavigation().moveTo(
                         heading.getX() + 0.5D,
@@ -121,6 +132,7 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
 
             // If we DO have a node, but it isn't WALK, stop moving so the Builder/Miner goals can take over.
             if (targetNode.action() != SiegeNode.SiegeAction.WALK) {
+                this.lastHopOrigin = null;
                 this.mob.getNavigation().stop();
                 return;
             }
@@ -131,7 +143,20 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
 
             for (int i = 0; i < maxLookAhead; i++) {
                 SiegeNode next = this.flowField.getNextSiegeNode((ServerLevel) this.mob.level(), nextInChain);
-                if (next == null || next.pos().equals(nextInChain) || next.action() != SiegeNode.SiegeAction.WALK) {
+                // Also stop at a Y change (added during Task 2's investigation): moveOrHop's own
+                // ballistic leap - the only mechanism that ever crosses a Y difference here - is a
+                // fixed, single-block-climb impulse (see its own javadoc: "a freshly-built
+                // BUILD_STAIR step... diagonally up-and-across"). Two already-built, consecutive
+                // WALK-classified stair cells chained by this loop (each 1 Y above the last) can
+                // otherwise hand moveOrHop a 2+-block-high target in one call - confirmed via
+                // GameTest diagnostics to leave the mob stuck permanently re-attempting the same
+                // hop (a fixed vy=0.5D impulse can clear one block's height, not two), the exact
+                // signature this loop's multi-node lookahead was never intended to produce. Capping
+                // the lookahead to SAME-Y WALK nodes keeps its original purpose (skip a pointless
+                // extra tick of pure horizontal walking) without ever handing moveOrHop a climb
+                // bigger than what its impulse is tuned for.
+                if (next == null || next.pos().equals(nextInChain) || next.action() != SiegeNode.SiegeAction.WALK
+                        || next.pos().getY() != nextInChain.getY()) {
                     break;
                 }
                 nextInChain = next.pos();
@@ -151,7 +176,38 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 this.occupiedLane = nextInChain;
             }
 
-            moveOrHop(currentPos, nextInChain);
+            // Root-cause fix for the "frozen after one short leg" deadlock (see class-level
+            // investigation in docs/superpowers/sdd/2026-07-31-clanrat-gap-crossing-pathing-fix-
+            // plan/task-1-report.md, Failure Mode 1): currentPos above is always re-derived from
+            // this.mob.blockPosition() - an INTEGER, floored value - every 10-tick cycle. Vanilla's
+            // own Navigation.moveTo is free to consider a path "done" once the mob's CONTINUOUS
+            // position is merely within its own arrival tolerance of the target, which can leave
+            // the mob resting a fraction of a block short of the actual block boundary. When that
+            // happens, blockPosition() never advances, so this exact code path re-derives and
+            // re-requests the IDENTICAL hop next cycle - and because start and goal now resolve to
+            // the same or adjacent pathfinding nodes, Navigation.moveTo hands back a degenerate,
+            // already-"done"-but-never-"in progress" Path(length=1) that produces no further
+            // motion, forever (confirmed via GameTest diagnostics: this reproduced as a stable,
+            // permanent deadlock for the rest of a 6000-tick test budget). The existing stuck-
+            // detection escape hatch above can't catch this: it's gated on
+            // getNavigation().isInProgress(), which is false the instant this deadlock exists (there's
+            // nothing left "in progress" about a path with no remaining nodes) - so it structurally
+            // can't observe "declined to path at all AND not moving", only "actively pathing AND not
+            // moving".
+            //
+            // Fix: track the blockPosition this goal was standing at the last time it requested a
+            // WALK-type hop. If the CURRENT cycle's blockPosition is unchanged from that (i.e. the
+            // mob never actually crossed into the block the last hop targeted), don't trust
+            // Navigation's own arrival tolerance a second time for the same hop - bypass it entirely
+            // with a direct, deliberate impulse toward the target cell (the same technique moveOrHop
+            // already uses for its ballistic gap-leap case), which doesn't depend on Navigation ever
+            // considering itself "arrived".
+            if (this.lastHopOrigin != null && this.lastHopOrigin.equals(currentPos)) {
+                nudgeAcross(currentPos, nextInChain);
+            } else {
+                moveOrHop(currentPos, nextInChain);
+            }
+            this.lastHopOrigin = currentPos;
         }
     }
 
@@ -180,29 +236,55 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
      * exact same wall for the identical reason (its own target can just as easily be a
      * just-built stair one hop back across the same gap) with no error and no retry, ever.
      *
-     * <p>A first version of this drove the hop via JumpControl.jump() + MoveControl -
-     * generic AI steering meant for opportunistic hops while already walking, not a
-     * deliberate, precisely-landing leap. Confirmed via repeated GameTest runs to land
-     * imprecisely often enough that a chain of ~10+ required hops (one staircase) rarely
-     * completed: short landings look "stuck" (falls right back onto the tile it left),
-     * off-target landings hand the next tick's flow-field lookup an unexpected cell, and
-     * some runs ended mid-arc at timeout. A direct one-tick velocity impulse - the same
-     * technique vanilla uses for its own deliberate leaps (Rabbit's hop, Goat's ram jump) -
-     * fully determines the arc up front instead of relying on continued AI steering while
-     * airborne, so its outcome doesn't depend on exactly when a later tick happens to sample
-     * the mob's position.
+     * <p>A first version of this drove the hop via a direct one-tick velocity impulse
+     * (mob.setDeltaMovement), reasoning that MoveControl-driven AI steering was too imprecise
+     * for a deliberate leap. That reasoning turned out backwards: read against vanilla's own
+     * LivingEntity.travel()/MoveControl source, a raw velocity assignment fights the engine
+     * instead of using it - travel() derives its ACTUAL per-tick horizontal thrust from
+     * MoveControl's own continuously-recomputed heading/speed (via moveRelative), not from
+     * whatever was set once via setDeltaMovement; confirmed via GameTest diagnostics that a
+     * one-shot velocity impulse's horizontal component was effectively lost within a tick or two
+     * even with zero blocking geometry in the path (ground-truth-checked), leaving a purely
+     * vertical bounce that fell back onto the exact tile it left. MoveControl.setWantedPosition +
+     * JumpControl.jump() is the mechanism vanilla's OWN deliberate short hops (a villager
+     * stepping over a 1-block gap, generic ledge-climbing) already use, and MoveControl's own
+     * JUMPING operation state (see its tick()) persists driving speed/heading across every game
+     * tick until the mob lands, independent of this goal's own 10-tick recheck cadence - so a
+     * single call here, gated on being grounded, is enough to carry the whole arc.
      */
     private void moveOrHop(BlockPos from, BlockPos to) {
         if (to.getY() > from.getY() && this.mob.onGround() && to.closerThan(from, 2.5)) {
-            double flightTicks = 5.0D;
-            double vx = (to.getX() + 0.5D - this.mob.getX()) / flightTicks;
-            double vz = (to.getZ() + 0.5D - this.mob.getZ()) / flightTicks;
-            this.mob.setDeltaMovement(vx, 0.5D, vz);
-            this.mob.hasImpulse = true;
+            this.mob.getJumpControl().jump();
+            this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
             return;
         }
 
         this.mob.getNavigation().moveTo(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
+    }
+
+    /**
+     * Corrective, non-negotiable follow-up to a hop {@code moveOrHop} already tried once for this
+     * exact {@code from}/{@code to} pair, whose own re-derivation from floored blockPosition() came
+     * back unchanged - i.e. Navigation's own arrival tolerance let the mob stop short last time.
+     * Re-issues the same MoveControl/JumpControl mechanism as moveOrHop's own climb branch rather
+     * than calling Navigation.moveTo again, precisely because Navigation.moveTo is what stopped
+     * short in the first place - retrying through the same API with the same tolerance would just
+     * reproduce the identical degenerate outcome.
+     */
+    private void nudgeAcross(BlockPos from, BlockPos to) {
+        // Only ever issue a fresh command while grounded - MoveControl's own JUMPING operation
+        // (see its tick()) already owns steering for the rest of the arc once started, and
+        // calling setWantedPosition again mid-air would just reset its internal operation state
+        // without adding anything useful.
+        if (!this.mob.onGround()) return;
+
+        if (to.getY() > from.getY() && to.closerThan(from, 2.5)) {
+            this.mob.getJumpControl().jump();
+            this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
+            return;
+        }
+
+        this.mob.getMoveControl().setWantedPosition(to.getX() + 0.5D, to.getY(), to.getZ() + 0.5D, this.speedModifier);
     }
 
     private BlockPos findEscapePos(BlockPos startPos) {

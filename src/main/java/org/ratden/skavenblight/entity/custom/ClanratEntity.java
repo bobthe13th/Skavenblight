@@ -97,9 +97,62 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(12, new RandomLookAroundGoal(this));
     }
 
+    private int consecutiveAirborneTicks = 0;
+    private net.minecraft.world.phys.Vec3 airbornePositionAnchor = null;
+
+    /**
+     * Recovers from a narrow but real physics edge case found via GameTest diagnostics (Task 2,
+     * clanrat-gap-crossing-pathing-fix-plan): landing a climb right at a stair block's own
+     * collision boundary can leave the mob perpetually airborne, bouncing in a tight, never-
+     * settling loop (onGround() staying false indefinitely) rather than landing cleanly. Both
+     * FollowFlowFieldGoal's own repeated-hop detection and BuildFlowFieldGoal's construction
+     * animation are victims of this, not the cause - the mob's own siege goals keep ping-ponging
+     * control between "not grounded yet, can't build" and "resolves to a build action, hand off
+     * from Follow", each briefly re-triggering the other's own state resets, so neither ever gets
+     * a stable multi-tick window to recover on its own. This runs every tick (ahead of the
+     * territoryCheckCooldown gate below, which most ticks skip) specifically because it must
+     * survive goal-selector switches between the Follow/Build/Widen/Breach goals, none of which
+     * individually see the whole airborne duration.
+     */
+    private void recoverFromStuckAirborne() {
+        if (this.onGround()) {
+            this.consecutiveAirborneTicks = 0;
+            this.airbornePositionAnchor = null;
+            return;
+        }
+
+        net.minecraft.world.phys.Vec3 pos = this.position();
+        if (this.airbornePositionAnchor == null || this.airbornePositionAnchor.distanceToSqr(pos) > 4.0) {
+            // Genuinely traveling (a real fall, a real leap in progress) - not the stuck case
+            // this guards against. Re-anchor and restart the count from here.
+            this.airbornePositionAnchor = pos;
+            this.consecutiveAirborneTicks = 0;
+            return;
+        }
+
+        if (++this.consecutiveAirborneTicks < 100) return;
+
+        this.consecutiveAirborneTicks = 0;
+        this.airbornePositionAnchor = null;
+        this.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+        // Force a clean landing at the mob's own current X/Z: walk straight down from here to the
+        // first solid ground, rather than guessing at any particular flow-field cell - whatever
+        // goal is active next tick re-resolves its own target fresh from wherever this leaves it.
+        BlockPos above = BlockPos.containing(pos.x, pos.y, pos.z);
+        BlockPos ground = above;
+        for (int i = 0; i < 8; i++) {
+            BlockPos below = ground.below();
+            if (this.level().getBlockState(below).blocksMotion()) break;
+            ground = below;
+        }
+        this.setPos(pos.x, ground.getY(), pos.z);
+    }
+
     @Override
     protected void customServerAiStep() {
         super.customServerAiStep();
+
+        recoverFromStuckAirborne();
 
         if (--this.territoryCheckCooldown > 0) return;
         this.territoryCheckCooldown = 40;
