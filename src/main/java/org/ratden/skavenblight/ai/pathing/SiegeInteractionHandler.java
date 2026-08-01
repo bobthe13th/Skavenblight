@@ -74,14 +74,29 @@ public class SiegeInteractionHandler {
         // deliberately excludes the builder from ITS check (a rat must be able to stand where
         // its own pillar/stair target is to reach it), so nothing else was verifying this.
         // Reported in testing: "the rat that made it up placed a block inside where they were
-        // standing, then hung." Logged rather than blocked outright since the correct fix
-        // (have the mob step clear, or jump mid-placement for pillar-style actions) needs
-        // real reproduction data first - see this WARN plus SiegeActivityLog's trail.
+        // standing, then hung." Root-caused via a controlled GameTest capture (see
+        // ClanratEntity's recoverFromStuckAirborne doc): this exact self-overlap, immediately
+        // followed by placing a STAIR (a compound, non-cuboid collision shape) into that
+        // overlapped space, embeds the mob partway inside the new shape. Vanilla's collision
+        // resolution against a stair's tread/riser discontinuity from an already-embedded
+        // starting position (as opposed to falling onto it from clear air) doesn't converge to
+        // a stable rest - the mob's own onGround() flickers true for a single tick at the
+        // bottom of each bounce, which resets recoverFromStuckAirborne's "100 consecutive
+        // airborne ticks" counter every cycle, so that safety net can never trigger either.
+        // Fix: push the actor straight down, out of the target's own volume, by exactly the
+        // overlap height before the block goes solid - the mob's current footing is already
+        // solid ground it was already standing on, so this can never drop it into anything
+        // unsupported.
         if (actor != null && actor.getBoundingBox().intersects(new AABB(pos))) {
-            LOGGER.warn("[Skavenblight] {} ({}) executing {} at {} while its own hitbox overlaps the target - " +
-                            "risk of self-entombment. Mob pos: {}",
-                    actor.getClass().getSimpleName(), actor.getUUID().toString().substring(0, 8),
-                    action, pos.toShortString(), actor.blockPosition().toShortString());
+            AABB overlap = actor.getBoundingBox().intersect(new AABB(pos));
+            if (overlap.getYsize() > 0) {
+                LOGGER.warn("[Skavenblight] {} ({}) executing {} at {} while its own hitbox overlaps the target " +
+                                "by {} - clearing before placement to avoid self-entombment. Mob pos: {}",
+                        actor.getClass().getSimpleName(), actor.getUUID().toString().substring(0, 8),
+                        action, pos.toShortString(), overlap.getYsize(), actor.blockPosition().toShortString());
+                actor.setPos(actor.getX(), actor.getY() - overlap.getYsize() - 0.01D, actor.getZ());
+                actor.setDeltaMovement(actor.getDeltaMovement().x, Math.min(actor.getDeltaMovement().y, 0.0D), actor.getDeltaMovement().z);
+            }
         }
 
         Direction validFacing = (facing != null) ? facing : Direction.NORTH;
