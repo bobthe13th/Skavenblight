@@ -103,10 +103,10 @@ public class TerrainEvaluator {
         BlockState ceiling = terrain.getBlockState(pos.above(2));
         BlockState support = terrain.getBlockState(pos.below());
 
-        if (dy != 0 && ceiling.blocksMotion() && !isWalkableScaffold(ceiling)) {
+        if (dy != 0 && !isClearHeadroom(ceiling)) {
             return SiegeNode.SiegeAction.MINE;
         }
-        if (head.blocksMotion() && !isWalkableScaffold(head)) {
+        if (!isClearHeadroom(head)) {
             return SiegeNode.SiegeAction.MINE;
         }
         if (foot.blocksMotion() && !isWalkableScaffold(foot)) {
@@ -232,7 +232,25 @@ public class TerrainEvaluator {
     private boolean isFitForWalking(TerrainAccess terrain, BlockPos pos) {
         BlockState foot = terrain.getBlockState(pos);
         BlockState head = terrain.getBlockState(pos.above());
-        return (!foot.blocksMotion() || isWalkableScaffold(foot)) && (!head.blocksMotion() || isWalkableScaffold(head));
+        return (!foot.blocksMotion() || isWalkableScaffold(foot)) && isClearHeadroom(head);
+    }
+
+    /**
+     * A foot-level cell can be a partial-height "scaffold" block (stair, slab, ladder) - the mob
+     * simply stands on/in the upper portion of the same cell the block occupies. HEAD-level is
+     * different: the mob's own body/hitbox occupies that whole cell, so a stair or slab there
+     * still has enough real collision to physically block it, even though {@link #isWalkableScaffold}
+     * happily allows the same block at foot level. Only genuine open air, or a ladder (thin enough
+     * to climb through), counts as clear headroom. Was previously conflated with
+     * {@link #isWalkableScaffold} in both {@link #isFitForWalking} and {@link #determineMacroAction}
+     * (two independently-duplicated copies of the same mistake) - letting a diagonal staircase's
+     * own already-built stair be treated as "fine" directly above the next step, so the planner
+     * never recognized it as an obstruction and kept planning another build straight into it,
+     * leaving a mob physically blocked at the base of the crossing. See
+     * StaircaseSiegeGroupGameTests/TerrainEvaluatorHeadroomGameTests.
+     */
+    private boolean isClearHeadroom(BlockState state) {
+        return !state.blocksMotion() || state.getBlock() instanceof net.minecraft.world.level.block.LadderBlock;
     }
 
     private boolean isWalkableScaffold(BlockState state) {
