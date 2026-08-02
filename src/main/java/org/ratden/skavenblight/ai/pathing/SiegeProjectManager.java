@@ -178,6 +178,34 @@ public class SiegeProjectManager {
                                       Map<BlockPos, Integer> nextCostMap,
                                       Map<BlockPos, SiegeNode> nextInstructionMap) {
 
+        // A region with a route-tree-assigned parent connector (see setMaxCandidateProjectLength's
+        // own doc) gets a short local-gap budget specifically so its OWN reactive search never
+        // substitutes for the connector graph's job of long-range connectivity. That intent held
+        // for a single macro-project line, but not for a CHAIN of them: evaluateSingleLine writes
+        // a successful line's own endPos directly back onto this SAME pass's calcQueue (see its own
+        // body), so FlowFieldCalculator's Dijkstra loop pops it as an ordinary frontier node and
+        // fires evaluateMacroProjects again from there - a synthetic BUILD_LANDING always "hits an
+        // obstacle" (see FlowFieldCalculator's isPlannedLanding check), so this repeats. Each such
+        // chained call previously got a completely fresh maxCandidateProjectLength budget, letting
+        // a region capped to (say) 6 blocks discover a path far longer than 6 blocks by chaining
+        // several 6-block-capped lines end to end - confirmed via GameTest reaching 14 blocks
+        // across 3 chained hops, all the way into a DIFFERENT region's own territory, producing a
+        // flow-field cycle against that region's own route-tree-assigned connector project (see
+        // docs/superpowers/plans/2026-08-01-flow-field-planning-gap-fix.md for the full trace).
+        // Refusing to continue a chain - rather than tracking a cumulative step budget across the
+        // 14-direction fan-out below, which would also restrict how far a single legitimate
+        // obstacle's own multi-direction search can reach in one call - keeps a capped region's
+        // search to "one obstacle, one line, one hop": exactly the "short local-gap" scope the cap
+        // was always meant to provide. Regions with no parent connector yet (the default, uncapped
+        // budget) are unaffected - they still need to chain freely to establish their own
+        // connectivity in the first place.
+        SiegeNode existingInstruction = nextInstructionMap.get(anchorPos);
+        boolean isChainedLanding = existingInstruction != null
+                && existingInstruction.action() == SiegeNode.SiegeAction.BUILD_LANDING;
+        if (isChainedLanding && this.maxCandidateProjectLength < DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH) {
+            return;
+        }
+
         macroEvaluationCount++;
 
         // Deliberately no "anchor itself needs fixing" special case here anymore. That used to
