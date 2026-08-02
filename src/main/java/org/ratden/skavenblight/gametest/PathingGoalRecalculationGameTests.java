@@ -458,4 +458,75 @@ public class PathingGoalRecalculationGameTests {
 
         helper.succeed();
     }
+
+    /**
+     * Proves setMaxCandidateProjectLength's cap applies to the WHOLE region-scoped reactive
+     * search across a pass, not just to a single macro-project line. FlowFieldCalculator's own
+     * Dijkstra loop fires evaluateMacroProjects again on any frontier node that still "hits an
+     * obstacle" - including a synthetic BUILD_LANDING a previous capped line just terminated on
+     * (see evaluateSingleLine, which pushes a successful line's own endPos back onto the SAME
+     * pass's calcQueue). Before the fix, each such chained call got a completely fresh
+     * maxCandidateProjectLength budget, letting a region capped to 6 blocks discover a path far
+     * longer than 6 blocks by chaining several 6-block-capped lines end to end - confirmed via a
+     * live GameTest capture reaching 14 blocks across 3 chained hops, well past a 6-block cap,
+     * reaching all the way into a different region's own territory (see
+     * docs/superpowers/plans/2026-08-01-flow-field-planning-gap-fix.md for the full trace).
+     *
+     * <p>Reuses testMaxCandidateProjectLengthCapsMacroProjectReach's own geometry technique
+     * (remove the floor east of the anchor to force BUILD_BRIDGE), but doubles the open span to
+     * 20 blocks so BOTH a first 6-block-capped line AND a hypothetical (bugged) second chained
+     * 6-block line reaching 12 blocks out would still land in open air, not real ground - the
+     * only way to prove the SECOND call's budget is actually constrained by the first call's own
+     * usage, rather than simply being re-granted a fresh 6 blocks.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
+    public static void testMaxCandidateProjectLengthCapsWholeSearchNotJustOneLine(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(4, 2, 4);
+        BlockPos anchorPos = helper.absolutePos(relativeAnchor);
+
+        for (int i = 1; i <= 20; i++) {
+            helper.setBlock(relativeAnchor.offset(i, -1, 0), Blocks.AIR.defaultBlockState());
+        }
+
+        BlockPos firstCappedLanding = helper.absolutePos(relativeAnchor.offset(6, 0, 0));
+        BlockPos secondChainedLanding = helper.absolutePos(relativeAnchor.offset(12, 0, 0));
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        LiveTerrainAccess terrain = new LiveTerrainAccess(helper.getLevel());
+        FlowFieldState state = new FlowFieldState(anchorPos, Set.of());
+
+        Map<BlockPos, Integer> costMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> instructionMap = new HashMap<>();
+        PriorityQueue<FlowFieldCalculator.QueueNode> queue = new PriorityQueue<>();
+
+        // One shared manager across BOTH calls - mirrors how FlowFieldCalculator's own Dijkstra
+        // loop reuses a single SiegeProjectManager instance across every evaluateMacroProjects
+        // call within one region-scoped pass (see FlowFieldCalculator.calculate's hitObstacle
+        // branch), which is exactly the scenario this test exercises.
+        SiegeProjectManager manager = new SiegeProjectManager(evaluator);
+        manager.setMaxCandidateProjectLength(6);
+
+        manager.evaluateMacroProjects(terrain, anchorPos, state, 0, queue, costMap, instructionMap);
+
+        SiegeNode firstLandingNode = instructionMap.get(firstCappedLanding);
+        check(firstLandingNode != null && firstLandingNode.action() == SiegeNode.SiegeAction.BUILD_LANDING,
+                "first call should cap at 6 blocks east with a synthetic BUILD_LANDING at " + firstCappedLanding
+                        + " (found: " + firstLandingNode + ")");
+
+        // Simulate the Dijkstra flood reaching that landing next and firing another macro
+        // evaluation from there - exactly what FlowFieldCalculator's own loop does for any
+        // frontier node that still hits an obstacle (a synthetic BUILD_LANDING always does,
+        // since there's nothing real to walk onto yet).
+        int firstLandingCost = costMap.getOrDefault(firstCappedLanding, 0);
+        manager.evaluateMacroProjects(terrain, firstCappedLanding, state, firstLandingCost, queue, costMap, instructionMap);
+
+        check(!instructionMap.containsKey(secondChainedLanding),
+                "setMaxCandidateProjectLength(6) should cap the region's WHOLE reactive search to 6 blocks total "
+                        + "per pass, not 6 blocks PER macro-project call - a second chained call from the first "
+                        + "call's own landing should not extend the search any further, but found instructions "
+                        + "reaching a second landing 12 blocks out at " + secondChainedLanding + ": "
+                        + instructionMap.keySet());
+
+        helper.succeed();
+    }
 }
