@@ -15,11 +15,20 @@ public class SiegeProject {
     private final Map<BlockPos, SiegeNode> instructions;
     private final BlockPos entryPos; // The block where rats enter this project (can be on ground or a mid-air landing)
     private final int expectedEntryCost; // The massive penalty cost assigned to this project
+    // The block where this project hands off to whatever region/field is supposed to take over
+    // once a mob finishes crossing - null when there's no separate handoff position to seed a
+    // fallback for (see getExitPos's own doc for why this is nullable and what it's for).
+    private final BlockPos exitPos;
 
     public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost) {
+        this(instructions, entryPos, expectedEntryCost, null);
+    }
+
+    public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost, BlockPos exitPos) {
         this.instructions = new HashMap<>(instructions);
         this.entryPos = entryPos;
         this.expectedEntryCost = expectedEntryCost;
+        this.exitPos = exitPos;
     }
 
     public boolean isCompleted(TerrainAccess terrain, TerrainEvaluator evaluator) {
@@ -58,6 +67,21 @@ public class SiegeProject {
 
     public int getExpectedEntryCost() {
         return expectedEntryCost;
+    }
+
+    /**
+     * The position, on the FAR side of this crossing, where a mob following it hands off to
+     * whatever comes next - null for projects with no distinct handoff position (e.g. a reactive
+     * macro-project discovered mid-flood, whose far end is already covered by the very flood that
+     * discovered it). Deliberately NOT part of {@code instructions} (see
+     * SiegeProjectManager#injectActiveProjects's use of this): a self-referential fallback node
+     * seeded there would make {@link #isCompleted} and {@link #survivedMapOverwrite} - which both
+     * iterate {@code instructions} as their ground truth for "is this project done/still needed" -
+     * see a permanently-incomplete, permanently-necessary entry that can never be satisfied by any
+     * terrain change, artificially pinning this project active forever.
+     */
+    public BlockPos getExitPos() {
+        return exitPos;
     }
 
     /**

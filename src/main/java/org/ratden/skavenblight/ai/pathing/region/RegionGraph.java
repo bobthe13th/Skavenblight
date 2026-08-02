@@ -140,8 +140,19 @@ public class RegionGraph {
         RegionConnector existing = bestPerPair.get(pairKey);
         if (existing != null && existing.cost() <= cost) return;
 
-        SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), endPos, cost);
-        SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), boundaryCell, cost);
+        // exitPos is the far side relative to each orientation's own entryPos - see
+        // SiegeProject.getExitPos's doc for why a fallback is seeded there instead of folded into
+        // `instructions`. Needed because the destination-side endpoint of a chained connector is
+        // claimed into its region via addCell just below (task-8), not genuine flood-fill
+        // membership - that destination region's OWN Dijkstra pass can never independently reach a
+        // cell it only owns because addCell said so, and neither outboundInstructions nor
+        // inboundInstructions keys their own far endpoint (each assumes, usually correctly, that
+        // the far region's own pass already covers it - see each method's own doc). Without this,
+        // a mob that finishes crossing lands on a cell with NO instruction anywhere and is
+        // permanently stuck (confirmed via testParentRegionGetsRealInstructionsForSharedConnectorCells
+        // and the real-world testSingleRatBuildsStaircaseAcrossSmallGap).
+        SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), endPos, cost, boundaryCell);
+        SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), boundaryCell, cost, endPos);
 
         // Claim every cell this connector actually traced into BOTH endpoint regions' own
         // membership, right here at graph-build time - not just at the two regions' boundary

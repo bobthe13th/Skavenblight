@@ -143,6 +143,19 @@ public class SiegeProjectManager {
                 nextCostMap.put(entry, entryCost);
                 calcQueue.add(new FlowFieldCalculator.QueueNode(entry, entryCost));
             }
+
+            // Fallback only, deliberately with no matching nextCostMap entry (unlike entry above):
+            // if this region's own ordinary Dijkstra propagation can genuinely reach exitPos (it
+            // usually can - see SiegeProject.getExitPos's doc for the one case it can't), that
+            // real step's own totalCost < Integer.MAX_VALUE comparison in
+            // FlowFieldCalculator#processOrthogonalNeighbors will still overwrite this with the
+            // real computed instruction later in the same pass. This only survives to publish when
+            // nothing else ever reaches exitPos at all - exactly the stuck-forever case this
+            // exists to prevent.
+            BlockPos exit = project.getExitPos();
+            if (exit != null) {
+                nextInstructionMap.putIfAbsent(exit, new SiegeNode(exit, SiegeNode.SiegeAction.WALK));
+            }
         }
     }
 
