@@ -2,6 +2,50 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Execution status (2026-08-01)
+
+Tasks 1 and 2 are complete, committed, reviewed clean, and pushed (`cb946b1`,
+`4150465` on branch `worktree-staircase-bounce-physics-fix2`). The defect
+described below is real, confirmed via a controlled instrumented capture,
+and the fix is verified by its own test with no regression to the existing
+sibling test.
+
+**Task 3 (real-world verification) is BLOCKED, not complete.** Running
+`testSingleRatBuildsStaircaseAcrossSmallGap` in isolation still fails 100%
+of the time post-fix (6 runs: the Task 3 subagent's 5 + one controller
+repro), and - critically - the *same* isolated-failure signature (zero
+`SiegeProjectManager` activity, rat stuck exactly at its region's connector
+entry, Y=-58 vs nexus Y=-44) already appears in `gametest_verify3.log`/
+`gametest_verify4.log`, captured earlier in the same investigation session
+*before* this plan's chaining defect was even found. Across all 8 relevant
+isolated-run observations gathered across the whole investigation, only
+1 showed the chaining defect this plan fixes; the other 7 show this
+different, zero-activity signature.
+
+**Follow-up investigation, localized but not yet root-caused:** the
+zero-activity signature very likely shares a root cause with the
+pre-existing, separate `PathingRegionGameTests.testParentRegionGetsRealInstructionsForSharedConnectorCells`
+failure (a connector cell resolving to a real region but
+`RegionFlowField.getNextSiegeNode` returning null there - "a mob standing
+there would be stuck"). A follow-up isolated run of that test precisely
+localized its failure: of ~39 cells in a chained/multi-hop vertical
+connector, exactly one - the last cell, right at the boundary into the
+root region - resolves to a region but gets no flow-field instruction; all
+other cells in the same connector resolve fine. This lives in the
+interaction between `RegionGraph`'s multi-hop chaining loop (`MAX_CHAIN_HOPS`)
+and `TerritoryRegionMap.injectSharedConnectorProjects`'s shared-cell
+tie-break handling - an area with a documented prior "hardening" effort
+(`docs/pathing/region-pathing-hardening-findings.md`) that is evidently
+still not fully closed. The exact mechanism (why that one boundary cell
+specifically) has not yet been traced - this is a real, well-scoped
+starting point for a dedicated follow-up investigation, not a completed
+diagnosis.
+
+This plan's own scope (the reactive-macro-project cumulative-chaining
+defect) is complete and should not be reopened or re-litigated by that
+follow-up - it is a separate, distinct bug in a related but different part
+of the same subsystem.
+
 **Goal:** Stop a region's own reactive macro-project search (`SiegeProjectManager.evaluateMacroProjects`) from chaining past its intended short local-gap budget when that region already has a route-tree-assigned parent connector, so a mob standing at a connector's own entry point actually gets the connector's BUILD_STAIR instructions instead of getting stuck behind a self-inflicted flow-field cycle.
 
 **Architecture:** No new classes or data flow. One additional early-return check inside the existing `SiegeProjectManager.evaluateMacroProjects` method, using data (`nextInstructionMap`) that method already receives as a parameter. Zero changes to `RegionGraph`, `RegionConnector`, `TerritoryRegionMap`, or `FlowFieldCalculator`'s cycle-breaking logic - all of that is already correct and stays untouched.
