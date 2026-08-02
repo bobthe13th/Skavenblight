@@ -58,6 +58,12 @@
   "gui.skavenblight.research_table.reason.busy": "The table is already studying something else.",
   "gui.skavenblight.research_table.reason.wind": "The Wind here is too faint to study this.",
   "gui.skavenblight.research_table.reason.catalyst": "Needs the right catalyst in the slot.",
+  "gui.skavenblight.research_table.wind_meter.level": "Wind Level: %d / %d",
+  "gui.skavenblight.research_table.wind_meter.speed": "Research Speed: %sx",
+  "gui.skavenblight.research_table.wind_meter.insufficient": "Insufficient Wind",
+  "gui.skavenblight.research_table.progress.active": "Progress: %d%%",
+  "gui.skavenblight.research_table.progress.studying": "Studying: %s",
+  "gui.skavenblight.research_table.progress.idle": "Progress: Idle",
 
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
