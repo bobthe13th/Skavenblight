@@ -383,9 +383,10 @@ git commit -m "fix(pathing): thread geometry-ordered build steps through every S
   `TerrainAccess` (existing).
 - Produces: `SiegeProject.nextUnbuiltInstruction(TerrainAccess, TerrainEvaluator):
   Optional<PlannedStep>`; `SiegeProject.tryRegisterWorker(Mob, TerrainAccess, TerrainEvaluator,
-  double workRadius): boolean`; `SiegeProject.unregisterWorker(Mob): void`;
-  `SiegeProject.isAtCapacity(): boolean` (cheap, terrain-free, reads a cached cap updated by
-  `tryRegisterWorker`/Task 4's `tick()`).
+  double workRadius, int maxProjectWorkers, int workersPerWidenStep): boolean` (6 params — matches
+  Step 3's own code block below; later tasks call it with exactly this shape);
+  `SiegeProject.unregisterWorker(Mob): void`; `SiegeProject.isAtCapacity(): boolean` (cheap,
+  terrain-free, reads a cached cap updated by `tryRegisterWorker`/Task 4's `tick()`).
 
 A test-only fake `TerrainAccess` is needed since these tests run outside a real `ServerLevel`.
 
