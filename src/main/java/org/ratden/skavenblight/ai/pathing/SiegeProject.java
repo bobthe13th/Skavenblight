@@ -1,8 +1,12 @@
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,12 +24,22 @@ public class SiegeProject {
     // fallback for (see getExitPos's own doc for why this is nullable and what it's for).
     private final BlockPos exitPos;
 
-    public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost) {
-        this(instructions, entryPos, expectedEntryCost, null);
+    // Geometry-ordered build sequence, sourced from SiegeLineTracer.TraceResult.orderedSteps() -
+    // NOT derived from `instructions` above, whose values point one step BACKWARD in trace order
+    // (see this class's own Javadoc / the design doc's Background for why that convention is
+    // wrong for "what to build, in what order, facing which way", and why RegionGraph's own
+    // outboundInstructions/inboundInstructions already avoid it for the identical reason).
+    private final List<PlannedStep> buildOrder;
+
+    public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
+                         BlockPos entryPos, int expectedEntryCost) {
+        this(instructions, orderedSteps, buildOrderAnchor, entryPos, expectedEntryCost, null);
     }
 
-    public SiegeProject(Map<BlockPos, SiegeNode> instructions, BlockPos entryPos, int expectedEntryCost, BlockPos exitPos) {
+    public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
+                         BlockPos entryPos, int expectedEntryCost, BlockPos exitPos) {
         this.instructions = new HashMap<>(instructions);
+        this.buildOrder = planSteps(orderedSteps, buildOrderAnchor);
         this.entryPos = entryPos;
         this.expectedEntryCost = expectedEntryCost;
         this.exitPos = exitPos;
@@ -92,6 +106,62 @@ public class SiegeProject {
      */
     public Map<BlockPos, SiegeNode> getInstructions() {
         return Collections.unmodifiableMap(instructions);
+    }
+
+    /**
+     * One position this project still needs to act on, in build order: the real position the
+     * action applies to (unlike `instructions`' values - see this class's own background doc),
+     * the action, and the facing derived purely from trace geometry (predecessor step -> this
+     * step), never from any mob's position - so placement can be centralized and driven by
+     * whichever/however many workers are registered, not tied to whoever happens to execute it.
+     */
+    record PlannedStep(BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {}
+
+    /** Package-private + static for direct unit testing, mirroring FlowFieldCalculator's own
+     * detectMutualCyclePositions/pickCyclePositionToDrop pattern for pure logic extracted out of
+     * a Minecraft-coupled class. */
+    static List<PlannedStep> planSteps(List<SiegeNode> orderedSteps, BlockPos anchor) {
+        List<PlannedStep> planned = new ArrayList<>(orderedSteps.size());
+        BlockPos previous = anchor;
+        for (SiegeNode step : orderedSteps) {
+            planned.add(new PlannedStep(step.pos(), step.action(), approachFacing(previous, step.pos())));
+            previous = step.pos();
+        }
+        return planned;
+    }
+
+    /** Same dx/dz-comparison logic as BuildFlowFieldGoal.computeApproachFacing, fed geometry
+     * instead of a mob's live position. */
+    private static Direction approachFacing(BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) > Math.abs(dz)) {
+            return dx > 0 ? Direction.EAST : Direction.WEST;
+        } else if (dz != 0) {
+            return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+        return Direction.NORTH; // pure-vertical step (BUILD_PILLAR/SPIRAL/LADDER) - facing unused for these.
+    }
+
+    /** How many of `orderedRemainingCosts` (in build order) `availableWork` fully covers, stopping
+     * at the first one it can't - a large mid-sequence cost blocks everything after it even if the
+     * total would otherwise suffice, matching "build in order" semantics. */
+    static int countCompletable(List<Integer> orderedRemainingCosts, double availableWork) {
+        int completed = 0;
+        double remaining = availableWork;
+        for (int cost : orderedRemainingCosts) {
+            if (remaining < cost) break;
+            remaining -= cost;
+            completed++;
+        }
+        return completed;
+    }
+
+    /** BUILD_STAIR/BUILD_BRIDGE scale their worker cap with `width` (see the auto-widening design);
+     * every other action type gets a flat cap regardless of `width`. */
+    static int effectiveCapFor(SiegeNode.SiegeAction action, int width, int maxProjectWorkers, int workersPerWidenStep) {
+        boolean widenable = action == SiegeNode.SiegeAction.BUILD_STAIR || action == SiegeNode.SiegeAction.BUILD_BRIDGE;
+        return widenable ? width * workersPerWidenStep : maxProjectWorkers;
     }
 
 }

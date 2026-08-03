@@ -268,7 +268,7 @@ public class SiegeProjectManager {
         LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Cost: {})",
                 anchorPos.toShortString(), endPos.toShortString(), totalCost);
 
-        candidateProjects.add(new SiegeProject(result.instructions(), endPos, totalCost));
+        candidateProjects.add(new SiegeProject(result.instructions(), result.orderedSteps(), anchorPos, endPos, totalCost));
         lastPassCandidatesGenerated++;
 
         nextCostMap.put(endPos, totalCost);

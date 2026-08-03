@@ -151,8 +151,8 @@ public class RegionGraph {
         // a mob that finishes crossing lands on a cell with NO instruction anywhere and is
         // permanently stuck (confirmed via testParentRegionGetsRealInstructionsForSharedConnectorCells
         // and the real-world testSingleRatBuildsStaircaseAcrossSmallGap).
-        SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), endPos, cost, boundaryCell);
-        SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), boundaryCell, cost, endPos);
+        SiegeProject towardA = new SiegeProject(inboundInstructions(boundaryCell, orderedSteps), orderedSteps, endPos, endPos, cost, boundaryCell);
+        SiegeProject towardB = new SiegeProject(outboundInstructions(boundaryCell, orderedSteps), orderedSteps, boundaryCell, boundaryCell, cost, endPos);
 
         // Claim every cell this connector actually traced into BOTH endpoint regions' own
         // membership, right here at graph-build time - not just at the two regions' boundary
