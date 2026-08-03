@@ -37,6 +37,12 @@ public class SiegeProject {
     // outboundInstructions/inboundInstructions already avoid it for the identical reason).
     private final List<PlannedStep> buildOrder;
 
+    /** The original build order's own starting anchor (the position its first step was traced
+     * from) - stored so tryWiden can reconstruct the same trace direction from a shifted anchor.
+     * Deliberately distinct from `entryPos` (the project's far-side entry, used for flow-field
+     * routing) - see the constructor. */
+    private final BlockPos widenAnchor;
+
     private final Set<Mob> workers = new HashSet<>();
     // Updated by nextUnbuiltInstruction()'s callers (tryRegisterWorker, Task 4's tick()) each time
     // they have real terrain access; isAtCapacity() reads this cheaply for callers (AwaitFormationGoal)
@@ -54,6 +60,7 @@ public class SiegeProject {
                          BlockPos entryPos, int expectedEntryCost, BlockPos exitPos) {
         this.instructions = new HashMap<>(instructions);
         this.buildOrder = planSteps(orderedSteps, buildOrderAnchor);
+        this.widenAnchor = buildOrderAnchor;
         this.entryPos = entryPos;
         this.expectedEntryCost = expectedEntryCost;
         this.exitPos = exitPos;
@@ -195,8 +202,10 @@ public class SiegeProject {
     /** Registers `mob` as a worker if there's real build work nearby (within `workRadius` of the
      * next unbuilt step) and the project isn't already at capacity - see effectiveCapFor for how
      * capacity scales with width for BUILD_STAIR/BUILD_BRIDGE. Idempotent: re-registering an
-     * already-registered mob succeeds trivially. Widening on a rejected registration is added in
-     * a later task; for now a full project simply refuses. */
+     * already-registered mob succeeds trivially. When a registration is rejected purely for being
+     * over cap, this retries once against a freshly-widened cap (see tryWiden) before giving up -
+     * so a growing crowd of rats spreads out into a new parallel lane instead of all queuing for
+     * the same single-file line. */
     public boolean tryRegisterWorker(Mob mob, TerrainAccess terrain, TerrainEvaluator evaluator, double workRadius,
                                       int maxProjectWorkers, int workersPerWidenStep) {
         Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
@@ -206,10 +215,69 @@ public class SiegeProject {
 
         this.cachedEffectiveCap = effectiveCapFor(step.action(), this.width, maxProjectWorkers, workersPerWidenStep);
         if (workers.contains(mob)) return true;
-        if (workers.size() >= this.cachedEffectiveCap) return false;
+
+        if (workers.size() >= this.cachedEffectiveCap) {
+            if (!tryWiden(step.action(), terrain, evaluator)) return false;
+            this.cachedEffectiveCap = effectiveCapFor(step.action(), this.width, maxProjectWorkers, workersPerWidenStep);
+            if (workers.size() >= this.cachedEffectiveCap) return false;
+        }
 
         workers.add(mob);
         return true;
+    }
+
+    /** Attempts to trace one more parallel lane, alternating sides on successive widens, when a
+     * BUILD_STAIR/BUILD_BRIDGE project is at capacity - see the design doc's Auto-widening
+     * section. No-ops (returns false) for non-widenable actions, once maxProjectWidth is reached,
+     * or when the trace itself fails (terrain doesn't support it, out of bounds, too much mining)
+     * - a failed attempt leaves width unchanged and is simply retried on the next rejected
+     * registration, never per-tick, bounding retry frequency to actual demand. */
+    private boolean tryWiden(SiegeNode.SiegeAction currentAction, TerrainAccess terrain, TerrainEvaluator evaluator) {
+        boolean widenable = currentAction == SiegeNode.SiegeAction.BUILD_STAIR || currentAction == SiegeNode.SiegeAction.BUILD_BRIDGE;
+        if (!widenable || this.width >= org.ratden.skavenblight.Config.maxProjectWidth || buildOrder.isEmpty()) return false;
+
+        PlannedStep first = buildOrder.get(0);
+        // Perpendicular horizontal axis to the trace direction, alternating sides per widen: even
+        // widths go one way, odd the other, so the structure grows outward on both sides. The
+        // direction vector is (second step - first step) when there are at least two build-order
+        // steps to compare; for a single-step build order there's no "second step", so fall back
+        // to (first step - the original anchor it was traced from) - the anchor is definitionally
+        // the point immediately preceding buildOrder[0], so this keeps the vector forward-pointing
+        // and non-degenerate (using buildOrder[0] against ITSELF here would collapse to (0,0), and
+        // an all-zero perpendicular offset would make the "widened" trace retrace the exact same
+        // line instead of shifting sideways at all).
+        BlockPos dirFrom = buildOrder.size() > 1 ? first.pos() : this.entryAnchorForWidenTrace();
+        BlockPos dirTo = buildOrder.size() > 1 ? buildOrder.get(1).pos() : first.pos();
+        int dx = dirTo.getX() - dirFrom.getX();
+        int dz = dirTo.getZ() - dirFrom.getZ();
+        int perpX = -dz;
+        int perpZ = dx;
+        int side = (this.width % 2 == 0) ? 1 : -1;
+        BlockPos offset = new BlockPos(perpX * side, 0, perpZ * side);
+
+        BlockPos newAnchor = this.entryAnchorForWidenTrace().offset(offset.getX(), 0, offset.getZ());
+        int traceDy = first.pos().getY() - this.entryAnchorForWidenTrace().getY();
+
+        SiegeLineTracer tracer = new SiegeLineTracer(evaluator);
+        SiegeLineTracer.TraceResult result = tracer.trace(terrain, newAnchor,
+                Integer.signum(first.pos().getX() - this.entryAnchorForWidenTrace().getX()),
+                Integer.signum(traceDy),
+                Integer.signum(first.pos().getZ() - this.entryAnchorForWidenTrace().getZ()),
+                newAnchor, 0, pos -> false, pos -> Integer.MAX_VALUE, buildOrder.size());
+
+        if (!result.completed() || result.orderedSteps().isEmpty()) return false;
+
+        buildOrder.addAll(planSteps(result.orderedSteps(), newAnchor));
+        this.width++;
+        return true;
+    }
+
+    private BlockPos entryAnchorForWidenTrace() {
+        return this.widenAnchor;
+    }
+
+    public int getWidth() {
+        return this.width;
     }
 
     public void unregisterWorker(Mob mob) {
