@@ -15,9 +15,10 @@ import java.util.function.Predicate;
  * caller cares about, snap to that node instead" lookup, used by both AbstractSiegeConstructionGoal
  * (the per-block-claim goal family) and AbstractSiegeProjectGoal (the project-scoped family) - the
  * same lookahead applies regardless of what a matching node's own claim/registration model is.
- * Extracted from AbstractSiegeConstructionGoal.findEffectiveNode without behavior change; see that
- * class's own historical Javadoc (MAX_TARGET_CLAIM_DISTANCE / LOOKAHEAD_SNAP_DISTANCE) for the full
- * history of why this exact shape (1.5-block peek, WALK-hop-only, self-overlap guard) is correct.
+ * Extracted from AbstractSiegeConstructionGoal.findEffectiveNode without behavior change; see
+ * AbstractSiegeConstructionGoal.MAX_TARGET_CLAIM_DISTANCE's own javadoc and this file's
+ * LOOKAHEAD_SNAP_DISTANCE javadoc below for the full history of why this exact shape (1.5-block
+ * peek, WALK-hop-only, self-overlap guard) is correct.
  */
 final class SiegeNodeLookahead {
 
