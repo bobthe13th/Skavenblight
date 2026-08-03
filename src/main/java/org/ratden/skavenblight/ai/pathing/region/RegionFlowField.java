@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -217,5 +218,9 @@ public class RegionFlowField {
 
     public Map<BlockPos, SiegeNode> getLiveDebugMap() {
         return calculator.getLiveDebugMap();
+    }
+
+    public Optional<SiegeProject> findProjectFor(BlockPos pos) {
+        return projectManager.findProjectContaining(pos);
     }
 }

@@ -178,6 +178,13 @@ public class SiegeProjectManager {
         return Collections.unmodifiableSet(this.lockedPositions);
     }
 
+    public Optional<SiegeProject> findProjectContaining(BlockPos pos) {
+        for (SiegeProject project : activeProjects) {
+            if (project.getInstructions().containsKey(pos)) return Optional.of(project);
+        }
+        return Optional.empty();
+    }
+
     public int getActiveProjectCount() { return this.activeProjects.size(); }
     /** Always 0 once a pass has finished - see the field doc on lastPassCandidatesGenerated/Survived for the real per-pass numbers. */
     public int getCandidateProjectCount() { return this.candidateProjects.size(); }

@@ -2,7 +2,9 @@ package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Mob;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,6 +43,7 @@ public class SiegeProject {
     // that don't want to thread a TerrainAccess/TerrainEvaluator through just to ask "is this full".
     private int cachedEffectiveCap = Integer.MAX_VALUE;
     private int width = 1;
+    private double accumulatedWork = 0.0;
 
     public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
                          BlockPos entryPos, int expectedEntryCost) {
@@ -218,6 +221,43 @@ public class SiegeProject {
      * tryRegisterWorker/Task 4's tick() last computed, so it can lag by up to one tick. */
     public boolean isAtCapacity() {
         return workers.size() >= this.cachedEffectiveCap;
+    }
+
+    /** Advances this project's construction by one tick: adds work proportional to registered
+     * worker count (capped), then places as many now-affordable not-yet-built steps as the
+     * accumulated work covers, in build order. A project whose next step is blocked on an
+     * incomplete MINE (see nextUnbuiltInstruction) or that's fully built is a no-op - callers
+     * don't need to check either case first. */
+    public void tick(ServerLevel level, RegionFlowField flowField, TerrainEvaluator evaluator) {
+        workers.removeIf(mob -> !mob.isAlive());
+
+        LiveTerrainAccess terrain = new LiveTerrainAccess(level);
+        Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
+        if (next.isEmpty()) return;
+
+        this.cachedEffectiveCap = effectiveCapFor(next.get().action(), this.width,
+                org.ratden.skavenblight.Config.maxProjectWorkers, org.ratden.skavenblight.Config.workersPerWidenStep);
+
+        int activeWorkers = Math.min(workers.size(), this.cachedEffectiveCap);
+        if (activeWorkers == 0) return;
+
+        this.accumulatedWork += activeWorkers * org.ratden.skavenblight.Config.workPerRatPerTick;
+
+        PlannedStep step = next.get();
+        while (step != null) {
+            int cost = evaluator.calculateActionCostForAction(terrain, step.pos(), step.action());
+            if (this.accumulatedWork < cost) break;
+
+            this.accumulatedWork -= cost;
+            // supportSolidAtClaim=true: unlike the old per-mob claim-then-execute window (a real
+            // multi-tick gap the flag exists to guard), this placement is synchronous with the
+            // "is it next in build order" check above - by definition every earlier step is
+            // already built, so support is verified fresh right now, not snapshotted earlier.
+            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, true);
+
+            Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
+            step = following.orElse(null);
+        }
     }
 
 }
