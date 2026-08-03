@@ -2,6 +2,9 @@ package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.Mob;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -99,5 +102,92 @@ class SiegeProjectTest {
 
         assertEquals(entryPos, project.getEntryPos());
         assertEquals(instructions, project.getInstructions());
+    }
+
+    /** Minimal fake so pure registration/cap logic can run with no real ServerLevel. Every
+     * position not explicitly set reports as open air, i.e. every action is "not yet built". */
+    private static class FakeTerrain implements TerrainAccess {
+        private final Map<BlockPos, BlockState> states = new java.util.HashMap<>();
+
+        void set(BlockPos pos, BlockState state) { states.put(pos, state); }
+
+        @Override
+        public BlockState getBlockState(BlockPos pos) {
+            return states.getOrDefault(pos, Blocks.AIR.defaultBlockState());
+        }
+
+        @Override
+        public boolean isLoaded(BlockPos pos) { return true; }
+
+        @Override
+        public boolean isOutsideBuildHeight(BlockPos pos) { return false; }
+
+        @Override
+        public boolean isSolidRender(BlockPos pos) { return getBlockState(pos).blocksMotion(); }
+
+        @Override
+        public float getDestroySpeed(BlockPos pos) { return 1.0F; }
+    }
+
+    private static SiegeProject freshSingleStepProject(BlockPos anchor, BlockPos target, SiegeNode.SiegeAction action) {
+        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, action));
+        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, action));
+        return new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+    }
+
+    @Test
+    void nextUnbuiltInstructionReturnsFirstIncompleteStep() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        BlockPos target = new BlockPos(1, 64, 0);
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.BUILD_BRIDGE);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+
+        assertTrue(project.nextUnbuiltInstruction(terrain, evaluator).isPresent());
+        assertEquals(target, project.nextUnbuiltInstruction(terrain, evaluator).get().pos());
+    }
+
+    @Test
+    void nextUnbuiltInstructionEmptyOnceBuilt() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        BlockPos target = new BlockPos(1, 64, 0);
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.BUILD_BRIDGE);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        terrain.set(target, Blocks.COBBLESTONE.defaultBlockState());
+
+        assertTrue(project.nextUnbuiltInstruction(terrain, evaluator).isEmpty());
+    }
+
+    @Test
+    void nextUnbuiltInstructionStopsAtAnIncompleteMineStep() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        BlockPos minePos = new BlockPos(1, 64, 0);
+        BlockPos buildPos = new BlockPos(2, 64, 0);
+        List<SiegeNode> orderedSteps = List.of(
+                new SiegeNode(minePos, SiegeNode.SiegeAction.MINE),
+                new SiegeNode(buildPos, SiegeNode.SiegeAction.BUILD_BRIDGE)
+        );
+        Map<BlockPos, SiegeNode> instructions = Map.of(
+                minePos, new SiegeNode(anchor, SiegeNode.SiegeAction.MINE),
+                buildPos, new SiegeNode(minePos, SiegeNode.SiegeAction.BUILD_BRIDGE)
+        );
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, buildPos, 500);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        terrain.set(minePos, Blocks.STONE.defaultBlockState()); // not yet mined
+
+        // Blocked on the still-solid MINE step (handled by the old per-rat SmartBreachGoal path,
+        // untouched by this overhaul) - must not skip ahead to the BUILD_BRIDGE step past it.
+        assertTrue(project.nextUnbuiltInstruction(terrain, evaluator).isEmpty());
+    }
+
+    @Test
+    void isAtCapacityFalseBeforeAnyRegistration() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        BlockPos target = new BlockPos(1, 64, 0);
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.BUILD_PILLAR);
+
+        assertFalse(project.isAtCapacity());
     }
 }

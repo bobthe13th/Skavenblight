@@ -2,12 +2,16 @@ package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Mob;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * A data class representing an active multi-block building or mining project.
@@ -30,6 +34,13 @@ public class SiegeProject {
     // wrong for "what to build, in what order, facing which way", and why RegionGraph's own
     // outboundInstructions/inboundInstructions already avoid it for the identical reason).
     private final List<PlannedStep> buildOrder;
+
+    private final Set<Mob> workers = new HashSet<>();
+    // Updated by nextUnbuiltInstruction()'s callers (tryRegisterWorker, Task 4's tick()) each time
+    // they have real terrain access; isAtCapacity() reads this cheaply for callers (AwaitFormationGoal)
+    // that don't want to thread a TerrainAccess/TerrainEvaluator through just to ask "is this full".
+    private int cachedEffectiveCap = Integer.MAX_VALUE;
+    private int width = 1;
 
     public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
                          BlockPos entryPos, int expectedEntryCost) {
@@ -162,6 +173,51 @@ public class SiegeProject {
     static int effectiveCapFor(SiegeNode.SiegeAction action, int width, int maxProjectWorkers, int workersPerWidenStep) {
         boolean widenable = action == SiegeNode.SiegeAction.BUILD_STAIR || action == SiegeNode.SiegeAction.BUILD_BRIDGE;
         return widenable ? width * workersPerWidenStep : maxProjectWorkers;
+    }
+
+    /** The first not-yet-built step in build order, or empty if the project is fully built OR
+     * currently blocked on an incomplete MINE step (handled entirely by the old per-rat
+     * SmartBreachGoal/flowField.tryClaimTarget path - out of scope for this mechanism; skipping
+     * PAST an unmined obstacle to a build step beyond it would be physically wrong, since that
+     * later step may depend on the obstacle already being cleared). */
+    public Optional<PlannedStep> nextUnbuiltInstruction(TerrainAccess terrain, TerrainEvaluator evaluator) {
+        for (PlannedStep step : buildOrder) {
+            if (step.action() == SiegeNode.SiegeAction.WALK || step.action() == SiegeNode.SiegeAction.LEAP) continue;
+            if (step.action() == SiegeNode.SiegeAction.MINE) return Optional.empty();
+            if (!evaluator.isActionCompleted(terrain, new SiegeNode(step.pos(), step.action()))) return Optional.of(step);
+        }
+        return Optional.empty();
+    }
+
+    /** Registers `mob` as a worker if there's real build work nearby (within `workRadius` of the
+     * next unbuilt step) and the project isn't already at capacity - see effectiveCapFor for how
+     * capacity scales with width for BUILD_STAIR/BUILD_BRIDGE. Idempotent: re-registering an
+     * already-registered mob succeeds trivially. Widening on a rejected registration is added in
+     * a later task; for now a full project simply refuses. */
+    public boolean tryRegisterWorker(Mob mob, TerrainAccess terrain, TerrainEvaluator evaluator, double workRadius,
+                                      int maxProjectWorkers, int workersPerWidenStep) {
+        Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
+        if (next.isEmpty()) return false;
+        PlannedStep step = next.get();
+        if (!mob.blockPosition().closerThan(step.pos(), workRadius)) return false;
+
+        this.cachedEffectiveCap = effectiveCapFor(step.action(), this.width, maxProjectWorkers, workersPerWidenStep);
+        if (workers.contains(mob)) return true;
+        if (workers.size() >= this.cachedEffectiveCap) return false;
+
+        workers.add(mob);
+        return true;
+    }
+
+    public void unregisterWorker(Mob mob) {
+        workers.remove(mob);
+    }
+
+    /** Cheap, terrain-free capacity check for callers (AwaitFormationGoal) that just need "is
+     * there room here right now" without re-deriving the next unbuilt step - reads whatever
+     * tryRegisterWorker/Task 4's tick() last computed, so it can lag by up to one tick. */
+    public boolean isAtCapacity() {
+        return workers.size() >= this.cachedEffectiveCap;
     }
 
 }
