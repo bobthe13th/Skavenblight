@@ -152,6 +152,67 @@ public final class Config {
                     1_000_000
             );
 
+    /*
+     * Project-scoped siege construction settings
+     */
+
+    private static final ModConfigSpec.DoubleValue PROJECT_WORK_RADIUS =
+            BUILDER.comment(
+                    "How close a rat must be to a siege project's next "
+                            + "unbuilt step to register as a worker on it."
+            ).defineInRange(
+                    "projectWorkRadius",
+                    3.5,
+                    1.0,
+                    16.0
+            );
+
+    private static final ModConfigSpec.IntValue MAX_PROJECT_WORKERS =
+            BUILDER.comment(
+                    "Worker cap for siege project actions that don't "
+                            + "auto-widen (pillars, landings, ladders, "
+                            + "spirals via the generic fallback)."
+            ).defineInRange(
+                    "maxProjectWorkers",
+                    4,
+                    1,
+                    100
+            );
+
+    private static final ModConfigSpec.IntValue WORKERS_PER_WIDEN_STEP =
+            BUILDER.comment(
+                    "Worker cap per lane for staircase/bridge projects "
+                            + "before they auto-widen by one lane, up to "
+                            + "maxProjectWidth."
+            ).defineInRange(
+                    "workersPerWidenStep",
+                    10,
+                    1,
+                    100
+            );
+
+    private static final ModConfigSpec.DoubleValue WORK_PER_RAT_PER_TICK =
+            BUILDER.comment(
+                    "Build-progress work one registered rat contributes "
+                            + "to its siege project per tick."
+            ).defineInRange(
+                    "workPerRatPerTick",
+                    100.0,
+                    1.0,
+                    10_000.0
+            );
+
+    private static final ModConfigSpec.IntValue MAX_PROJECT_WIDTH =
+            BUILDER.comment(
+                    "Maximum number of lanes a staircase/bridge project "
+                            + "may auto-widen to."
+            ).defineInRange(
+                    "maxProjectWidth",
+                    4,
+                    1,
+                    20
+            );
+
     private static final ModConfigSpec.IntValue
             REGION_SCAN_MAX_CELLS =
             BUILDER.comment(
@@ -303,6 +364,12 @@ public final class Config {
     public static int regionScanMaxCells;
     public static int minimumSettleDelayMs;
 
+    public static double projectWorkRadius;
+    public static int maxProjectWorkers;
+    public static int workersPerWidenStep;
+    public static double workPerRatPerTick;
+    public static int maxProjectWidth;
+
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
     public static int wlCoilCostPerShot;
@@ -350,6 +417,21 @@ public final class Config {
 
         minimumSettleDelayMs =
                 MINIMUM_SETTLE_DELAY_MS.get();
+
+        projectWorkRadius =
+                PROJECT_WORK_RADIUS.get();
+
+        maxProjectWorkers =
+                MAX_PROJECT_WORKERS.get();
+
+        workersPerWidenStep =
+                WORKERS_PER_WIDEN_STEP.get();
+
+        workPerRatPerTick =
+                WORK_PER_RAT_PER_TICK.get();
+
+        maxProjectWidth =
+                MAX_PROJECT_WIDTH.get();
 
         wlCoilCapacity =
                 WL_COIL_CAPACITY.get();
