@@ -272,7 +272,7 @@ public class StaircaseSiegeGroupGameTests {
         awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 7);
     }
 
-    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 8000, skyAccess = true)
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 5000, skyAccess = true)
     public static void testSmallGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
@@ -289,7 +289,7 @@ public class StaircaseSiegeGroupGameTests {
         awaitArrivalAndStaircase(helper, rats, relativeNexusPos, relativeGroundSpawn, 3.0, 7);
     }
 
-    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 12000, skyAccess = true)
+    @GameTest(template = "pathing_test_giant", batch = BATCH, timeoutTicks = 3000, skyAccess = true)
     public static void testLargeGroupBuildsStaircaseAcrossSmallGap(GameTestHelper helper) {
         NexusTracker.clearActiveNexus(helper.getLevel());
 
