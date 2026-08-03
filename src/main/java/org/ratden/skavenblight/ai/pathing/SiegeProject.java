@@ -351,6 +351,31 @@ public class SiegeProject {
             // risk here for tick() to guard against in the first place.
             SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false);
 
+            // The old per-goal onChainComplete (AbstractSiegeConstructionGoal's default, and
+            // BuildFlowFieldGoal's own override before Task 8 migrated it onto this class) was the
+            // ONLY thing that ever told the region system "a rat just built something here" -
+            // SiegeInteractionHandler's direct level.setBlockAndUpdate/destroyBlock calls don't
+            // fire the NeoForge BlockEvents SiegeBlockEventHandler listens for, and
+            // TerritoryRegionMap.tick() early-returns with nothing to do when there are no dirty
+            // regions (no periodic fallback refresh). Without this call, a placement here would
+            // never get discovered - the exact "built a real pillar, but that position stayed
+            // 'wilderness' three rebuild generations later" bug forceRecalculation's own javadoc
+            // describes. Called once per PLACEMENT (not once per tick(), and not batched/cooldown-
+            // gated here) deliberately: forceRecalculation/onBlockChanged must be given the EXACT
+            // position that changed (see its own doc - passing a proxy position marks the wrong
+            // chunk's terrain snapshot stale), and this loop can place more than one step per
+            // tick() call when a step's cost is cheap relative to Config.workPerRatPerTick - each
+            // placement can land in a different chunk, so each needs its own call. This is cheap to
+            // call this often: TerritoryRegionMap.onBlockChanged is an O(1)
+            // ConcurrentLinkedQueue.add, and the actual expensive recompute it can eventually
+            // trigger is already independently rate-limited by TerritoryRegionMap's own
+            // RECALC_COOLDOWN_TICKS (80 ticks) and Config.minimumSettleDelayMs (1000ms settle
+            // delay) - unlike the old goal-level 100-tick recalculateCooldown, which was extra
+            // insurance on top of that, not the only thing standing between this and a real cost.
+            if (flowField != null) {
+                flowField.forceRecalculation(step.pos());
+            }
+
             Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
             step = following.orElse(null);
         }

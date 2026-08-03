@@ -125,6 +125,72 @@ public class PathingGoalRecalculationGameTests {
     }
 
     /**
+     * Regression coverage for fix round 1 (Task 8-11 review): the old {@code BuildFlowFieldGoal}
+     * (an {@code AbstractSiegeConstructionGoal}) called {@code onChainComplete}'s default
+     * {@code flowField.forceRecalculation(completedPos)} after every completed action - the ONLY
+     * thing that ever tells {@code TerritoryRegionMap} "a rat just built something here" (see
+     * {@code testDeployClimbableGoalMarksRegionDirty}'s own class javadoc for why direct
+     * {@code level.setBlockAndUpdate}/{@code destroyBlock} calls don't fire this on their own).
+     * Task 8 migrated {@code BuildFlowFieldGoal} onto {@code AbstractSiegeProjectGoal} /
+     * {@code SiegeProject.tick()}, which had no equivalent call at all - a project-driven
+     * placement would never mark its region dirty, leaving it permanently stale exactly like the
+     * bug {@code RegionFlowField#forceRecalculation}'s own javadoc describes. This proves the
+     * call {@code SiegeProject.tick()} now makes after each successful placement actually reaches
+     * the region map, through the real {@link BuildFlowFieldGoal} + {@link SiegeProject} path
+     * (not a direct {@code SiegeProject.tick()} call), mirroring
+     * {@code testDeployClimbableGoalMarksRegionDirty}'s own goal-driven shape.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    public static void testBuildFlowFieldGoalMarksRegionDirty(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(4, 2, 4);
+        BlockPos relativeTarget = relativeAnchor.relative(Direction.EAST);
+        BlockPos anchor = helper.absolutePos(relativeAnchor);
+        BlockPos target = helper.absolutePos(relativeTarget);
+
+        RecordingRegionMap owner = new RecordingRegionMap();
+        FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
+        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR)));
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        // Single-step, default-solid-floor BUILD_STAIR project (same shape as
+        // SiegeProjectAutoWidenGameTests/PathingGoalRecalculationGameTests' own widen tests) -
+        // this test is about region-dirty-marking, not the no-prior-support scenario, so real
+        // ground support keeps the setup minimal.
+        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR));
+        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_STAIR));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        projectManager.addSharedConnectorProject(project);
+
+        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        mob.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(mob);
+
+        BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), "goal should trigger for target " + target.toShortString());
+        goal.start();
+        for (int t = 0; t < 60 && !helper.getLevel().getBlockState(target).is(Blocks.COBBLESTONE_STAIRS); t++) {
+            goal.tick();
+        }
+
+        helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE_STAIRS),
+                () -> "BUILD_STAIR should have placed a stair at " + relativeTarget);
+
+        check(owner.changes.contains(target),
+                "region map was never told about the stair placement at " + target
+                        + " - SiegeProject.tick() never called forceRecalculation (recorded changes: "
+                        + owner.changes + ")");
+
+        helper.succeed();
+    }
+
+    /**
      * Regression coverage for the narrowing correction described in
      * docs/superpowers/plans/2026-07-29-siege-project-floating-stair-fix.md's "Correction"
      * section: the original support guard required solid ground below EVERY BUILD_STAIR target,
