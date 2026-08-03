@@ -39,17 +39,23 @@ design's own verification (below) is what will actually confirm it.
 **In scope:**
 - `SiegeProject` gains an ordered build sequence, a worker registry, an accumulated-work counter,
   and (for laterally-widenable actions) a width that grows with worker demand.
-- `BuildFlowFieldGoal`, `SpiralSapperGoal`, and `DeployClimbableGoal` move from per-block claiming to
-  project-worker registration.
+- `BuildFlowFieldGoal` moves from per-block claiming to project-worker registration.
 - `WidenStairsGoal` is deleted; its intent (relieve crowding on a saturated lane) is replaced by
   project auto-widening.
 - Facing for placed blocks is derived from the project's own trace geometry instead of from
   whichever mob happens to execute the placement.
 
 **Explicitly out of scope:**
+- `SpiralSapperGoal` and `DeployClimbableGoal` (`BUILD_SPIRAL`/`BUILD_LADDER`) are untouched, still
+  using the old per-block `flowField.tryClaimTarget`. Both run strictly sequential, multi-step mining
+  prep (ceiling/ledge/overhang breach) on a vertical shaft one block wide — physically only one rat
+  can ever work one at a time, so there is no real parallel-worker benefit to gain by migrating them,
+  and their state machines (chained sub-steps, not the simple approach/animate/execute shape) are
+  materially riskier to rewrite than the benefit justifies. `BuildFlowFieldGoal` remains their generic
+  fallback for `BUILD_SPIRAL`/`BUILD_LADDER` when these specialized goals decline, exactly as today.
 - `SmartBreachGoal` (`MINE`) and `WidenStairsGoal`'s formerly-shared `RegionFlowField.claimedTargets`
-  map stay on the current per-block claiming model. `SmartBreachGoal` is demolition, not group
-  construction, and gets its own pass later.
+  map stay on the current per-block claiming model for anything not covered above. `SmartBreachGoal`
+  is demolition, not group construction, and gets its own pass later.
 - `RegionFlowField.tryOccupyLane`/`MAX_LANE_OCCUPANTS` (physical crowding on a narrow connector lane
   during *movement*) is unrelated to this change and untouched.
 - Danger/exposure costing, non-clanrat construction methods, event-driven dirty tracking — already
@@ -135,11 +141,10 @@ core:
   one goal instance.
 - `stop()`: `project.unregisterWorker(mob)` instead of `flowField.releaseTarget(pos)`.
 
-`BuildFlowFieldGoal`, `SpiralSapperGoal`, and `DeployClimbableGoal` move onto this base. Their
-specialized placement math (spiral rotation, ladder wall-finding) is unchanged — it's still what
-`SiegeInteractionHandler` calls to actually place a given instruction type — only the goal-level
-claiming/timing wrapper around it changes. `SmartBreachGoal` and `WidenStairsGoal`'s prior use of
-`AbstractSiegeConstructionGoal` is otherwise untouched (`WidenStairsGoal` is deleted, not migrated).
+Only `BuildFlowFieldGoal` moves onto this base. `SpiralSapperGoal` and `DeployClimbableGoal` are
+untouched (see Scope) — they keep their own multi-step state machines and their own direct
+`flowField.tryClaimTarget`/`releaseTarget` calls exactly as today. `SmartBreachGoal`'s use of
+`AbstractSiegeConstructionGoal` is likewise untouched (`WidenStairsGoal` is deleted, not migrated).
 
 `AwaitFormationGoal` currently calls `peekClaimedTarget()` on sibling goals to detect "this block is
 already spoken for, wait your turn." For project-scoped goals, "spoken for" becomes "the project is
