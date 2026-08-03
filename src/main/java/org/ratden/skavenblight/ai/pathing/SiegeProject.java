@@ -239,15 +239,19 @@ public class SiegeProject {
         PlannedStep first = buildOrder.get(0);
         // Perpendicular horizontal axis to the trace direction, alternating sides per widen: even
         // widths go one way, odd the other, so the structure grows outward on both sides. The
-        // direction vector is (second step - first step) when there are at least two build-order
-        // steps to compare; for a single-step build order there's no "second step", so fall back
-        // to (first step - the original anchor it was traced from) - the anchor is definitionally
-        // the point immediately preceding buildOrder[0], so this keeps the vector forward-pointing
-        // and non-degenerate (using buildOrder[0] against ITSELF here would collapse to (0,0), and
-        // an all-zero perpendicular offset would make the "widened" trace retrace the exact same
-        // line instead of shifting sideways at all).
-        BlockPos dirFrom = buildOrder.size() > 1 ? first.pos() : this.entryAnchorForWidenTrace();
-        BlockPos dirTo = buildOrder.size() > 1 ? buildOrder.get(1).pos() : first.pos();
+        // direction vector is always (original first step - original anchor), NEVER derived from
+        // buildOrder.get(1): after any widen has already happened, buildOrder.get(1) is whatever
+        // that widen appended (a sideways lane), not "the original trace's second step" - branching
+        // on buildOrder.size() to pick between the two would silently re-derive the direction from
+        // the wrong pair of points on the second and later widens, since buildOrder keeps growing
+        // with each one. `widenAnchor` and `buildOrder.get(0)` are both stable for the project's
+        // entire life (new lanes are only ever appended, never inserted before index 0, and
+        // `widenAnchor` never changes), so this is the only pairing that stays correct across
+        // repeated widens - and for any straight trace it's the same unit direction as any two
+        // consecutive original steps anyway, since SiegeLineTracer walks a fixed (dx,dy,dz) the
+        // entire length (see its own doc), so this changes nothing for multi-step build orders.
+        BlockPos dirFrom = this.entryAnchorForWidenTrace();
+        BlockPos dirTo = first.pos();
         int dx = dirTo.getX() - dirFrom.getX();
         int dz = dirTo.getZ() - dirFrom.getZ();
         int perpX = -dz;
@@ -278,6 +282,15 @@ public class SiegeProject {
 
     public int getWidth() {
         return this.width;
+    }
+
+    /** Test-support accessor: every position currently in build order (original steps first, then
+     * each widen's appended lane, in the order they were added) - lets tests verify tryWiden's
+     * geometry actually lands on genuinely different positions across successive widens, without
+     * depending on real terrain's action classification (BUILD_STAIR vs WALK) at each lane, which
+     * calling tick() and asserting on placed blocks would. */
+    public List<BlockPos> getBuildOrderPositions() {
+        return buildOrder.stream().map(PlannedStep::pos).toList();
     }
 
     public void unregisterWorker(Mob mob) {
