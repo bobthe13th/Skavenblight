@@ -1179,32 +1179,124 @@ git commit -m "feat(pathing): auto-widen staircase/bridge projects under worker 
 
 ---
 
-## Task 7: `AbstractSiegeProjectGoal` base class
+## Task 7: Shared lookahead helper + `AbstractSiegeProjectGoal` base class
 
 **Files:**
+- Create: `src/main/java/org/ratden/skavenblight/ai/goal/clanrat/SiegeNodeLookahead.java`
+- Modify: `src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeConstructionGoal.java`
 - Create: `src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeProjectGoal.java`
 
 **Interfaces:**
-- Consumes: `AbstractSiegeConstructionGoal.MAX_TARGET_CLAIM_DISTANCE`/`findEffectiveNode` (reused
-  by inheritance is NOT possible here since this is a sibling, not a subclass — this new class
-  reimplements the small amount of shared plumbing it needs directly, since
-  `AbstractSiegeConstructionGoal`'s claim/execute core is exactly what's being replaced);
-  `RegionFlowField.findProjectFor` (Task 4); `SiegeProject.tryRegisterWorker`/`unregisterWorker`/
-  `tick`/`isAtCapacity` (Tasks 3/4/6); `SiegeGoal` interface (existing).
-- Produces: `AbstractSiegeProjectGoal` — `canUse()`, `start()`, `tick()`, `stop()`,
-  `canContinueToUse()` skeleton; abstract hooks `findEffectiveNode()`
-  (reusing the exact lookahead logic `AbstractSiegeConstructionGoal.findEffectiveNode` already has,
-  duplicated here since it isn't reusable via inheritance across two sibling base classes without
-  a deeper refactor this plan intentionally avoids — see Global Constraints on minimizing blast
-  radius) and `matchesAction(SiegeNode.SiegeAction)`.
+- Consumes: `RegionFlowField.getNextSiegeNode` (existing); `RegionFlowField.findProjectFor` (Task
+  4); `SiegeProject.tryRegisterWorker`/`unregisterWorker`/`tick`/`isAtCapacity` (Tasks 3/4/6);
+  `SiegeGoal` interface (existing).
+- Produces: `static Optional<SiegeNode> SiegeNodeLookahead.findEffectiveNode(RegionFlowField
+  flowField, PathfinderMob mob, Predicate<SiegeNode.SiegeAction> lookAheadMatch)` — extracted,
+  byte-for-byte-behavior-preserving, from `AbstractSiegeConstructionGoal.findEffectiveNode`'s
+  current body; `AbstractSiegeProjectGoal` — `canUse()`, `start()`, `tick()`, `stop()`,
+  `canContinueToUse()` skeleton; abstract hook `matchesAction(SiegeNode.SiegeAction)`.
+
+`AbstractSiegeConstructionGoal.findEffectiveNode` and the new `AbstractSiegeProjectGoal` both need
+the identical "look at the node ahead, snap through a WALK hop to whatever's past it" lookup.
+Rather than duplicating it (flagged and rejected during this plan's pre-flight review — extraction
+was chosen over duplication despite touching the existing, heavily-hardened
+`AbstractSiegeConstructionGoal`), this task extracts it once into a small shared static helper both
+classes call. This is a pure extract-method refactor: `AbstractSiegeConstructionGoal`'s own
+observable behavior must not change, since `SmartBreachGoal`/`WidenStairsGoal`(-until-deleted) rely
+on it unmodified.
 
 This is a new file, not a GameTest-testable-in-isolation unit (goal plumbing needs a live
 `ServerLevel` + `ClanratEntity`), so its correctness is verified through Task 8's own GameTest
 updates (`SiegeConstructionActionsGameTests`, `PathingGoalRecalculationGameTests`) which drive it
-through `BuildFlowFieldGoal`. Writing it stand-alone first (this task) keeps Task 8's diff focused
-on `BuildFlowFieldGoal` itself.
+through `BuildFlowFieldGoal`, AND through re-running the existing GameTest suite (Step 3 below) to
+confirm the extraction didn't change `AbstractSiegeConstructionGoal`'s behavior for `SmartBreachGoal`.
 
-- [ ] **Step 1: Write the class**
+- [ ] **Step 1: Extract the shared helper**
+
+Create `src/main/java/org/ratden/skavenblight/ai/goal/clanrat/SiegeNodeLookahead.java`:
+
+```java
+package org.ratden.skavenblight.ai.goal.clanrat;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.PathfinderMob;
+import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
+
+import java.util.Optional;
+import java.util.function.Predicate;
+
+/**
+ * Shared "look at the node in front of us, and if it's a WALK step immediately before a node the
+ * caller cares about, snap to that node instead" lookup, used by both AbstractSiegeConstructionGoal
+ * (the per-block-claim goal family) and AbstractSiegeProjectGoal (the project-scoped family) - the
+ * same lookahead applies regardless of what a matching node's own claim/registration model is.
+ * Extracted from AbstractSiegeConstructionGoal.findEffectiveNode without behavior change; see that
+ * class's own historical Javadoc (MAX_TARGET_CLAIM_DISTANCE / LOOKAHEAD_SNAP_DISTANCE) for the full
+ * history of why this exact shape (1.5-block peek, WALK-hop-only, self-overlap guard) is correct.
+ */
+final class SiegeNodeLookahead {
+
+    private static final double LOOKAHEAD_SNAP_DISTANCE = 1.5D;
+
+    private SiegeNodeLookahead() {}
+
+    static Optional<SiegeNode> findEffectiveNode(RegionFlowField flowField, PathfinderMob mob,
+                                                  Predicate<SiegeNode.SiegeAction> lookAheadMatch) {
+        if (flowField == null || !(mob.level() instanceof ServerLevel serverLevel)) return Optional.empty();
+        BlockPos currentPos = mob.blockPosition();
+
+        SiegeNode node = flowField.getNextSiegeNode(serverLevel, currentPos);
+        if (node == null) {
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                node = flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
+                if (node != null) break;
+            }
+        }
+
+        if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
+            SiegeNode nextNode = flowField.getNextSiegeNode(serverLevel, node.pos());
+            if (nextNode != null && lookAheadMatch.test(nextNode.action())
+                    && !nextNode.pos().equals(currentPos)
+                    && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {
+                return Optional.of(nextNode);
+            }
+        }
+
+        if (node != null && node.action() != SiegeNode.SiegeAction.WALK && node.pos().equals(currentPos)) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(node);
+    }
+}
+```
+
+- [ ] **Step 2: Point `AbstractSiegeConstructionGoal.findEffectiveNode` at the shared helper**
+
+In `AbstractSiegeConstructionGoal.java`, replace the body of `findEffectiveNode` (currently ~35
+lines implementing this logic inline) with a one-line delegation:
+
+```java
+    protected final Optional<SiegeNode> findEffectiveNode(Predicate<SiegeNode.SiegeAction> lookAheadMatch) {
+        return SiegeNodeLookahead.findEffectiveNode(this.flowField, this.mob, lookAheadMatch);
+    }
+```
+
+Delete the now-unused `LOOKAHEAD_SNAP_DISTANCE` constant from `AbstractSiegeConstructionGoal` (it
+moved into `SiegeNodeLookahead`) — confirm nothing else in the file references it first (it's
+private and only used inside the method being replaced, so this is safe).
+
+- [ ] **Step 3: Run the existing GameTest suite to confirm the extraction is behavior-preserving**
+
+Run: `./gradlew runGameTestServer`
+Expected: identical pass/fail set to this plan's recorded baseline (32 tests, the same 5
+pre-existing failures — no new failures, since this step is a pure refactor of code
+`SmartBreachGoal`/`WidenStairsGoal` depend on and neither goal's behavior should change).
+
+- [ ] **Step 4: Write the `AbstractSiegeProjectGoal` class**
 
 ```java
 package org.ratden.skavenblight.ai.goal.clanrat;
@@ -1224,7 +1316,6 @@ import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 import java.util.EnumSet;
 import java.util.Optional;
-import java.util.function.Predicate;
 
 /**
  * Shared skeleton for project-scoped construction goals: a rat registers as a worker on the
@@ -1232,9 +1323,10 @@ import java.util.function.Predicate;
  * registered, and the project itself - not this goal - places blocks as accumulated work covers
  * their cost (see SiegeProject.tick()). Sibling to AbstractSiegeConstructionGoal, not a subclass:
  * the claim/fixed-duration-execute core those goals share is exactly what this class replaces, so
- * inheriting from it would mean overriding away most of what it provides. WidenStairsGoal,
- * SmartBreachGoal, SpiralSapperGoal, and DeployClimbableGoal are unaffected by this class - see
- * the design doc's Scope section for why the latter two stay on the old per-block claim.
+ * inheriting from it would mean overriding away most of what it provides. Shares only the
+ * lookahead lookup (SiegeNodeLookahead) with that class. WidenStairsGoal, SmartBreachGoal,
+ * SpiralSapperGoal, and DeployClimbableGoal are unaffected by this class - see the design doc's
+ * Scope section for why the latter two stay on the old per-block claim.
  */
 public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal {
 
@@ -1264,38 +1356,8 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
      * BUILD_STAIR/BUILD_BRIDGE/BUILD_PILLAR/BUILD_LANDING/BUILD_LADDER/BUILD_SPIRAL. */
     protected abstract boolean matchesAction(SiegeNode.SiegeAction action);
 
-    /**
-     * Shared "look at the node in front of us, and if it's a WALK step immediately before a node
-     * this goal cares about, snap to that node instead" lookup - identical logic to
-     * AbstractSiegeConstructionGoal.findEffectiveNode (duplicated rather than shared - see this
-     * class's own Javadoc on why it isn't a subclass of that one).
-     */
     private Optional<SiegeNode> findEffectiveNode() {
-        if (this.flowField == null || !(this.mob.level() instanceof ServerLevel serverLevel)) return Optional.empty();
-        BlockPos currentPos = this.mob.blockPosition();
-
-        SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
-        if (node == null) {
-            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.Plane.HORIZONTAL) {
-                node = this.flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
-                if (node != null) break;
-            }
-        }
-
-        if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
-            SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
-            if (nextNode != null && matchesAction(nextNode.action())
-                    && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), 1.5D)) {
-                return Optional.of(nextNode);
-            }
-        }
-
-        if (node != null && node.action() != SiegeNode.SiegeAction.WALK && node.pos().equals(currentPos)) {
-            return Optional.empty();
-        }
-
-        return Optional.ofNullable(node);
+        return SiegeNodeLookahead.findEffectiveNode(this.flowField, this.mob, this::matchesAction);
     }
 
     @Override
@@ -1370,17 +1432,17 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
 }
 ```
 
-- [ ] **Step 2: Compile**
+- [ ] **Step 5: Compile**
 
 Run: `./gradlew compileJava`
 Expected: BUILD SUCCESSFUL (this class has no concrete subclass yet, so nothing exercises it, but
 it must compile standalone).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeProjectGoal.java
-git commit -m "feat(ai): add AbstractSiegeProjectGoal, the project-scoped construction goal base"
+git add src/main/java/org/ratden/skavenblight/ai/goal/clanrat/SiegeNodeLookahead.java src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeConstructionGoal.java src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AbstractSiegeProjectGoal.java
+git commit -m "refactor(ai): extract shared node-lookahead helper; add AbstractSiegeProjectGoal"
 ```
 
 ---
