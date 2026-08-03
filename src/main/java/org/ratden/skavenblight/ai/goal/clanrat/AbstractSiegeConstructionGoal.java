@@ -57,22 +57,6 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
      */
     public static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
-    /**
-     * findEffectiveNode's own lookahead peek distance - deliberately separate from
-     * MAX_TARGET_CLAIM_DISTANCE above. The lookahead exists only to let a mob standing one
-     * ordinary WALK step short of real work skip the pointless extra tick of walking there
-     * first - i.e. it should never see further than a single legitimate adjacent
-     * interaction (orthogonal 1.0, diagonal ~1.41) would ever reach on its own. Reusing
-     * MAX_TARGET_CLAIM_DISTANCE (2.5, sized for tolerating crowd-shove during an ALREADY
-     * claimed build) here let the lookahead claim a target a full two flow-field hops away -
-     * confirmed via StaircaseSiegeGroupGameTests + a live debug-item observation: a rat
-     * still two cells back from a gap's ledge would build the far stair immediately, before
-     * ever walking onto the ledge itself, leaving the newly-built stair unreachable from
-     * where the rat actually stood. The lookahead was never meant to affect what gets
-     * targeted, only to smooth movement across a surface - this bounds it back to that.
-     */
-    private static final double LOOKAHEAD_SNAP_DISTANCE = 1.5D;
-
     protected AbstractSiegeConstructionGoal(PathfinderMob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
@@ -186,43 +170,12 @@ public abstract class AbstractSiegeConstructionGoal extends Goal implements Sieg
     /**
      * Shared "look at the node in front of us, and if it's a WALK step immediately before
      * a node this goal cares about, snap to that node instead" lookup used by build/breach
-     * goals that key off the flow field rather than scanning the world directly.
+     * goals that key off the flow field rather than scanning the world directly. Delegates to
+     * SiegeNodeLookahead, which also backs AbstractSiegeProjectGoal - see that class's own
+     * Javadoc for the full history of this lookup's exact shape.
      */
     protected final Optional<SiegeNode> findEffectiveNode(Predicate<SiegeNode.SiegeAction> lookAheadMatch) {
-        if (this.flowField == null || !(this.mob.level() instanceof ServerLevel serverLevel)) return Optional.empty();
-        BlockPos currentPos = this.mob.blockPosition();
-
-        SiegeNode node = this.flowField.getNextSiegeNode(serverLevel, currentPos);
-
-        if (node == null) {
-            for (Direction dir : Direction.Plane.HORIZONTAL) {
-                node = this.flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
-                if (node != null) break;
-            }
-        }
-
-        if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
-            SiegeNode nextNode = this.flowField.getNextSiegeNode(serverLevel, node.pos());
-            if (nextNode != null && lookAheadMatch.test(nextNode.action())
-                    && !nextNode.pos().equals(currentPos)
-                    && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {
-                return Optional.of(nextNode);
-            }
-        }
-
-        // A construction target that IS the mob's own current position can never be executed
-        // safely - a mob can't place a block into the exact space its body occupies without
-        // stepping aside first, which nothing here does. Defense in depth: the one known
-        // source of this (SiegeProjectManager's old self-referential anchor instruction) has
-        // been removed, but this guard means any future/unknown source degrades to
-        // "no instruction" (safe - the mob just waits) instead of silently entombing it.
-        // Confirmed via SiegeActivityLog in testing: exact mob-pos == target-pos matches on
-        // BUILD_STAIR executions.
-        if (node != null && node.action() != SiegeNode.SiegeAction.WALK && node.pos().equals(currentPos)) {
-            return Optional.empty();
-        }
-
-        return Optional.ofNullable(node);
+        return SiegeNodeLookahead.findEffectiveNode(this.flowField, this.mob, lookAheadMatch);
     }
 
     // =================================================================================
