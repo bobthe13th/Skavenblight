@@ -330,11 +330,26 @@ public class SiegeProject {
             if (this.accumulatedWork < cost) break;
 
             this.accumulatedWork -= cost;
-            // supportSolidAtClaim=true: unlike the old per-mob claim-then-execute window (a real
-            // multi-tick gap the flag exists to guard), this placement is synchronous with the
-            // "is it next in build order" check above - by definition every earlier step is
-            // already built, so support is verified fresh right now, not snapshotted earlier.
-            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, true);
+            // supportSolidAtClaim=false: this flag (see SiegeInteractionHandler.constructSiegeBlock's
+            // own doc, which explicitly says it's "never true for a macro SiegeProject's next unbuilt
+            // chain step") guards the old per-mob claim-then-execute race window - a real multi-tick
+            // gap between "support looked solid when claimed" and "support got mined out from under
+            // it before execute() ran". No such window exists here: nextUnbuiltInstruction() (just
+            // above) and this placement both run synchronously against the same `terrain` snapshot,
+            // so there is nothing stale to guard against. A hardcoded `true` here was wrong, not
+            // merely redundant: for a diagonal chain (the exact case this method exists to build),
+            // step N's OWN pos().below() is essentially never the previous step's position (a
+            // +1X/+1Y trace has chain[N].below() = (x+N, y+N-1, z) while chain[N-1] = (x+N-1, y+N-1,
+            // z) - different cells), so it is normal for pos().below() to still be open air right up
+            // to and through this exact placement. Passing `true` made
+            // SiegeInteractionHandler.constructSiegeBlock's own no-support guard fire on literally
+            // the first step of every such chain, forever refusing to place it - confirmed via
+            // testBuildFlowFieldGoalCompletesMultiStepMacroChainWithNoPriorSupport, which failed at
+            // step 0 until this was corrected. A placed stair/pillar/spiral is self-supporting for
+            // pathing purposes regardless of what ends up below it once built (see
+            // TerrainEvaluator.isWalkableTerrain's scaffold short-circuit) - there is no floating-step
+            // risk here for tick() to guard against in the first place.
+            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false);
 
             Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
             step = following.orElse(null);

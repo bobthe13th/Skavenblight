@@ -109,11 +109,25 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
         // further away than the contested one.
         return field.getInstructionMap().values().stream()
                 .filter(node -> node.action().isClimbDependent())
-                .map(SiegeNode::pos)
                 .distinct()
-                .filter(pos -> !field.isTargetClaimed(pos))
+                .filter(node -> isPositionAvailable(field, node))
+                .map(SiegeNode::pos)
                 .filter(pos -> level.getBlockState(pos).canBeReplaced())
                 .min(Comparator.comparingDouble(pos -> pos.distSqr(mobPos)));
+    }
+
+    /**
+     * BUILD_SPIRAL still goes through the old per-block claim table (SpiralSapperGoal is
+     * untouched by the project-scoped overhaul - see the design doc's Scope). BUILD_STAIR and
+     * BUILD_PILLAR moved to project-worker registration (Task 8) - "available" for those means
+     * their owning SiegeProject isn't at capacity, not "unclaimed" (that table no longer reflects
+     * them at all).
+     */
+    private boolean isPositionAvailable(RegionFlowField field, SiegeNode node) {
+        if (node.action() == SiegeNode.SiegeAction.BUILD_SPIRAL) {
+            return !field.isTargetClaimed(node.pos());
+        }
+        return field.findProjectFor(node.pos()).map(project -> !project.isAtCapacity()).orElse(true);
     }
 
     /**

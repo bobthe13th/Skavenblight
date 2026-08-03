@@ -6,12 +6,10 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.StairBlock;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.goal.clanrat.AwaitFormationGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import org.ratden.skavenblight.ai.pathing.*;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
@@ -21,7 +19,6 @@ import org.ratden.skavenblight.entity.custom.ClanratEntity;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
@@ -46,58 +43,6 @@ public class AwaitFormationGoalGameTests {
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         return new RegionFlowField(null, 0, state, projectManager, calculator, throttler);
-    }
-
-    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
-    public static void testPeekClaimedTargetEmptyWhenUnclaimed(GameTestHelper helper) {
-        BlockPos relativeStairPos = new BlockPos(4, 2, 4);
-        BlockPos relativeMobPos = relativeStairPos.relative(Direction.EAST);
-        helper.setBlock(relativeStairPos, Blocks.COBBLESTONE_STAIRS.defaultBlockState()
-                .setValue(StairBlock.FACING, Direction.NORTH));
-
-        BlockPos mobPos = helper.absolutePos(relativeMobPos);
-        RegionFlowField flowField = buildFlowField(mobPos);
-
-        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
-        helper.getLevel().addFreshEntity(mob);
-
-        WidenStairsGoal goal = new WidenStairsGoal(mob);
-        goal.setFlowField(flowField);
-
-        check(goal.peekClaimedTarget().isEmpty(),
-                "an unclaimed target should not be reported as claimed - a goal would just claim it normally");
-
-        helper.succeed();
-    }
-
-    @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
-    public static void testPeekClaimedTargetReturnsPositionWhenClaimedByAnotherMob(GameTestHelper helper) {
-        BlockPos relativeStairPos = new BlockPos(4, 2, 4);
-        BlockPos relativeMobPos = relativeStairPos.relative(Direction.EAST);
-        helper.setBlock(relativeStairPos, Blocks.COBBLESTONE_STAIRS.defaultBlockState()
-                .setValue(StairBlock.FACING, Direction.NORTH));
-
-        BlockPos mobPos = helper.absolutePos(relativeMobPos);
-        RegionFlowField flowField = buildFlowField(mobPos);
-
-        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
-        helper.getLevel().addFreshEntity(mob);
-
-        ClanratEntity otherMob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        otherMob.setPos(mobPos.getX() + 5.5, mobPos.getY(), mobPos.getZ() + 5.5);
-        helper.getLevel().addFreshEntity(otherMob);
-        flowField.tryClaimTarget(mobPos, otherMob);
-
-        WidenStairsGoal goal = new WidenStairsGoal(mob);
-        goal.setFlowField(flowField);
-
-        Optional<BlockPos> claimed = goal.peekClaimedTarget();
-        check(claimed.isPresent() && claimed.get().equals(mobPos),
-                "target claimed by a different, living mob should be reported - found: " + claimed);
-
-        helper.succeed();
     }
 
     @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
@@ -178,6 +123,26 @@ public class AwaitFormationGoalGameTests {
         helper.getLevel().addFreshEntity(claimant);
         flowField.tryClaimTarget(contestedTarget, claimant);
 
+        // AwaitFormationGoal.canUse() now (post project-scoped overhaul) asks whether the mob's
+        // own nearest BUILD_STAIR target's owning SiegeProject is AT CAPACITY, not whether the
+        // old per-block claim table has it claimed - that table no longer reflects BUILD_STAIR/
+        // BUILD_PILLAR at all (see AwaitFormationGoal.isPositionAvailable / Task 9). The
+        // tryClaimTarget call above is kept for the OLD table's own sake (still exercised by the
+        // freeTarget assertion below, via AwaitFormationGoal's own redirect-claim logic, which is
+        // unrelated to Task 9's fix) but no longer drives canUse() by itself - register a real,
+        // single-worker-capacity SiegeProject at contestedTarget and fill it so the capacity
+        // check this goal actually depends on trips.
+        SiegeProject contestedProject = new SiegeProject(
+                Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
+                List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
+                mobPos, contestedTarget, 500);
+        projectManager.addSharedConnectorProject(contestedProject);
+        contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
+                org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
+        check(contestedProject.isAtCapacity(),
+                "setup sanity: the contested project must actually be at capacity, or canUse()'s "
+                        + "at-capacity check below is testing nothing");
+
         AwaitFormationGoal goal = new AwaitFormationGoal(mob);
         goal.setFlowField(flowField);
 
@@ -243,6 +208,19 @@ public class AwaitFormationGoalGameTests {
             claimant.setPos(contestedTarget.getX() + 0.5, contestedTarget.getY(), contestedTarget.getZ() + 0.5);
             helper.getLevel().addFreshEntity(claimant);
             flowField.tryClaimTarget(contestedTarget, claimant);
+
+            // See testAwaitFormationGoalRedirectsToUnclaimedAlternative's identical comment:
+            // canUse() now depends on a real, at-capacity SiegeProject, not the old claim table.
+            SiegeProject contestedProject = new SiegeProject(
+                    Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
+                    List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
+                    mobPos, contestedTarget, 500);
+            projectManager.addSharedConnectorProject(contestedProject);
+            contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
+                    org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
+            check(contestedProject.isAtCapacity(),
+                    "setup sanity: the contested project must actually be at capacity, or canUse()'s "
+                            + "at-capacity check below is testing nothing");
 
             AwaitFormationGoal goal = new AwaitFormationGoal(mob);
             goal.setFlowField(flowField);
@@ -327,6 +305,19 @@ public class AwaitFormationGoalGameTests {
             claimant.setPos(contestedTarget.getX() + 0.5, contestedTarget.getY(), contestedTarget.getZ() + 0.5);
             helper.getLevel().addFreshEntity(claimant);
             flowField.tryClaimTarget(contestedTarget, claimant);
+
+            // See testAwaitFormationGoalRedirectsToUnclaimedAlternative's identical comment:
+            // canUse() now depends on a real, at-capacity SiegeProject, not the old claim table.
+            SiegeProject contestedProject = new SiegeProject(
+                    Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
+                    List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
+                    mobPos, contestedTarget, 500);
+            projectManager.addSharedConnectorProject(contestedProject);
+            contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
+                    org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
+            check(contestedProject.isAtCapacity(),
+                    "setup sanity: the contested project must actually be at capacity, or canUse()'s "
+                            + "at-capacity check below is testing nothing");
 
             AwaitFormationGoal goal = new AwaitFormationGoal(mob);
             goal.setFlowField(flowField);

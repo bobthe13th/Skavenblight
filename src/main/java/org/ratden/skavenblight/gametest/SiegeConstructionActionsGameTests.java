@@ -8,7 +8,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
 import org.ratden.skavenblight.ai.pathing.*;
@@ -17,6 +16,7 @@ import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.entity.ModEntities;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -63,13 +63,13 @@ public class SiegeConstructionActionsGameTests {
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
         helper.getLevel().addFreshEntity(mob);
 
-        runBuildLane(helper, mob, flowField, state, 2, SiegeNode.SiegeAction.MINE);
-        runBuildLane(helper, mob, flowField, state, 6, SiegeNode.SiegeAction.BUILD_STAIR);
-        runBuildLane(helper, mob, flowField, state, 10, SiegeNode.SiegeAction.BUILD_BRIDGE);
-        runBuildLane(helper, mob, flowField, state, 14, SiegeNode.SiegeAction.BUILD_PILLAR);
-        runBuildLane(helper, mob, flowField, state, 18, SiegeNode.SiegeAction.BUILD_LANDING);
-        runBuildLane(helper, mob, flowField, state, 22, SiegeNode.SiegeAction.BUILD_LADDER);
-        runBuildLane(helper, mob, flowField, state, 26, SiegeNode.SiegeAction.BUILD_SPIRAL);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 2, SiegeNode.SiegeAction.MINE);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 6, SiegeNode.SiegeAction.BUILD_STAIR);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 10, SiegeNode.SiegeAction.BUILD_BRIDGE);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 14, SiegeNode.SiegeAction.BUILD_PILLAR);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 18, SiegeNode.SiegeAction.BUILD_LANDING);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 22, SiegeNode.SiegeAction.BUILD_LADDER);
+        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 26, SiegeNode.SiegeAction.BUILD_SPIRAL);
 
         helper.succeed();
     }
@@ -83,7 +83,8 @@ public class SiegeConstructionActionsGameTests {
      * anchor (X=22), so no lane's setup or execution can touch a neighbor's.
      */
     private static void runBuildLane(GameTestHelper helper, ClanratEntity mob, RegionFlowField flowField,
-                                      FlowFieldState state, int mobX, SiegeNode.SiegeAction action) {
+                                      FlowFieldState state, SiegeProjectManager projectManagerRef, TerrainEvaluator evaluatorRef,
+                                      int mobX, SiegeNode.SiegeAction action) {
         BlockPos relativeMobPos = new BlockPos(mobX, 2, 4);
         BlockPos relativeTargetPos = relativeMobPos.relative(Direction.EAST);
 
@@ -119,21 +120,31 @@ public class SiegeConstructionActionsGameTests {
 
         state.updateInstructions(Map.of(mobPos, new SiegeNode(targetPos, action)));
 
-        AbstractSiegeConstructionGoal goal = (action == SiegeNode.SiegeAction.MINE)
-                ? new SmartBreachGoal(mob)
-                : new BuildFlowFieldGoal(mob);
-        goal.setFlowField(flowField);
+        if (action == SiegeNode.SiegeAction.MINE) {
+            SmartBreachGoal goal = new SmartBreachGoal(mob);
+            goal.setFlowField(flowField);
+            check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
+            goal.start();
+            for (int i = 0; i < 20; i++) goal.tick();
+        } else {
+            // Every real BUILD_* node belongs to a SiegeProject - only SiegeProjectManager ever
+            // writes them in production. A single-instruction project here mirrors that
+            // invariant instead of adding a "no owning project" fallback to production code for a
+            // case that can't happen for real.
+            List<SiegeNode> orderedSteps = List.of(new SiegeNode(targetPos, action));
+            Map<BlockPos, SiegeNode> instructions = Map.of(targetPos, new SiegeNode(mobPos, action));
+            SiegeProject project = new SiegeProject(instructions, orderedSteps, mobPos, targetPos, 500);
+            projectManagerRef.addSharedConnectorProject(project);
 
-        check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
-        goal.start();
-        // Tick EXACTLY the goal's own action duration, not duration-plus-margin: actionTicks is
-        // only reset by start(), so any tick() call past the duration re-enters the
-        // requiresClearSpace/execute branch and fires execute() a second time - harmless for some
-        // actions but not something to rely on. SmartBreachGoal's duration is 20 ticks,
-        // BuildFlowFieldGoal's is 15 - matching the exact-duration convention already established
-        // by this package's own multi-step BUILD_STAIR chain test.
-        int actionDurationTicks = (action == SiegeNode.SiegeAction.MINE) ? 20 : 15;
-        for (int i = 0; i < actionDurationTicks; i++) goal.tick();
+            BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
+            goal.setFlowField(flowField);
+
+            check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
+            goal.start();
+            for (int i = 0; i < 200 && project.nextUnbuiltInstruction(new org.ratden.skavenblight.ai.pathing.LiveTerrainAccess(helper.getLevel()), evaluatorRef).isPresent(); i++) {
+                goal.tick();
+            }
+        }
 
         switch (action) {
             case MINE -> helper.assertBlockState(relativeTargetPos, s -> s.isAir(),

@@ -12,7 +12,6 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import org.ratden.skavenblight.ai.pathing.*;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
@@ -125,94 +124,6 @@ public class PathingGoalRecalculationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
-    public static void testWidenStairsGoalMarksRegionDirty(GameTestHelper helper) {
-        // Same Y correction as above: the walkable layer (and therefore the existing stair the
-        // mob widens alongside, and the mob's own standing cell) is helper-Y=2, not Y=1.
-        BlockPos relativeStairPos = new BlockPos(4, 2, 4);
-        BlockPos relativeMobPos = relativeStairPos.relative(Direction.EAST);
-        helper.setBlock(relativeStairPos, Blocks.COBBLESTONE_STAIRS.defaultBlockState()
-                .setValue(StairBlock.FACING, Direction.NORTH));
-
-        BlockPos mobPos = helper.absolutePos(relativeMobPos);
-
-        RecordingRegionMap owner = new RecordingRegionMap();
-        // Empty instruction map: currentPos must NOT be on an active path for the reactive
-        // branch to trigger (see WidenStairsGoal.findTarget()).
-        FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
-        state.updateInstructions(Map.of());
-        TerrainEvaluator evaluator = new TerrainEvaluator();
-        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
-        CalculationThrottler throttler = new CalculationThrottler();
-        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
-        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
-
-        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
-        helper.getLevel().addFreshEntity(mob);
-
-        WidenStairsGoal goal = new WidenStairsGoal(mob);
-        goal.setFlowField(flowField);
-
-        check(goal.canUse(), "goal should trigger: off-path, replaceable, adjacent to an existing stair");
-        goal.start();
-        for (int i = 0; i < 16; i++) goal.tick();
-
-        helper.assertBlockState(relativeMobPos, s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                () -> "widened stair should have been placed at the mob's own cell");
-
-        check(!owner.changes.isEmpty(),
-                "region map was never told about the widened stair - onChainComplete's default never fired");
-
-        helper.succeed();
-    }
-
-    /**
-     * Reported production bug: a group of clanrats converges on a build site, places one
-     * staircase step, and the whole group then stops - the step ends up floating with nothing
-     * solid beneath it, so no mob can reach its top to continue the chain. This test simulates a
-     * different clanrat's concurrent MINE/headroom-clear action pulling the support out from
-     * under an already-claimed target mid-action.
-     */
-    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
-    public static void testWidenStairsGoalDoesNotPlaceFloatingStairWhenSupportRemovedMidAction(GameTestHelper helper) {
-        BlockPos relativeStairPos = new BlockPos(4, 2, 4);
-        BlockPos relativeMobPos = relativeStairPos.relative(Direction.EAST);
-        helper.setBlock(relativeStairPos, Blocks.COBBLESTONE_STAIRS.defaultBlockState()
-                .setValue(StairBlock.FACING, Direction.NORTH));
-
-        BlockPos mobPos = helper.absolutePos(relativeMobPos);
-
-        RecordingRegionMap owner = new RecordingRegionMap();
-        FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
-        state.updateInstructions(Map.of());
-        TerrainEvaluator evaluator = new TerrainEvaluator();
-        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
-        CalculationThrottler throttler = new CalculationThrottler();
-        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
-        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
-
-        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
-        helper.getLevel().addFreshEntity(mob);
-
-        WidenStairsGoal goal = new WidenStairsGoal(mob);
-        goal.setFlowField(flowField);
-
-        check(goal.canUse(), "goal should trigger: off-path, replaceable, adjacent to an existing stair");
-        goal.start();
-
-        helper.setBlock(relativeMobPos.below(), Blocks.AIR.defaultBlockState());
-
-        for (int i = 0; i < 16; i++) goal.tick();
-
-        helper.assertBlockState(relativeMobPos, s -> !s.is(Blocks.COBBLESTONE_STAIRS),
-                () -> "stair should NOT have been placed once its support was removed mid-action - "
-                        + "a placement here would float with nothing beneath it");
-
-        helper.succeed();
-    }
-
     /**
      * Regression coverage for the narrowing correction described in
      * docs/superpowers/plans/2026-07-29-siege-project-floating-stair-fix.md's "Correction"
@@ -234,21 +145,14 @@ public class PathingGoalRecalculationGameTests {
      */
     @GameTest(template = "pathing_test", timeoutTicks = 400, skyAccess = true)
     public static void testBuildFlowFieldGoalCompletesMultiStepMacroChainWithNoPriorSupport(GameTestHelper helper) {
-        // helper-Y=2 is the walkable layer above the template's solid floor (helper-Y=1) - see
-        // this file's class javadoc / PathingRegionGameTests' for the +1 helper-Y convention.
         BlockPos relativeStart = new BlockPos(4, 2, 4);
 
-        // Four diagonal steps climbing north-east, one Y per step - the same shape as the real
-        // bug's staircase (each step offset (+1 X, +1 Y, same Z) from the last).
         BlockPos[] relativeChain = new BlockPos[5];
         relativeChain[0] = relativeStart;
         for (int i = 1; i <= 4; i++) {
             relativeChain[i] = relativeStart.offset(i, i, 0);
         }
 
-        // Explicitly clear every step's own cell, its support cell, and 2 blocks of headroom -
-        // every one of these must be open air (never solid) for the whole test, proving the
-        // chain builds through a genuine void with no scaffolding ever appearing beneath any step.
         for (int i = 1; i <= 4; i++) {
             BlockPos step = relativeChain[i];
             helper.setBlock(step, Blocks.AIR.defaultBlockState());
@@ -262,19 +166,40 @@ public class PathingGoalRecalculationGameTests {
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(startPos, Set.of(new ChunkPos(startPos)));
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
+        // Two DIFFERENT keyings are needed here, not one reused map: FlowFieldState's own
+        // instruction map (consumed by goal-facing code via getNextSiegeNode/getInstruction) is
+        // keyed by STANDING position with a forward-pointing value ("from here, go build at
+        // pos()") - see AwaitFormationGoal's own inline comment on this exact convention.
+        // SiegeProject's own `instructions` field (consumed by SiegeProjectManager.
+        // findProjectContaining via getInstructions().containsKey(pos)) is keyed the OPPOSITE
+        // way in real production usage (see SiegeLineTracer.trace, whose output populates this
+        // field for every real project): keyed by the BUILD/target position itself, with a
+        // backward-pointing value. Reusing the standing-position-keyed map for both would leave
+        // the project's own instructions missing a key for chain[4] (only chain[0..3] are ever
+        // "from" positions), so AbstractSiegeProjectGoal.canUse()'s own
+        // flowField.findProjectFor(node.pos()) call - node.pos() is always the BUILD target -
+        // would fail to find this project for the final step.
+        Map<BlockPos, SiegeNode> stateInstructions = new HashMap<>();
+        Map<BlockPos, SiegeNode> projectInstructions = new HashMap<>();
+        List<SiegeNode> orderedSteps = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
             BlockPos from = helper.absolutePos(relativeChain[i]);
             BlockPos to = helper.absolutePos(relativeChain[i + 1]);
-            instructions.put(from, new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
+            stateInstructions.put(from, new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
+            projectInstructions.put(to, new SiegeNode(from, SiegeNode.SiegeAction.BUILD_STAIR));
+            orderedSteps.add(new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
         }
-        state.updateInstructions(instructions);
+        state.updateInstructions(stateInstructions);
 
         TerrainEvaluator evaluator = new TerrainEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        BlockPos chainEndPos = helper.absolutePos(relativeChain[4]);
+        SiegeProject project = new SiegeProject(projectInstructions, orderedSteps, startPos, chainEndPos, 500);
+        projectManager.addSharedConnectorProject(project);
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
         mob.setPos(startPos.getX() + 0.5, startPos.getY(), startPos.getZ() + 0.5);
@@ -289,26 +214,26 @@ public class PathingGoalRecalculationGameTests {
                     "step " + i + "'s support at " + toPos.below() + " must be air BEFORE building - "
                             + "this is the whole point of the test (no support ever appears)");
 
-            // A fresh goal instance per step: getPostActionCooldownTicks() (10 ticks) is set
-            // against the world's real game time after a successful build, but this test drives
-            // everything synchronously within one GameTest invocation with no real ticks elapsing
-            // between steps - reusing one goal instance would have its own just-set cooldown
-            // block canUse() on the very next step, an artifact of the test harness having no
-            // elapsed time, not a real gate on whether the step itself is legitimate.
+            // A fresh goal instance per step - mirrors the mob's real per-tick canUse()/start()
+            // re-evaluation as it moves; the underlying SiegeProject is the SAME instance across
+            // every step, matching how a real rat crossing a macro chain would.
             BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
             goal.setFlowField(flowField);
-
-            check(goal.canUse(), "step " + i + ": goal should propose BUILD_STAIR -> " + toPos.toShortString()
-                    + " even though its support is air - a legitimate unbuilt chain step must not be rejected");
-
+            check(goal.canUse(), "step " + i + ": goal should trigger for the next unbuilt chain step");
             goal.start();
-            for (int t = 0; t < 15; t++) goal.tick();
+
+            // Can't query project.nextUnbuiltInstruction()'s own PlannedStep result directly here
+            // (it's package-private to org.ratden.skavenblight.ai.pathing, not accessible from
+            // this gametest package) - tick until the real world shows the step done instead,
+            // which is exactly what the assertion right after this loop already checks for.
+            for (int t = 0; t < 60 && !helper.getLevel().getBlockState(toPos).is(Blocks.COBBLESTONE_STAIRS); t++) {
+                goal.tick();
+            }
+            goal.stop();
 
             int stepIndex = i;
             helper.assertBlockState(relativeChain[stepIndex + 1], s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                    () -> "step " + stepIndex + " should have been built at " + relativeChain[stepIndex + 1]
-                            + " despite having no support below it - the narrowed guard must not block a "
-                            + "legitimately-unbuilt macro chain step");
+                    () -> "step " + stepIndex + " should have placed a stair at " + relativeChain[stepIndex + 1]);
         }
 
         helper.succeed();
@@ -526,6 +451,134 @@ public class PathingGoalRecalculationGameTests {
                         + "call's own landing should not extend the search any further, but found instructions "
                         + "reaching a second landing 12 blocks out at " + secondChainedLanding + ": "
                         + instructionMap.keySet());
+
+        helper.succeed();
+    }
+
+    /**
+     * Goal-driven regression coverage for the auto-widening mechanism this file's own deletions
+     * leave uncovered at this level (the two deleted {@code WidenStairsGoal} tests exercised
+     * region-dirty-marking, not auto-widen - that property is already covered at the
+     * {@code SiegeProject} level by {@code SiegeProjectAutoWidenGameTests
+     * #testWidensWhenRegistrationRejectedAtCap}). This proves the SAME mechanism actually engages
+     * through a real {@link BuildFlowFieldGoal}, not just via direct
+     * {@code SiegeProject#tryRegisterWorker} calls: fill a BUILD_STAIR project's width-1 capacity
+     * with {@code Config.workersPerWidenStep} filler workers, then start the goal on one more rat
+     * and confirm the project widens.
+     *
+     * <p>The extra rat is positioned at {@code anchor}, not {@code target}: {@code
+     * SiegeNodeLookahead.findEffectiveNode}'s own self-reference guard rejects any resolved node
+     * whose {@code pos()} equals the mob's current position (see that class's javadoc), and a rat
+     * standing AT {@code target} would resolve (via the neighbor-fallback lookahead) to exactly
+     * that self-referential node, since the only instruction in this field's state is keyed at
+     * {@code anchor} pointing at {@code target}.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    public static void testBuildFlowFieldGoalRegistersOnAWidenedLane(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(4, 2, 4);
+        BlockPos relativeTarget = relativeAnchor.relative(Direction.EAST);
+        BlockPos anchor = helper.absolutePos(relativeAnchor);
+        BlockPos target = helper.absolutePos(relativeTarget);
+
+        RecordingRegionMap owner = new RecordingRegionMap();
+        FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
+        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR)));
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR));
+        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_STAIR));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        projectManager.addSharedConnectorProject(project);
+
+        LiveTerrainAccess live = new LiveTerrainAccess(helper.getLevel());
+        List<ClanratEntity> filler = new ArrayList<>();
+        for (int i = 0; i < org.ratden.skavenblight.Config.workersPerWidenStep; i++) {
+            ClanratEntity rat = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            rat.setPos(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(rat);
+            filler.add(rat);
+            project.tryRegisterWorker(rat, live, evaluator, org.ratden.skavenblight.Config.projectWorkRadius,
+                    org.ratden.skavenblight.Config.maxProjectWorkers, org.ratden.skavenblight.Config.workersPerWidenStep);
+        }
+
+        ClanratEntity extraRat = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        extraRat.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(extraRat);
+
+        BuildFlowFieldGoal goal = new BuildFlowFieldGoal(extraRat);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), "goal should trigger even though the project is nominally at its width-1 cap");
+        goal.start();
+
+        check(project.getWidth() > 1, "starting the goal on a full project should have triggered a widen");
+
+        helper.succeed();
+    }
+
+    /**
+     * Counterpart to {@link #testBuildFlowFieldGoalRegistersOnAWidenedLane}: BUILD_PILLAR is not
+     * laterally widenable (see {@code SiegeProject#effectiveCapFor} - only BUILD_STAIR/
+     * BUILD_BRIDGE scale with width), mirroring {@code SiegeProjectAutoWidenGameTests
+     * #testDoesNotWidenWhenActionIsNotLaterallyWidenable} but driven through a real goal instead
+     * of a direct {@code tryRegisterWorker} call. {@code canUse()} only checks that SOME project
+     * exists for the target (it doesn't know about capacity), so it's still expected to return
+     * true here - the rejection has to show up in {@code start()}'s registration itself, observed
+     * via {@code canContinueToUse()} returning false (no project ever got registered) and the
+     * project's own width staying at 1.
+     */
+    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    public static void testBuildFlowFieldGoalDoesNotRegisterOnAFullNonWidenableProject(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(4, 2, 4);
+        BlockPos relativeTarget = relativeAnchor.above();
+        BlockPos anchor = helper.absolutePos(relativeAnchor);
+        BlockPos target = helper.absolutePos(relativeTarget);
+
+        RecordingRegionMap owner = new RecordingRegionMap();
+        FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
+        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_PILLAR)));
+
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
+        CalculationThrottler throttler = new CalculationThrottler();
+        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
+        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
+
+        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_PILLAR));
+        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_PILLAR));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        projectManager.addSharedConnectorProject(project);
+
+        LiveTerrainAccess live = new LiveTerrainAccess(helper.getLevel());
+        List<ClanratEntity> filler = new ArrayList<>();
+        for (int i = 0; i < org.ratden.skavenblight.Config.maxProjectWorkers; i++) {
+            ClanratEntity rat = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            rat.setPos(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(rat);
+            filler.add(rat);
+            project.tryRegisterWorker(rat, live, evaluator, org.ratden.skavenblight.Config.projectWorkRadius,
+                    org.ratden.skavenblight.Config.maxProjectWorkers, org.ratden.skavenblight.Config.workersPerWidenStep);
+        }
+
+        ClanratEntity extraRat = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        extraRat.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(extraRat);
+
+        BuildFlowFieldGoal goal = new BuildFlowFieldGoal(extraRat);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), "goal should still propose the target - canUse() only checks a project exists, not capacity");
+        goal.start();
+
+        check(!goal.canContinueToUse(),
+                "registration should have been rejected (BUILD_PILLAR can't widen) - the goal should have no "
+                        + "registered project to continue with");
+        check(project.getWidth() == 1, "width must not have changed for a non-widenable action");
 
         helper.succeed();
     }

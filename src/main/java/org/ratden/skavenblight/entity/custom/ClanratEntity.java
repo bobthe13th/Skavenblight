@@ -11,6 +11,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.*;
 import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
+import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeProjectGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
@@ -18,7 +19,6 @@ import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.SpiralSapperGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.StrandedGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.WarpSapperGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.WidenStairsGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -84,7 +84,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
         this.goalSelector.addGoal(4, new SpiralSapperGoal(this));
         this.goalSelector.addGoal(5, new DeployClimbableGoal(this));
         this.goalSelector.addGoal(6, new BuildFlowFieldGoal(this));
-        this.goalSelector.addGoal(7, new WidenStairsGoal(this));
         // Sits below the construction goals (only runs once they've already declined - a rat
         // with real, unclaimed work of its own never reaches this) and above
         // FollowFlowFieldGoal (pre-empts plain "walk toward the crowd" specifically for the
@@ -302,18 +301,19 @@ public class ClanratEntity extends Monster implements GeoEntity {
     }
 
     /**
-     * The nearest target either BuildFlowFieldGoal or WidenStairsGoal on this rat would want to
-     * build, if that target exists but is already claimed by a different, living mob. Used by
-     * AwaitFormationGoal to decide whether "someone else already has the spot I'd otherwise go
-     * queue at." Deliberately excludes SmartBreachGoal - breach/MINE contention is out of scope
-     * for formation-waiting (see docs/superpowers/plans/2026-07-30-formation-waiting-goal.md's
+     * The nearest target BuildFlowFieldGoal on this rat would want to build, if that target
+     * exists but its owning SiegeProject is already at capacity. Used by AwaitFormationGoal to
+     * decide whether "someone else already has the spot I'd otherwise go queue at" - the
+     * project-scoped equivalent of the old per-block claim check (WidenStairsGoal is gone; its
+     * own crowd-relief role is now the auto-widening built into SiegeProject itself).
+     * Deliberately excludes SmartBreachGoal - breach/MINE contention is out of scope for
+     * formation-waiting (see docs/superpowers/plans/2026-07-30-formation-waiting-goal.md's
      * Global Constraints).
      */
     public Optional<BlockPos> peekAnyClaimedConstructionTarget() {
         for (WrappedGoal wrapped : this.goalSelector.getAvailableGoals()) {
-            if (wrapped.getGoal() instanceof AbstractSiegeConstructionGoal siegeGoal
-                    && (siegeGoal instanceof BuildFlowFieldGoal || siegeGoal instanceof WidenStairsGoal)) {
-                Optional<BlockPos> claimed = siegeGoal.peekClaimedTarget();
+            if (wrapped.getGoal() instanceof AbstractSiegeProjectGoal siegeGoal) {
+                Optional<BlockPos> claimed = siegeGoal.peekAtCapacityTarget();
                 if (claimed.isPresent()) return claimed;
             }
         }
