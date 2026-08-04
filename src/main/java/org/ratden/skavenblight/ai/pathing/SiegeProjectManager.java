@@ -304,14 +304,21 @@ public class SiegeProjectManager {
         // breakMutualCycles/pickCyclePositionToDrop cycle-breaker if it ever forms a cycle, rather
         // than reintroducing the over-broad block that caused the regression this replaces.
         Optional<SiegeProject> reenteredProject = activeProjectWithEntryPos(anchorPos);
+        java.util.function.Predicate<BlockPos> stopTrace = pos -> {
+            if (terrainEvaluator.isOutOfBounds(terrain, pos, state)) return true;
+            if (isNearExistingProject(pos, anchorPos)) return true;
+            return reenteredProject.isPresent() && lockedPositions.contains(pos)
+                    && reenteredProject.get().getInstructions().containsKey(pos);
+        };
+
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
-                        || (reenteredProject.isPresent() && lockedPositions.contains(pos)
-                                && reenteredProject.get().getInstructions().containsKey(pos)),
+                stopTrace,
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
-        if (!result.completed() || result.instructions().isEmpty()) return;
+        if (!result.completed() || result.instructions().isEmpty()) {
+            return;
+        }
 
         BlockPos endPos = result.endPos();
         int totalCost = result.totalCost();

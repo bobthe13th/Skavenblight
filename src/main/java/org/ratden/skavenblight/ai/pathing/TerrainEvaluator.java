@@ -204,16 +204,15 @@ public class TerrainEvaluator {
                     && isOpenOrWalkable(terrain, node.pos().above())
                     && isOpenOrWalkable(terrain, node.pos().above(2));
             case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
-            // WALK deliberately still falls to `default -> false` here - see
-            // TerrainEvaluatorTest.walkStepOntoOpenSupportedGroundReportsCompleted (disabled) and
-            // docs/superpowers/specs/2026-08-04-flow-field-locked-cycle-drops-build-stair-bug.md's
-            // "Follow-ups found during this investigation" section for why this isn't a safe fix
-            // to land here in isolation: isCompleted()/getRemainingInstructions() both call this
-            // method with the raw stored SiegeNode value, whose .pos() is the PREDECESSOR position
-            // (SiegeLineTracer's anchor-ward storage convention - see its own doc), not the real
-            // position the map key names. Making WALK terrain-sensitive here would evaluate
-            // walkability at the wrong cell for every caller that hasn't also been fixed to pass
-            // the real position - a second, independent bug that needs its own fix first.
+            // Now safe to make WALK terrain-sensitive: SiegeProject.isCompleted() and
+            // getRemainingInstructions() were fixed alongside this to call isActionCompleted with
+            // the real position (the instructions map's KEY), not the raw stored value (whose
+            // .pos() is the predecessor position per SiegeLineTracer's anchor-ward convention) -
+            // see docs/superpowers/specs/2026-08-04-flow-field-locked-cycle-drops-build-stair-bug.md.
+            case WALK -> isWalkableTerrain(terrain, node.pos());
+            // LEAP: like WALK, nextUnbuiltInstruction() skips it outright rather than asking
+            // isActionCompleted anything, so this branch is untested dead weight - left as `false`
+            // rather than guessed at.
             default -> false;
         };
     }

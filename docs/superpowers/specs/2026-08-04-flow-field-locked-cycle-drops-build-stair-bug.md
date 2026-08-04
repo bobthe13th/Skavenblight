@@ -1,12 +1,13 @@
 # Flow-Field Cycle-Breaker Drops a Locked, Needed BUILD_STAIR — Bug Report
 
-**Status:** FIXED (second iteration — the first landed fix caused a live regression and was
-reverted; see below). Root cause confirmed with a deterministic unit repro (not just the live
-log), and the original "two lines from the same anchor collide with each other" hypothesis below
-is **refuted** — see "Root cause, corrected" for what actually produces the cycle and why. Two
-secondary bugs surfaced during the investigation that are real but deliberately NOT fixed here
-(larger blast radius, no repro tying them to this symptom) — see "Follow-ups found during this
-investigation."
+**Status:** FIXED (third iteration). The first landed fix caused a live regression and was
+reverted; the second (narrower, self-collision-scoped) fix resolved the original cycle bug but two
+further live symptoms surfaced under it (a real gap skipping a block, then stairs reported placed
+"one block higher than expected" with the debug arrow missing at ground level). Chasing the second
+of those symptoms with refined diagnostic logging led to concrete field evidence for exactly the
+two follow-up bugs this doc had already identified and deliberately deferred — see "Third
+iteration: the eviction bug, confirmed and fixed" below. The "one block higher"/missing-arrow
+symptom itself is **not explained** by anything fixed here — see that section's own closing note.
 
 **Regression history, for the next session's benefit:** the first fix
 (`lockedPositions.contains(pos)`, unconditional) correctly stopped the cycle but was too broad —
@@ -182,54 +183,94 @@ between two *both-real, both-locked* macro-project candidates, not a real instru
 artifact. Whatever theory the fix works from should account for this non-test-environment
 reproduction, not just the GameTest-specific framing in the older plan doc.
 
-## Follow-ups found during this investigation (not fixed here — see each item for why)
+## Third iteration: the eviction bug, confirmed and fixed
 
-Two more bugs surfaced while confirming the root cause above. Both are real, but deliberately left
-unfixed in this change: fixing either changes lock/build-completion timing for every active
-`SiegeProject` in the mod, a materially larger blast radius than the confirmed cycle fix, and
-neither has a repro tying it directly to "0 stairs ever placed." A fresh session should tackle them
-as their own investigation, in this order (the second depends on understanding the first):
+After the second (narrower, self-collision-scoped) fix shipped, live testing surfaced two further
+symptoms under it: a real gap skipping a block partway up a staircase, and then — after refining the
+diagnostic logging to distinguish *why* each of the 14 fan directions per anchor failed (self-
+collision guard vs. out-of-bounds vs. near-existing-project vs. the tracer's own internal abort) —
+a report that stairs were being "placed one block higher than expected," with the debug arrow not
+showing at ground level.
 
-1. **A reactive `SiegeProject` can never be evicted via `isCompleted()`, because `WALK` never
-   reports complete.** `TerrainEvaluator.isActionCompleted`'s switch has cases for `MINE` and every
-   `BUILD_*` action but falls to `default -> false` for `WALK` (`TerrainEvaluator.java:186-208`
-   pre-fix). Every reactive macro-project trace ends its `instructions` map with a `WALK` entry at
-   its own `entryPos` — `SiegeLineTracer.trace` terminates exactly when `isWalkableTerrain` first
-   becomes true, and that final hop's own `determineMacroAction` call sees already-open, supported
-   ground and returns `WALK` (`TerrainEvaluator.java:100-146`). Since `SiegeProject.isCompleted()`
-   requires `instructions.values().stream().allMatch(...)`, and the `WALK` entry's own check can
-   never pass, **no reactive project with a normal (non-`BUILD_LANDING`) landing can ever be
-   reported complete**, even once every real build/mine step in it is finished in the world. That
-   leaves it in `SiegeProjectManager.activeProjects` forever (`injectActiveProjects`'
-   `removeIf(isCompleted)` never fires for it), continuously re-locking its cells and re-injecting
-   its stale instructions on every pass — plausibly a large part of why `lockedPositions` grows
-   large enough for the `MAX_ACTIVE_PROJECTS` eviction-by-age cap's own comment to note "803 active
-   projects in one test." It's also the precondition this bug's whole reproduction depends on: an
-   active project must persist indefinitely for its `entryPos` to keep getting re-processed as a
-   fresh anchor pass after pass. `TerrainEvaluatorTest.walkStepOntoOpenSupportedGroundReportsCompleted`
-   reproduces this in isolation (currently `@Disabled` — see its class doc for why fixing it isn't
-   safe to do in isolation, per item 2 below).
-2. **`isCompleted()`/`getRemainingInstructions()` check terrain at the wrong cell.** Both
-   (`SiegeProject.java:74` and `:93-101`) call `evaluator.isActionCompleted(terrain, node)` with the
-   raw `SiegeNode` *value* straight from the `instructions` map. But per `SiegeLineTracer`'s own
-   anchor-ward storage convention (see its doc on `TraceResult.instructions`), that value's `.pos()`
-   field is the *predecessor* position, not the real position the map *key* names and the action
-   applies to — confirmed live by the setup-sanity assertion in this investigation's own draft
-   `SiegeProjectManagerTest`, which failed once the WALK case (item 1) was patched, because
-   `isActionCompleted` was evaluating walkability at `upstream` (the value's `.pos()`) instead of
-   `anchor` (the real key). `SiegeProject.nextUnbuiltInstruction` avoids this correctly by
-   constructing `new SiegeNode(step.pos(), step.action())` from `PlannedStep`'s own real position
-   before calling `isActionCompleted` (`SiegeProject.java:191-201`) — `isCompleted`/
-   `getRemainingInstructions` need the same correction. Whether this makes completion detection
-   *looser* or *stricter* isn't yet known and depends on action type (a `BUILD_STAIR` chain's
-   predecessor cell is often exactly what the chain just built, which could make cells unlock
-   *before* they're actually built — the opposite failure mode from item 1) — this needs its own
-   investigation and its own test (a `SiegeProjectTest` fixture with a real multi-step chain and
-   terrain that's built at the predecessor cell but not the real one, verifying
-   `getRemainingInstructions` doesn't drop the still-unbuilt entry, is a good starting point).
-   **Fix item 1 only after this is resolved** — landing the `WALK` fix first, on top of the
-   predecessor-position bug, would make `isActionCompleted` terrain-sensitive at the wrong cell for
-   every caller.
+The refined diagnostic logging itself didn't localize either symptom directly (most of the 12-13
+non-succeeding directions per anchor failed for reasons other than the self-collision guard, and no
+single direction's failure obviously explained either symptom). But a full server log from an
+automated `staircase_siege_group:0` GameTest run, requested at that point, contained something more
+useful: the exact same macro-line — anchor `63,-60,199`, direction `(0,1,-1)`, completing at
+`63,-58,197` via an interior `MINE` step at `63,-59,198` — was independently rediscovered and logged
+as "completed" **5 separate times** over one ~2-minute test run (10:50:23 through 10:51:20). In the
+same window, `FlowFieldCalculator`'s cycle-breaker fired **4 times**, each time dropping the exact
+same position, `63,-59,198` (`MINE, locked=false`), for pointing at `63,-60,199` — the identical edge
+the line tracer kept rediscovering.
+
+That's not a coincidence of unrelated systems; it's the smoking gun for the two follow-up bugs this
+doc had already identified in the previous iteration and deliberately deferred (see the prior
+revision's "Follow-ups found during this investigation" section, superseded by this one):
+
+1. **`SiegeProject.isCompleted()`/`getRemainingInstructions()` checked terrain at the wrong
+   cell.** Both (`SiegeProject.java:74` and `:93-101`, pre-fix) called
+   `evaluator.isActionCompleted(terrain, node)` with the raw `SiegeNode` *value* straight from the
+   `instructions` map. Per `SiegeLineTracer`'s own anchor-ward storage convention, that value's
+   `.pos()` field is the *predecessor* position, not the real position the map *key* names and the
+   action applies to. `SiegeProject.nextUnbuiltInstruction` already avoided this correctly by
+   constructing `new SiegeNode(step.pos(), step.action())` from `PlannedStep`'s own real position —
+   `isCompleted`/`getRemainingInstructions` just never got the same correction.
+2. **`WALK` never reported complete**, because `TerrainEvaluator.isActionCompleted`'s switch had no
+   `WALK` case and fell to `default -> false`. Every reactive macro-project trace ends its
+   `instructions` map with a `WALK` entry at its own `entryPos` (`SiegeLineTracer.trace` terminates
+   exactly when `isWalkableTerrain` first becomes true), so no reactive project could ever be
+   reported fully complete via `isCompleted()`, even once every real build/mine step in it was
+   finished in the world.
+
+Combined, these two bugs meant `injectActiveProjects`' `activeProjects.removeIf(isCompleted)`
+(`SiegeProjectManager.java:130`) essentially never fired for a real reactive project. A project that
+had **genuinely finished building** stayed in `activeProjects` forever, so its `entryPos` kept
+getting unconditionally re-added to `calcQueue` every pass (`injectActiveProjects:139-145`), which
+the ordinary Dijkstra loop would pop and re-fire `evaluateMacroProjects` on — producing a brand-new,
+functionally-duplicate candidate `SiegeProject` for the exact same physical line, pass after pass,
+forever. `SiegeProjectManager.evaluateSingleLine`/`finalizeCandidateProjects` have no deduplication
+against an already-active project covering the same cells, so `activeProjects` could (and, per the
+live log, did) accumulate multiple redundant project objects for one line — exactly what produced
+the repeated "completed at" log lines and, independently, kept re-locking `63,-59,198` for the raw
+Dijkstra flood to separately, repeatedly collide with and cycle-break against.
+
+**The fix:** both `SiegeProject.isCompleted()` and `getRemainingInstructions()` now construct
+`new SiegeNode(entry.getKey(), entry.getValue().action())` before calling `isActionCompleted` — the
+same real-position correction `nextUnbuiltInstruction` already had. `TerrainEvaluator.isActionCompleted`
+gained a real `WALK` case (`isWalkableTerrain(terrain, node.pos())`), safe to land now that every
+caller checks the real position. Landing the `WALK` case without the position fix (or vice versa)
+would have been wrong in isolation — exactly why the previous iteration deferred both together.
+
+One correctness note the fix surfaced: `MINE` completion is asymmetric. Pre-fix, a `MINE` step's
+completion was evaluated at the predecessor cell — which is typically already open — so an
+*unmined* obstacle may have been silently reading as complete all along. Post-fix, it correctly
+reads the real (still-solid) cell, so a project can now legitimately stay active *longer* in some
+cases, not just get evicted sooner. This is correct behavior, not a regression — verified with one
+test per action class (`BUILD_STAIR` built, `MINE` not yet dug, `WALK` over walkable ground) rather
+than a single mixed-line test, specifically to catch this asymmetry.
+
+A second question the fix raises on its own: does an evicted project's cell stay reachable, or does
+eviction just trade permanent staleness for a transient "wilderness" gap? Once a project is evicted,
+`injectActiveProjects` stops writing its cells into `nextInstructionMap`/`lockedPositions`, and its
+`getExitPos()` fallback (the one documented escape hatch for "nothing else reaches this cell") is
+scoped to the *far* side of the crossing, not `entryPos` itself. Verified with a full
+`FlowFieldCalculator.calculateFully` pass (not just `injectActiveProjects` in isolation) over terrain
+where the project's own cell is *also* genuinely, independently walkable: the ordinary Dijkstra flood
+picks it up on its own merits after eviction, confirming the fix is safe in the realistic case where
+terrain around a completed crossing is actually connected. (A project whose `entryPos` sits in
+genuinely isolated terrain with no independent path to it is a separate, narrower risk this test
+doesn't cover — not encountered in any live evidence so far.)
+
+**What this does *not* explain:** the "one block higher than expected" placement and the missing
+debug arrow that prompted this investigation. Nothing found here points at a placement-position bug
+— `SiegeInteractionHandler.constructSiegeBlock` places `BUILD_STAIR` directly at `pos` with no
+vertical offset, and a field dump taken mid-test (`siege_dump_2026-08-04_10-50-37.txt`) showed clean,
+correctly-adjacent placements (`49,-57,201` then `50,-56,201`, each one step up and over from the
+last) for the one mob it captured. The eviction bug fixed here explains the *duplicate rediscovery*
+and the *repeated cycle-break at the same position* concretely, by direct log evidence — it does not
+explain the Y-offset/missing-arrow report, which remains open for the next session. If it recurs,
+get the exact coordinate of one wrongly-placed stair and what was expected, and check
+`Recent Siege Activity`/`Mapped Y-Coverage` in a fresh dump taken at the moment it happens.
 
 ## Other known follow-up items (secondary, already documented, not blocking)
 
@@ -264,15 +305,39 @@ only so a fresh session has the full picture in one place. Full detail in
   DIFFERENT active project (not the one `anchorPos` belongs to). Fails under the first (over-broad)
   fix, passes under the final (narrower) one — this is the test that would have caught the live
   regression before it shipped.
-- `TerrainEvaluatorTest.walkStepOntoOpenSupportedGroundReportsCompleted` — new unit test capturing
-  follow-up item 1, `@Disabled` pending item 2's own fix.
-- Live field verification: the same real-world repro that caught the regression (a single-rat
-  staircase test, `worktree-flow-field-locked-cycle-fix2` branch, logs from 2026-08-04 10:12) was
-  re-run with temporary diagnostic logging in `evaluateSingleLine` and confirmed the fix's own
-  scoping decision empirically (11/13 blocked directions self-collision, 2/13 cross-project) before
-  the narrower fix was written — see "Regression history" above. The diagnostic logging has been
-  removed from the final fix.
-- Full `./gradlew test` suite passes.
+- `TerrainEvaluatorTest.walkStepOntoOpenSupportedGroundReportsCompleted` — re-enabled (was
+  `@Disabled` pending the position fix); now passes.
+- `SiegeProjectTest.isCompletedTrueOnceBuildStairIsBuiltAtTheRealPositionDespiteAnUnbuiltPredecessor`,
+  `isCompletedFalseWhenMineStepsRealPositionIsStillSolidDespiteAnOpenPredecessor`,
+  `isCompletedTrueOnceWalkTargetIsWalkableDespiteASolidPredecessor` — three new tests, one per
+  action class, each setting up terrain where the old (predecessor) and new (real-position) checks
+  disagree, proving the fix changed which cell gets checked rather than coincidentally agreeing.
+  The `MINE` test specifically catches the asymmetry noted above (a not-yet-mined obstacle must
+  stay incomplete, not read as done via a stale predecessor check).
+- `SiegeProjectManagerTest.fullyBuiltProjectIsEvictedAndItsCellStaysReachableViaOrdinaryWalkPropagation`
+  — new integration test running a full `FlowFieldCalculator.calculateFully` pass: registers a
+  fully-satisfied one-cell project, confirms `isCompleted()` now evicts it (`getLockedPositions()`
+  no longer contains its cell right after the pass' initial injection), and confirms the cell still
+  gets a `WALK` instruction from the ordinary Dijkstra flood afterward — the eviction-reachability
+  question raised above.
+- `reEvaluatingAnActiveProjectsEntryPosMustNotOverwriteThatSameProjectsOwnLockedInteriorCell` (the
+  original cycle-bug repro) still passes: its `anchor` cell's `WALK` step now correctly reads as
+  already-complete (updated setup-sanity assertion), but the cell the guard actually protects
+  (`upstream`, still genuinely unbuilt) stays locked and unclobbered exactly as before — the fix
+  here didn't touch the self-collision guard's real behavior, only made completion detection
+  accurate.
+- Live field verification (second iteration): the same real-world repro that caught the regression
+  (a single-rat staircase test, `worktree-flow-field-locked-cycle-fix2` branch, logs from 2026-08-04
+  10:12) was re-run with temporary diagnostic logging in `evaluateSingleLine` and confirmed the
+  self-collision fix's own scoping decision empirically (11/13 blocked directions self-collision,
+  2/13 cross-project) before the narrower fix was written — see "Regression history" above.
+- Live field verification (third iteration): an automated `staircase_siege_group:0` GameTest run's
+  server log (2026-08-04 10:50-10:51) showed the same macro-line rediscovered 5 times and the same
+  cycle-break position dropped 4 times over ~2 minutes — the direct evidence for the eviction bug
+  above. All temporary diagnostic logging has since been removed.
+- Full `./gradlew test` suite passes (pathing package: `FlowFieldCalculatorTest` 13,
+  `SiegeProjectManagerTest` 4, `SiegeProjectTest` 15, `TerrainEvaluatorTest` 1 — all green, 0
+  skipped).
 - Not yet run: the automated `StaircaseSiegeGroupGameTests` (all 4 cases) — these are the
   end-to-end, real-world-shaped reproduction the original report pointed at, and are the natural
   next verification step for a fresh session (they require `runGameTestServer`, a much slower,
@@ -280,3 +345,6 @@ only so a fresh session has the full picture in one place. Full detail in
   for this fix). Given this bug already regressed once from a fix that passed unit tests but broke
   in the field, running these before considering the fix fully verified is a stronger
   recommendation now than it was the first time around.
+- Still open: the "one block higher"/missing-debug-arrow symptom that prompted this iteration — not
+  reproduced or explained by anything in this doc. Next session should treat it as its own fresh
+  investigation if it recurs.

@@ -1,15 +1,18 @@
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -104,10 +107,15 @@ class SiegeProjectManagerTest {
         // nextInstructionMap/calcQueue from the active project exactly as a real pass would.
         manager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
 
-        assertEquals(Map.of(upstream, furtherBack, anchor, upstream).keySet(), manager.getLockedPositions(),
-                "setup sanity: both of the project's own instruction keys must be locked before evaluateMacroProjects runs");
-        assertEquals(new SiegeNode(upstream, SiegeNode.SiegeAction.WALK), nextInstructionMap.get(anchor),
-                "setup sanity: the active project's own instruction must be seeded before evaluateMacroProjects runs");
+        // Only `upstream` is locked here, not `anchor`: getRemainingInstructions() now checks
+        // completion at each entry's REAL position (the predecessor-position fix), and anchor's own
+        // WALK step reads as already-satisfied (anchor is genuinely walkable terrain - a walkable
+        // scaffold block, per its own setup above), so it's correctly excluded as nothing-left-to-do.
+        // upstream's BUILD_PILLAR is still genuinely unbuilt (furtherBack, its real position, is
+        // untouched terrain), so it stays locked - that's the one this test's real guard behavior
+        // below depends on; anchor no longer being locked doesn't affect it.
+        assertEquals(Set.of(upstream), manager.getLockedPositions(),
+                "setup sanity: only upstream (still genuinely unbuilt) should be locked before evaluateMacroProjects runs");
 
         // The ordinary Dijkstra loop would pop `anchor` off calcQueue here and re-fire
         // evaluateMacroProjects on it exactly like this, once it's judged to have hit an obstacle.
@@ -204,5 +212,89 @@ class SiegeProjectManagerTest {
                         + "`anchor` here is not `unrelatedProject`'s entryPos, so this otherwise-identical "
                         + "line (same terrain, same direction, same endpoint as the passing baseline above) "
                         + "must still complete even though it crosses a cell locked by a different project");
+    }
+
+    // --- Eviction reachability (2026-08-04, SiegeProject.isCompleted()/getRemainingInstructions()
+    // predecessor-position fix): confirms fixing isCompleted() to actually detect completion - so
+    // a fully-built project is finally evicted from activeProjects instead of staying "active"
+    // forever - doesn't just trade permanent staleness for a transient reachability gap. Once
+    // evicted, injectActiveProjects stops writing this project's cells into nextInstructionMap/
+    // lockedPositions AND stops seeding its getExitPos() fallback (see that method's own doc - it's
+    // deliberately excluded from `instructions` for exactly this reason). A cell that's only ever
+    // reachable via the evicted project's own instructions, with no ordinary terrain-driven WALK
+    // path to it, would go dark the instant eviction started working - the same "no blue arrow"
+    // symptom this whole investigation began with, produced from the opposite direction. Runs a
+    // full FlowFieldCalculator pass (not just injectActiveProjects in isolation) over terrain where
+    // the project's own cell is ALSO genuinely, independently walkable - proving the fix is safe
+    // because the ordinary Dijkstra flood picks the cell up on its own merits, not because eviction
+    // was skipped.
+    @Test
+    void fullyBuiltProjectIsEvictedAndItsCellStaysReachableViaOrdinaryWalkPropagation() {
+        FakeTerrain terrain = new FakeTerrain();
+        BlockPos target = new BlockPos(0, 64, 0);
+        BlockPos entryPos = new BlockPos(0, 64, 2); // the (formerly locked) cell under test
+
+        // A flat, fully-supported 3x6 plaza (x: -1..1, z: -1..4) around the target-to-entryPos
+        // line.
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 4; z++) {
+                terrain.set(new BlockPos(x, 63, z), Blocks.STONE.defaultBlockState());
+            }
+        }
+
+        // A real, bounded territory - NOT Collections.emptySet() (which FlowFieldState.isOutOfBounds
+        // treats as unbounded "global scope"). Without a bound, every plaza-edge cell has fewer than
+        // 4 valid orthogonal steps (its neighbors past the plaza are unset/unsupported open air), so
+        // hitObstacle fires there and evaluateMacroProjects happily bridges (BUILD_BRIDGE needs no
+        // support) outward through that infinite open air, forever, one 32-block-capped line at a
+        // time chaining into the next - confirmed by hand: an unbounded version of this test pegged
+        // a CPU core for 10+ minutes without ever draining calcQueue. A real territory bound makes
+        // every cell past this margin genuinely out-of-bounds, so the flood terminates normally.
+        Set<ChunkPos> territoryChunks = new HashSet<>();
+        for (int x = -3; x <= 3; x++) {
+            for (int z = -3; z <= 6; z++) {
+                territoryChunks.add(new ChunkPos(new BlockPos(x, 64, z)));
+            }
+        }
+
+        SiegeProjectManager manager = new SiegeProjectManager(new TerrainEvaluator());
+        FlowFieldCalculator calculator = new FlowFieldCalculator(new TerrainEvaluator(), manager, new CalculationThrottler());
+        FlowFieldState state = new FlowFieldState(target, territoryChunks);
+
+        // A trivial one-cell "project" whose only instruction is a WALK entry at entryPos, exactly
+        // matching how a real reactive SiegeProject's trace always terminates (SiegeLineTracer.trace
+        // stops the instant isWalkableTerrain first becomes true) - already fully satisfied by the
+        // plaza terrain above, so isCompleted() must now report true once it checks the real
+        // position instead of the stored predecessor.
+        BlockPos predecessor = new BlockPos(0, 64, 1);
+        Map<BlockPos, SiegeNode> instructions = Map.of(entryPos, new SiegeNode(predecessor, SiegeNode.SiegeAction.WALK));
+        SiegeProject project = new SiegeProject(instructions,
+                List.of(new SiegeNode(entryPos, SiegeNode.SiegeAction.WALK)), predecessor, entryPos, 500);
+        manager.addSharedConnectorProject(project);
+
+        calculator.calculateFully(terrain, state, false);
+
+        // Not getActiveProjectCount() == 0: the bounded-but-still-open plaza's own edges
+        // legitimately trigger hitObstacle and produce unrelated incidental candidate projects of
+        // their own (BUILD_BRIDGE chains into open air within territoryChunks but outside the
+        // supported footprint) - real noise from this test's terrain shape, not a sign of what
+        // we're actually checking. getLockedPositions() instead reflects locking as it stood right
+        // after injectActiveProjects ran at the START of this pass (before any of that incidental
+        // discovery), which is exactly "was MY project's cell evicted" - and stays a valid check
+        // regardless of how many other projects get promoted later in the same pass, since any of
+        // THEM claiming entryPos as their own remaining WALK cell would hit the exact same
+        // real-terrain completion check and also read it as already-satisfied.
+        assertFalse(manager.getLockedPositions().contains(entryPos),
+                "setup sanity: isCompleted() must now evict this fully-built project - if this "
+                        + "fails, the reachability assertion below proves nothing (the project's own "
+                        + "getRemainingInstructions()/entry re-seeding could be masking a real gap)");
+
+        SiegeNode instructionAtFormerlyLockedCell = state.getInstructionMap().get(entryPos);
+        assertNotNull(instructionAtFormerlyLockedCell,
+                "entryPos must still be covered by the ordinary Dijkstra flood after eviction - "
+                        + "the project's own instruction AND its getExitPos() fallback both disappear "
+                        + "once evicted, so genuine terrain-driven reachability is the only thing left "
+                        + "that can cover this cell, or a rat here would fall back to wilderness");
+        assertEquals(SiegeNode.SiegeAction.WALK, instructionAtFormerlyLockedCell.action());
     }
 }

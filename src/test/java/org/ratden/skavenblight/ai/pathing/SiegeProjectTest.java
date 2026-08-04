@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -205,6 +206,64 @@ class SiegeProjectTest {
         assertTrue(next.isPresent(), "a cleared MINE step must not block the rest of the build order");
         assertEquals(buildPos, next.get().pos());
         assertEquals(SiegeNode.SiegeAction.BUILD_BRIDGE, next.get().action());
+    }
+
+    // The three tests below cover isCompleted()/getRemainingInstructions()'s predecessor-position
+    // fix directly: instructions is keyed by the REAL position (target) but its stored SiegeNode
+    // value carries the PREDECESSOR position (anchor) - see the class's own Javadoc on that
+    // anchor-ward convention. Before the fix, both methods called isActionCompleted with the raw
+    // stored value, so completion was evaluated at anchor (predecessor), never at target (the cell
+    // the action actually applies to). Each test sets terrain so the OLD (predecessor) and NEW
+    // (real) checks disagree, proving the fix actually changed which cell gets checked - not just
+    // that some cell happens to satisfy both.
+
+    @Test
+    void isCompletedTrueOnceBuildStairIsBuiltAtTheRealPositionDespiteAnUnbuiltPredecessor() {
+        BlockPos anchor = new BlockPos(0, 64, 0); // predecessor - left open air, unbuilt
+        BlockPos target = new BlockPos(1, 65, 0); // real position - the instructions map's KEY
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.BUILD_STAIR);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        terrain.set(target, Blocks.COBBLESTONE_STAIRS.defaultBlockState());
+
+        assertTrue(project.isCompleted(terrain, evaluator),
+                "the built stair sits at target (the map key) - checking anchor (the stale "
+                        + "predecessor-position bug) would wrongly see unbuilt open air and report incomplete");
+        assertTrue(project.getRemainingInstructions(terrain, evaluator).isEmpty());
+    }
+
+    @Test
+    void isCompletedFalseWhenMineStepsRealPositionIsStillSolidDespiteAnOpenPredecessor() {
+        BlockPos anchor = new BlockPos(0, 64, 0); // predecessor - left open air (already "cleared")
+        BlockPos target = new BlockPos(1, 64, 0); // real position - the obstacle that still needs mining
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.MINE);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        terrain.set(target, Blocks.STONE.defaultBlockState()); // not yet mined
+
+        assertFalse(project.isCompleted(terrain, evaluator),
+                "target is still solid rock - checking anchor instead (the predecessor-position "
+                        + "bug) would see it as already-open air and wrongly report this MINE step done");
+        assertEquals(Set.of(target), project.getRemainingInstructions(terrain, evaluator).keySet());
+    }
+
+    @Test
+    void isCompletedTrueOnceWalkTargetIsWalkableDespiteASolidPredecessor() {
+        BlockPos anchor = new BlockPos(0, 64, 0); // predecessor - solid, not itself walkable
+        BlockPos target = new BlockPos(1, 64, 0); // real position - open ground, genuinely walkable
+        SiegeProject project = freshSingleStepProject(anchor, target, SiegeNode.SiegeAction.WALK);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        terrain.set(anchor, Blocks.STONE.defaultBlockState());
+        terrain.set(target.below(), Blocks.STONE.defaultBlockState()); // support for target itself
+
+        assertTrue(evaluator.isWalkableTerrain(terrain, target),
+                "setup sanity: target must actually be walkable, or this test proves nothing");
+
+        assertTrue(project.isCompleted(terrain, evaluator),
+                "target is genuinely walkable - checking anchor instead (the predecessor-position "
+                        + "bug) would see solid rock and wrongly report this WALK step incomplete forever");
+        assertTrue(project.getRemainingInstructions(terrain, evaluator).isEmpty());
     }
 
     @Test
