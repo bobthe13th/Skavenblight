@@ -1,11 +1,25 @@
 # Flow-Field Cycle-Breaker Drops a Locked, Needed BUILD_STAIR — Bug Report
 
-**Status:** FIXED. Root cause confirmed with a deterministic unit repro (not just the live log),
-and the original "two lines from the same anchor collide with each other" hypothesis below is
-**refuted** — see "Root cause, corrected" for what actually produces the cycle and why. The fix
-landed in `SiegeProjectManager.evaluateSingleLine`. Two secondary bugs surfaced during the
-investigation that are real but deliberately NOT fixed here (larger blast radius, no repro tying
-them to this symptom) — see "Follow-ups found during this investigation."
+**Status:** FIXED (second iteration — the first landed fix caused a live regression and was
+reverted; see below). Root cause confirmed with a deterministic unit repro (not just the live
+log), and the original "two lines from the same anchor collide with each other" hypothesis below
+is **refuted** — see "Root cause, corrected" for what actually produces the cycle and why. Two
+secondary bugs surfaced during the investigation that are real but deliberately NOT fixed here
+(larger blast radius, no repro tying them to this symptom) — see "Follow-ups found during this
+investigation."
+
+**Regression history, for the next session's benefit:** the first fix
+(`lockedPositions.contains(pos)`, unconditional) correctly stopped the cycle but was too broad —
+it aborted a fresh macro-line trace the instant it touched ANY locked cell, including one owned by
+a completely unrelated, harmless active project. This broke real staircase construction almost
+immediately in live testing (reported: "clanrats being near the planned stairs aren't letting it
+auto-build"; a manually-placed first stair block wouldn't get a second one). The regressing commit
+was reverted, temporary diagnostic logging was added to `evaluateSingleLine`, and a fresh live
+repro settled the question with real data: **11 of 13 blocked directions were self-collision**
+(`owner.getEntryPos().equals(anchorPos)`), only 2 were genuine cross-project collisions. The fix
+below is scoped to self-collision only, verified against that same live repro's exact anchor
+(`45,-55,155`, direction `1,1,0`) and against new unit tests proving both the over-broad version's
+failure mode and the narrower version's fix. See "Verification" for the full trail.
 
 **Context:** found while manually testing
 `docs/superpowers/specs/2026-08-03-project-scoped-clanrat-construction-design.md`'s clanrat
@@ -127,15 +141,26 @@ the live log's "both locked" detail), calls `injectActiveProjects` then `evaluat
 (`upstream`'s correct instruction, pointing at `furtherBack`, got clobbered with one pointing back
 at `anchor`); after the fix it no longer does.
 
-**The fix** (`SiegeProjectManager.evaluateSingleLine`): add `lockedPositions.contains(pos)` to the
-trace's own stop-predicate, alongside the existing `isOutOfBounds`/`isNearExistingProject` checks.
-This makes a locked cell's instruction immutable within a pass — a fresh trace now aborts the
-instant it would step onto any position an active project already owns, the same "never touch a
-locked cell" invariant `TerrainEvaluator.getValidOrthogonalSteps` already enforces for the ordinary
-core-flood step (`lockedPositions.contains(neighbor)` at line 37). This is the fix the original
-report's own "Suggested starting points" pointed at ("the fix likely belongs in
-`SiegeProjectManager`... rather than in `FlowFieldCalculator`'s tie-break") — it was just aimed at
-the wrong collision (sibling-vs-sibling instead of fresh-trace-vs-stale-active-project).
+**The fix, corrected** (`SiegeProjectManager.evaluateSingleLine`): the first attempt added
+`lockedPositions.contains(pos)`, unconditionally, to the trace's own stop-predicate. That's too
+broad — it blocks a fresh trace from crossing ANY locked cell, including one belonging to a
+completely different, unrelated active project that poses no cycle risk at all (nothing about that
+crossing would create a mutual pointer). Live diagnostic logging against a real repro (see the
+"Regression history" note above) confirmed the actual bug is narrower: the risk is specifically a
+project's own `entryPos` being re-evaluated as a fresh anchor and one of its 14 fanned directions
+retracing into cells that SAME project already owns.
+
+The final fix scopes the guard accordingly: `evaluateSingleLine` first looks up
+`activeProjectWithEntryPos(anchorPos)` — the active project (if any) whose own `entryPos` equals
+the anchor currently being evaluated — and only refuses to trace onto a position if it's (a) still
+in `lockedPositions` (genuinely unbuilt, not just historically part of the project) AND (b) one of
+THAT SAME project's own instruction keys. A cell belonging to a *different* active project is no
+longer blocked at all; the existing `breakMutualCycles`/`pickCyclePositionToDrop` mechanism remains
+as a fallback for the rare cross-project case if it ever actually forms a cycle, which is a strictly
+better outcome than blocking real construction on every pass to prevent a collision that mostly
+doesn't happen. This is still the fix the original report's own "Suggested starting points" pointed
+at ("the fix likely belongs in `SiegeProjectManager`... rather than in `FlowFieldCalculator`'s
+tie-break") — it was just initially over-applied.
 
 ## Why this isn't the construction-overhaul's bug
 
@@ -229,12 +254,29 @@ only so a fresh session has the full picture in one place. Full detail in
 ## Verification
 
 - `SiegeProjectManagerTest.reEvaluatingAnActiveProjectsEntryPosMustNotOverwriteThatSameProjectsOwnLockedInteriorCell`
-  — new deterministic unit test, fails pre-fix (reproduces the exact overwrite), passes post-fix.
+  — new deterministic unit test, fails pre-fix (reproduces the exact overwrite), passes with both
+  the first (over-broad) and final (narrower) fix — this is the original cycle bug, and the final
+  fix still catches it.
+- `SiegeProjectManagerTest.freshTraceCompletesNormallyWhenNothingOnItsPathIsLocked` — baseline: a
+  3-step gap-crossing line with nothing locked on its path completes normally under both fixes.
+- `SiegeProjectManagerTest.freshTraceSucceedsWhenItCrossesAnUnrelatedActiveProjectsLockedCellWithoutFormingACycle`
+  — the regression repro: otherwise identical to the baseline above, but crosses a cell locked by a
+  DIFFERENT active project (not the one `anchorPos` belongs to). Fails under the first (over-broad)
+  fix, passes under the final (narrower) one — this is the test that would have caught the live
+  regression before it shipped.
 - `TerrainEvaluatorTest.walkStepOntoOpenSupportedGroundReportsCompleted` — new unit test capturing
   follow-up item 1, `@Disabled` pending item 2's own fix.
+- Live field verification: the same real-world repro that caught the regression (a single-rat
+  staircase test, `worktree-flow-field-locked-cycle-fix2` branch, logs from 2026-08-04 10:12) was
+  re-run with temporary diagnostic logging in `evaluateSingleLine` and confirmed the fix's own
+  scoping decision empirically (11/13 blocked directions self-collision, 2/13 cross-project) before
+  the narrower fix was written — see "Regression history" above. The diagnostic logging has been
+  removed from the final fix.
 - Full `./gradlew test` suite passes.
 - Not yet run: the automated `StaircaseSiegeGroupGameTests` (all 4 cases) — these are the
   end-to-end, real-world-shaped reproduction the original report pointed at, and are the natural
   next verification step for a fresh session (they require `runGameTestServer`, a much slower,
   long-running Minecraft server process, which is why the unit-level repro above was prioritized
-  for this fix).
+  for this fix). Given this bug already regressed once from a fix that passed unit tests but broke
+  in the field, running these before considering the fix fully verified is a stronger
+  recommendation now than it was the first time around.

@@ -39,6 +39,10 @@ import static org.junit.jupiter.api.Assertions.*;
 // impossible. The only writer of an "outward" (away-from-target) edge is a stale active project's
 // own re-injected instruction; the only way that collides into a cycle is a fresh trace
 // overwriting one of that same project's own already-locked cells.
+//
+// The fix itself is scoped to exactly that self-collision case (not "any locked cell") - see the
+// second block of tests below for why a broader "abort on any locked cell" guard was tried,
+// reverted, and replaced after a live regression.
 class SiegeProjectManagerTest {
 
     private static class FakeTerrain implements TerrainAccess {
@@ -118,15 +122,19 @@ class SiegeProjectManagerTest {
                         + "`upstream` - forms a direct mutual 2-cycle");
     }
 
-    // --- Regression found live post-fix (2026-08-04 field report): a clanrat standing next to a
-    // freshly-placed BUILD_STAIR block would no longer keep building on its own. Live logs showed
-    // no cycle-break WARN (the fix above is working) but also no "Successful Macro Line" for the
-    // long climbing direction that should have produced the rest of the staircase - only the short
-    // one-hop line succeeded. The lockedPositions check above aborts a trace unconditionally the
-    // instant it touches ANY locked cell, with no way to tell "this would form a cycle" apart from
-    // "this cell just happens to be near/on the path of a different, unrelated, harmless active
-    // project". The two tests below isolate that: identical terrain and direction, the only
-    // difference is whether an unrelated project has locked one cell on the path.
+    // --- Regression found live post-fix (2026-08-04 field report), now itself fixed: a clanrat
+    // standing next to a freshly-placed BUILD_STAIR block stopped building the rest of the
+    // staircase on its own. Live logs showed no cycle-break WARN (the self-collision fix above was
+    // working) but also no "Successful Macro Line" for the long climbing direction that should have
+    // produced the rest of the staircase - only the short one-hop line succeeded. A first version
+    // of the guard aborted a trace the instant it touched ANY locked cell, with no way to tell
+    // "this would form a cycle" apart from "this cell just happens to be on the path of a
+    // different, unrelated, harmless active project". Live diagnostic logging against the same
+    // repro confirmed the real bug is narrower (11 of 13 blocked directions were self-collision,
+    // only 2 were cross-project) - see evaluateSingleLine's own doc for the fix this settled on.
+    // The two tests below isolate the cross-project case: identical terrain and direction, the only
+    // difference is whether an UNRELATED project (not the one anchorPos belongs to) has locked one
+    // cell on the path - this must now succeed, matching the live fix.
 
     private static BlockPos horizontalGapPos(int x) { return new BlockPos(x, 50, 0); }
 
@@ -156,21 +164,29 @@ class SiegeProjectManagerTest {
     }
 
     @Test
-    void freshTraceAbortsEntirelyWhenItCrossesAnUnrelatedActiveProjectsLockedCellEvenWithoutFormingACycle() {
+    void freshTraceSucceedsWhenItCrossesAnUnrelatedActiveProjectsLockedCellWithoutFormingACycle() {
         FakeTerrain terrain = new FakeTerrain();
         SiegeProjectManager manager = buildManagerForHorizontalGapLine(terrain);
         BlockPos anchor = horizontalGapPos(0);
         BlockPos crossedCell = horizontalGapPos(2); // second step of the SAME line as the baseline above
 
-        // A completely unrelated active project happens to have locked `crossedCell` - its own
-        // instruction points at a distant position, nothing to do with this new line at all, and
-        // overwriting it here would NOT create any cycle (nothing in the new line points back to
-        // it or to anything it points to).
-        BlockPos distantAnchor = new BlockPos(2, 50, 500);
-        Map<BlockPos, SiegeNode> unrelatedInstructions =
-                Map.of(crossedCell, new SiegeNode(distantAnchor, SiegeNode.SiegeAction.BUILD_PILLAR));
+        // A completely unrelated active project happens to have `crossedCell` as one of its OWN
+        // interior (still-locked) cells - its own entryPos is `distantEntry`, well away from this
+        // line entirely, so this is a genuine cross-project crossing, not the anchor re-entering
+        // its own project. `crossedCell` is deliberately NOT this project's entryPos: injectActiveProjects
+        // only seeds nextCostMap at a project's entryPos, so making entryPos itself the crossed cell
+        // would trip the trace's own unrelated cost-ceiling guard (refusing to overwrite a cheaper
+        // existing path) - a real but different protection this test isn't about. Overwriting
+        // crossedCell here would not create any cycle either (nothing in the new line points back
+        // to it or to anything it points to).
+        BlockPos distantEntry = new BlockPos(2, 50, 500);
+        Map<BlockPos, SiegeNode> unrelatedInstructions = Map.of(
+                crossedCell, new SiegeNode(new BlockPos(2, 50, 501), SiegeNode.SiegeAction.BUILD_PILLAR),
+                distantEntry, new SiegeNode(crossedCell, SiegeNode.SiegeAction.WALK));
         SiegeProject unrelatedProject = new SiegeProject(unrelatedInstructions,
-                List.of(new SiegeNode(crossedCell, SiegeNode.SiegeAction.BUILD_PILLAR)), distantAnchor, crossedCell, 500);
+                List.of(new SiegeNode(crossedCell, SiegeNode.SiegeAction.BUILD_PILLAR),
+                        new SiegeNode(distantEntry, SiegeNode.SiegeAction.WALK)),
+                new BlockPos(2, 50, 501), distantEntry, 500);
         manager.addSharedConnectorProject(unrelatedProject);
 
         FlowFieldState state = new FlowFieldState(new BlockPos(0, 0, 0), Collections.emptySet());
@@ -183,12 +199,10 @@ class SiegeProjectManagerTest {
 
         manager.evaluateMacroProjects(terrain, anchor, state, 0, calcQueue, nextCostMap, nextInstructionMap);
 
-        assertNull(nextInstructionMap.get(horizontalGapPos(3)),
-                "REGRESSION: this line is otherwise identical to the passing baseline above (same "
-                        + "terrain, same direction, same endpoint) and overwriting crossedCell here would "
-                        + "not have formed a cycle - but because crossedCell happens to be locked by a "
-                        + "wholly unrelated project, the entire line now aborts and produces NOTHING, "
-                        + "exactly matching the live field report: a clanrat stands next to a real gap "
-                        + "that needs a staircase, and no construction ever gets planned for it at all");
+        assertNotNull(nextInstructionMap.get(horizontalGapPos(3)),
+                "the guard must only block a project re-entering its OWN cells via its own entryPos - "
+                        + "`anchor` here is not `unrelatedProject`'s entryPos, so this otherwise-identical "
+                        + "line (same terrain, same direction, same endpoint as the passing baseline above) "
+                        + "must still complete even though it crosses a cell locked by a different project");
     }
 }
