@@ -117,4 +117,78 @@ class SiegeProjectManagerTest {
                         + "combined with anchor's own still-standing instruction pointing at "
                         + "`upstream` - forms a direct mutual 2-cycle");
     }
+
+    // --- Regression found live post-fix (2026-08-04 field report): a clanrat standing next to a
+    // freshly-placed BUILD_STAIR block would no longer keep building on its own. Live logs showed
+    // no cycle-break WARN (the fix above is working) but also no "Successful Macro Line" for the
+    // long climbing direction that should have produced the rest of the staircase - only the short
+    // one-hop line succeeded. The lockedPositions check above aborts a trace unconditionally the
+    // instant it touches ANY locked cell, with no way to tell "this would form a cycle" apart from
+    // "this cell just happens to be near/on the path of a different, unrelated, harmless active
+    // project". The two tests below isolate that: identical terrain and direction, the only
+    // difference is whether an unrelated project has locked one cell on the path.
+
+    private static BlockPos horizontalGapPos(int x) { return new BlockPos(x, 50, 0); }
+
+    private SiegeProjectManager buildManagerForHorizontalGapLine(FakeTerrain terrain) {
+        // A 3-step horizontal gap: steps 1-2 are open air over open air (need BUILD_BRIDGE), step 3
+        // lands on solid ground (support at y=49) and completes the trace.
+        terrain.set(horizontalGapPos(3).below(), Blocks.STONE.defaultBlockState());
+        return new SiegeProjectManager(new TerrainEvaluator());
+    }
+
+    @Test
+    void freshTraceCompletesNormallyWhenNothingOnItsPathIsLocked() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = buildManagerForHorizontalGapLine(terrain);
+        BlockPos anchor = horizontalGapPos(0);
+
+        FlowFieldState state = new FlowFieldState(new BlockPos(0, 0, 0), Collections.emptySet());
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        manager.evaluateMacroProjects(terrain, anchor, state, 0, calcQueue, nextCostMap, nextInstructionMap);
+
+        assertNotNull(nextInstructionMap.get(horizontalGapPos(3)),
+                "setup sanity: with nothing locked on its path, this 3-step gap-crossing line must "
+                        + "complete normally - the regression test below only means something if this baseline works");
+    }
+
+    @Test
+    void freshTraceAbortsEntirelyWhenItCrossesAnUnrelatedActiveProjectsLockedCellEvenWithoutFormingACycle() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = buildManagerForHorizontalGapLine(terrain);
+        BlockPos anchor = horizontalGapPos(0);
+        BlockPos crossedCell = horizontalGapPos(2); // second step of the SAME line as the baseline above
+
+        // A completely unrelated active project happens to have locked `crossedCell` - its own
+        // instruction points at a distant position, nothing to do with this new line at all, and
+        // overwriting it here would NOT create any cycle (nothing in the new line points back to
+        // it or to anything it points to).
+        BlockPos distantAnchor = new BlockPos(2, 50, 500);
+        Map<BlockPos, SiegeNode> unrelatedInstructions =
+                Map.of(crossedCell, new SiegeNode(distantAnchor, SiegeNode.SiegeAction.BUILD_PILLAR));
+        SiegeProject unrelatedProject = new SiegeProject(unrelatedInstructions,
+                List.of(new SiegeNode(crossedCell, SiegeNode.SiegeAction.BUILD_PILLAR)), distantAnchor, crossedCell, 500);
+        manager.addSharedConnectorProject(unrelatedProject);
+
+        FlowFieldState state = new FlowFieldState(new BlockPos(0, 0, 0), Collections.emptySet());
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        manager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
+        assertTrue(manager.getLockedPositions().contains(crossedCell), "setup sanity: crossedCell must be locked");
+
+        manager.evaluateMacroProjects(terrain, anchor, state, 0, calcQueue, nextCostMap, nextInstructionMap);
+
+        assertNull(nextInstructionMap.get(horizontalGapPos(3)),
+                "REGRESSION: this line is otherwise identical to the passing baseline above (same "
+                        + "terrain, same direction, same endpoint) and overwriting crossedCell here would "
+                        + "not have formed a cycle - but because crossedCell happens to be locked by a "
+                        + "wholly unrelated project, the entire line now aborts and produces NOTHING, "
+                        + "exactly matching the live field report: a clanrat stands next to a real gap "
+                        + "that needs a staircase, and no construction ever gets planned for it at all");
+    }
 }

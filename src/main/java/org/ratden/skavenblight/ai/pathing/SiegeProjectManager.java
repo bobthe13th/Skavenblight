@@ -274,9 +274,33 @@ public class SiegeProjectManager {
         // the anchor's own untouched, still-locked instruction. getValidOrthogonalSteps already
         // enforces this same "never touch a locked cell" invariant for the ordinary core-flood
         // step; this closes the one path (the macro-line tracer) that didn't.
+        //
+        // TEMPORARY DIAGNOSTIC (2026-08-04): this blanket check is suspected of over-blocking -
+        // a live field report showed a legitimate staircase-climb line no longer even being
+        // attempted after this landed. Logging here to settle whether the blocking cell belongs
+        // to the SAME active project anchorPos re-enters (the confirmed self-collision this check
+        // was written for) or to a DIFFERENT, unrelated one (which a narrower fix should stop
+        // blocking) - see docs/superpowers/specs/2026-08-04-flow-field-locked-cycle-drops-build-stair-bug.md.
+        // Remove this block once that's confirmed.
+        java.util.function.Predicate<BlockPos> stopTrace = pos -> {
+            if (terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)) {
+                return true;
+            }
+            if (lockedPositions.contains(pos)) {
+                Optional<SiegeProject> owner = findProjectContaining(pos);
+                boolean sameProjectAsAnchor = owner.isPresent() && owner.get().getEntryPos().equals(anchorPos);
+                LOGGER.warn("[Pathfinder] TEMPORARY DIAGNOSTIC: fresh trace from anchor {} (direction {},{},{}) "
+                                + "blocked at locked position {} - blocking cell's owner entryPos={}, "
+                                + "sameProjectAsAnchor={}",
+                        anchorPos.toShortString(), dx, dy, dz, pos.toShortString(),
+                        owner.map(p -> p.getEntryPos().toShortString()).orElse("none"), sameProjectAsAnchor);
+                return true;
+            }
+            return false;
+        };
+
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
-                        || lockedPositions.contains(pos),
+                stopTrace,
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
