@@ -35,12 +35,6 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
 
     private SiegeProject registeredProject;
 
-    /** Same tolerance AbstractSiegeConstructionGoal uses for post-claim crowd-shove - this class
-     * doesn't claim a single block, but a rat drifting this far from the project's own next
-     * unbuilt step while registered is exactly the same "can't close the gap under its own MOVE
-     * flag being zeroed every tick" situation that constant is sized for. */
-    public static final double MAX_PROJECT_DRIFT_DISTANCE = 2.5D;
-
     protected AbstractSiegeProjectGoal(PathfinderMob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
@@ -59,42 +53,79 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
         return SiegeNodeLookahead.findEffectiveNode(this.flowField, this.mob, this::matchesAction);
     }
 
+    /**
+     * The project this goal would register on right now, if any - shared by canUse() and start() so
+     * they can never disagree about WHICH project the decision is about.
+     */
+    private Optional<SiegeProject> findCandidateProject() {
+        if (this.flowField == null) return Optional.empty();
+        return findEffectiveNode()
+                .filter(node -> matchesAction(node.action()))
+                .flatMap(node -> this.flowField.findProjectFor(node.pos()));
+    }
+
+    /**
+     * Deliberately mirrors {@code start()}'s real registration preconditions via
+     * {@link SiegeProject#canAcceptWorker} rather than just asking "does a project exist here?".
+     * Checking only for existence let this goal take the mob's {MOVE, LOOK} flags at priority 6
+     * while {@code start()}'s registration silently failed (out of {@code projectWorkRadius} of the
+     * project's next unbuilt step, or the project full and unable to widen), leaving {@code tick()}
+     * a no-op with {@code registeredProject == null} - and permanently starving
+     * {@code AwaitFormationGoal} (priority 8) and {@code FollowFlowFieldGoal} (priority 9), which
+     * can never get the MOVE flag back. See SiegeProject#canAcceptWorker for the full writeup.
+     */
     @Override
     public boolean canUse() {
         if (this.flowField == null || !this.mob.isAlive()) return false;
         // Mid-leap guard - see AbstractSiegeConstructionGoal.canUse()'s own identical check for
         // the full history of why this specific condition (not bare onGround()) is correct.
         if (!this.mob.onGround() && this.mob.getDeltaMovement().y > 1.0E-2) return false;
+        if (!(this.mob.level() instanceof ServerLevel serverLevel)) return false;
 
-        return findEffectiveNode()
-                .filter(node -> matchesAction(node.action()))
-                .flatMap(node -> this.flowField.findProjectFor(node.pos()))
-                .isPresent();
+        return findCandidateProject().filter(project -> canWorkOn(project, serverLevel)).isPresent();
+    }
+
+    private boolean canWorkOn(SiegeProject project, ServerLevel serverLevel) {
+        return project.canAcceptWorker(this.mob, new LiveTerrainAccess(serverLevel), this.terrainEvaluator,
+                Config.projectWorkRadius, Config.maxProjectWorkers, Config.workersPerWidenStep);
     }
 
     @Override
     public void start() {
-        findEffectiveNode()
-                .filter(node -> matchesAction(node.action()))
-                .flatMap(node -> this.flowField.findProjectFor(node.pos()))
-                .ifPresent(project -> {
-                    if (this.mob.level() instanceof ServerLevel serverLevel
-                            && project.tryRegisterWorker(this.mob, new LiveTerrainAccess(serverLevel), this.terrainEvaluator,
-                            Config.projectWorkRadius, Config.maxProjectWorkers, Config.workersPerWidenStep)) {
-                        this.registeredProject = project;
-                    }
-                });
+        findCandidateProject().ifPresent(project -> {
+            if (this.mob.level() instanceof ServerLevel serverLevel
+                    && project.tryRegisterWorker(this.mob, new LiveTerrainAccess(serverLevel), this.terrainEvaluator,
+                    Config.projectWorkRadius, Config.maxProjectWorkers, Config.workersPerWidenStep)) {
+                this.registeredProject = project;
+            }
+        });
     }
 
+    /**
+     * The exact same predicate canUse() uses, against the project actually registered - NOT a
+     * distance check against whatever node the flow field happens to hand back. Two reasons it has
+     * to be the same predicate:
+     *
+     * <p>(1) It has to measure the right thing. The registered project's own next unbuilt step is
+     * what this mob is contributing work toward; {@code findEffectiveNode()}'s node is only ever
+     * the next hop from the mob's own cell, which can be a completely different position (and can
+     * stop matching this goal's actions entirely) while the project itself is still perfectly
+     * workable.
+     *
+     * <p>(2) Any predicate STRICTER than canUse()'s would flip-flop forever. Registration is gated
+     * at {@code Config.projectWorkRadius} (3.5), so a continue-check with a tighter tolerance (the
+     * old {@code MAX_PROJECT_DRIFT_DISTANCE} = 2.5) would stop a rat that registered at 3.0 on the
+     * very next tick - and since canUse() would still be true, vanilla's GoalSelector immediately
+     * restarts it in the same tick, re-taking the MOVE flag at priority 6 and re-starving the same
+     * lower-priority goals Fix 3 exists to unblock. {@code canAcceptWorker} checks radius BEFORE
+     * its already-registered short-circuit precisely so it can serve both roles with one threshold.
+     */
     @Override
     public boolean canContinueToUse() {
         if (this.registeredProject == null || !this.mob.isAlive() || !(this.mob.level() instanceof ServerLevel serverLevel)) {
             return false;
         }
-        return findEffectiveNode()
-                .filter(node -> matchesAction(node.action()))
-                .map(node -> this.mob.blockPosition().closerThan(node.pos(), MAX_PROJECT_DRIFT_DISTANCE))
-                .orElse(false);
+        return canWorkOn(this.registeredProject, serverLevel);
     }
 
     @Override
