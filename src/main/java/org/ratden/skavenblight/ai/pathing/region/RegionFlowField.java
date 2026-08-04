@@ -69,7 +69,7 @@ public class RegionFlowField {
         return state.getInstruction(pos);
     }
 
-    // Only these three actions come from determineMacroAction's pure-vertical ("Vertical Shaft /
+    // Only these two actions come from determineMacroAction's pure-vertical ("Vertical Shaft /
     // Column", dx==0 && dz==0) branch, where the placed block sits UNDER the mob's new footing -
     // once built, the mob climbs one MORE block up to stand on top of it. Every other action
     // places (or clears) the block the mob steps directly ONTO/INTO: BUILD_STAIR and BUILD_BRIDGE
@@ -81,8 +81,13 @@ public class RegionFlowField {
     // it as completed, but then get pointed one block above the newly-built stair - a position
     // with no instruction of its own at all (only node.pos() itself, the stair's own position, is
     // one of the connector's keyed positions), stranding the mob after exactly one step.
+    // BUILD_SPIRAL was originally grouped here too, but SiegeInteractionHandler places the exact
+    // same half-height cobblestone_stairs geometry for BUILD_SPIRAL as it does for BUILD_STAIR
+    // (see its BUILD_SPIRAL case) - it belongs with BUILD_STAIR's "lands AT node.pos()" treatment,
+    // not BUILD_PILLAR/BUILD_LADDER's "stand on top of a full block" one. Confirmed wrong the same
+    // way BUILD_STAIR's old bug was: see RegionFlowFieldClimbResolutionGameTests.
     private static final Set<SiegeNode.SiegeAction> CLIMB_TO_ABOVE_ONCE_BUILT = Set.of(
-            SiegeNode.SiegeAction.BUILD_PILLAR, SiegeNode.SiegeAction.BUILD_SPIRAL, SiegeNode.SiegeAction.BUILD_LADDER);
+            SiegeNode.SiegeAction.BUILD_PILLAR, SiegeNode.SiegeAction.BUILD_LADDER);
 
     public SiegeNode getNextSiegeNode(ServerLevel level, BlockPos ratPos) {
         SiegeNode node = state.getInstruction(ratPos);
