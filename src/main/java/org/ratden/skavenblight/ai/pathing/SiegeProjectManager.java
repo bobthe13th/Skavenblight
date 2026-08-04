@@ -262,8 +262,21 @@ public class SiegeProjectManager {
                                     Map<BlockPos, Integer> nextCostMap,
                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
 
+        // lockedPositions.contains(pos) stops a fresh trace from ever stepping onto a cell an
+        // active project already owns. Without this, a locked entryPos re-surfacing as a fresh
+        // obstacle anchor (see injectActiveProjects - entryPos is unconditionally re-added to
+        // nextInstructionMap AND calcQueue every pass, so ordinary Dijkstra can pop it again and
+        // re-fire evaluateMacroProjects on it) could fan a brand-new line straight back through
+        // that SAME project's own still-locked interior cells: evaluateSingleLine's own
+        // nextInstructionMap.putAll below writes with no cost comparison (see
+        // FlowFieldCalculator's comment above breakMutualCycles), so it would silently flip that
+        // cell's instruction to point back at the anchor - producing a direct mutual cycle with
+        // the anchor's own untouched, still-locked instruction. getValidOrthogonalSteps already
+        // enforces this same "never touch a locked cell" invariant for the ordinary core-flood
+        // step; this closes the one path (the macro-line tracer) that didn't.
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos),
+                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
+                        || lockedPositions.contains(pos),
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
