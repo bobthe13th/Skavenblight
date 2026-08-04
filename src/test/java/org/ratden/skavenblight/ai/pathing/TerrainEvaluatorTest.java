@@ -56,4 +56,46 @@ class TerrainEvaluatorTest {
         assertTrue(completed,
                 "a WALK step requires no construction and must report completed once the ground is genuinely walkable");
     }
+
+    // isWalkableScaffold's blanket `state.is(Blocks.COBBLESTONE)` exemption treats plain
+    // cobblestone - the exact block BUILD_PILLAR/BUILD_BRIDGE/BUILD_LANDING place - as passable in
+    // every role it's checked in, including as a ceiling. Unlike StairBlock/SlabBlock/LadderBlock,
+    // a full cobblestone block has no partial collision shape - there is no configuration where a
+    // solid cobblestone block directly overhead leaves real headroom. Reported by the user as
+    // "the flow field ... thinks they can just jump through blocks": a completed pillar/bridge/
+    // landing segment crossing overhead was being reported as walkable underneath.
+    @Test
+    void plainCobblestoneDirectlyOverheadIsNotWalkable() {
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        BlockPos gapPos = new BlockPos(0, 64, 0);
+        terrain.set(gapPos.below(), Blocks.STONE.defaultBlockState());
+        terrain.set(gapPos.above(), Blocks.COBBLESTONE.defaultBlockState());
+
+        assertFalse(evaluator.isWalkableTerrain(terrain, gapPos),
+                "a solid cobblestone block directly overhead is a real ceiling - the cell beneath it " +
+                        "must not be reported walkable just because cobblestone happens to be exempted " +
+                        "as \"scaffold\" elsewhere");
+    }
+
+    // Companion to the cobblestone case above, for StairBlock specifically. Originally written
+    // expecting this to require distinguishing "a stair belonging to my own climbing structure"
+    // from "an unrelated stair crossing overhead" - a real GameTest (SpiralStaircaseClimbGameTests)
+    // settled that no such distinction is needed: a real ClanratEntity using vanilla navigation
+    // could not climb past a couple of levels of a 1-wide stacked-stair column even while every
+    // level of it read as walkable under the old (exempting) predicate, proving the exemption was
+    // never actually load-bearing for real mob movement in the first place.
+    @Test
+    void stairBlockDirectlyOverheadIsNotWalkable() {
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        FakeTerrain terrain = new FakeTerrain();
+        BlockPos gapPos = new BlockPos(10, 64, 10);
+        terrain.set(gapPos.below(), Blocks.COBBLESTONE_STAIRS.defaultBlockState());
+        terrain.set(gapPos.above(), Blocks.COBBLESTONE_STAIRS.defaultBlockState());
+
+        assertFalse(evaluator.isWalkableTerrain(terrain, gapPos),
+                "a stair block directly overhead is a real ceiling for headroom purposes - the gap " +
+                        "underneath it must not be reported walkable just because stairs are exempted " +
+                        "as standable \"scaffold\" underfoot");
+    }
 }

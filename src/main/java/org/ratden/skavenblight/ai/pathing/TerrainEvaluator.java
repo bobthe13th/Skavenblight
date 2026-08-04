@@ -241,7 +241,23 @@ public class TerrainEvaluator {
     private boolean isFitForWalking(TerrainAccess terrain, BlockPos pos) {
         BlockState foot = terrain.getBlockState(pos);
         BlockState head = terrain.getBlockState(pos.above());
-        return (!foot.blocksMotion() || isWalkableScaffold(foot)) && (!head.blocksMotion() || isWalkableScaffold(head));
+        // Head/ceiling clearance is checked WITHOUT isWalkableScaffold's exemptions, unlike foot -
+        // "can I stand on this" and "is there genuine open space above my head" are different
+        // questions, and every scaffold material (stair, slab, ladder, cobblestone) answers the
+        // first one but not the second: a real mob's head needs actual open air, not a block it
+        // merely happens to be able to climb. Reported by the user as "the flow field ... thinks
+        // they can just jump through blocks" - a solid block overhead (most concretely, a plain
+        // cobblestone BUILD_PILLAR/BUILD_BRIDGE segment, which has no partial collision shape at
+        // all) was being reported as clear headroom just because that same material is exempted
+        // when it's underfoot. Confirmed empirically: a real ClanratEntity using vanilla
+        // navigation cannot climb past a couple of levels of a stacked stair column even though
+        // this predicate (before this fix) called every level of it walkable - see
+        // SpiralStaircaseClimbGameTests.
+        return (!foot.blocksMotion() || isWalkableScaffold(foot)) && isOverheadClear(head);
+    }
+
+    private boolean isOverheadClear(BlockState state) {
+        return !state.blocksMotion();
     }
 
     private boolean isWalkableScaffold(BlockState state) {
