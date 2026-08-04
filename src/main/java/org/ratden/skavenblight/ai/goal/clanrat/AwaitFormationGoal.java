@@ -219,11 +219,21 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
 
     @Override
     public void stop() {
-        // Release-and-reclaim, not hand-off: BuildFlowFieldGoal/WidenStairsGoal's own canUse()
-        // treats ANY claim (including this mob's own) as "someone has it" - holding the claim
-        // across this goal transition would make the receiving goal refuse to pick it back up.
-        // Releasing here and letting it re-claim fresh via its own already-tested start() is the
-        // only safe pattern given that filter's semantics.
+        // Release-and-reclaim, not hand-off - still required, but for the per-block-claim goal
+        // family, NOT for BuildFlowFieldGoal. (This comment used to cite BuildFlowFieldGoal and
+        // WidenStairsGoal; WidenStairsGoal was deleted during the project-scoped overhaul, and
+        // BuildFlowFieldGoal - now an AbstractSiegeProjectGoal - doesn't consult the claim table at
+        // all any more, it registers as a worker on the owning SiegeProject instead.)
+        //
+        // What still makes this necessary: every remaining claim-table consumer treats ANY claim on
+        // a position as "someone has it", without comparing the claimant to the asking mob -
+        // AbstractSiegeConstructionGoal.canUse() (SmartBreachGoal), SpiralSapperGoal,
+        // WarpSapperGoal and DeployClimbableGoal all filter on a bare
+        // flowField.isTargetClaimed(pos), and so does this goal's OWN isPositionAvailable for
+        // BUILD_SPIRAL. Carrying this mob's claim across the goal transition would therefore make
+        // the receiving goal - including this same mob's own next goal - refuse to pick the target
+        // back up. Releasing here and letting whoever takes over re-claim fresh via its own
+        // already-tested start() is the only safe pattern given those filters' semantics.
         if (this.redirectTarget != null && this.flowField != null) {
             this.flowField.releaseTarget(this.redirectTarget);
         }

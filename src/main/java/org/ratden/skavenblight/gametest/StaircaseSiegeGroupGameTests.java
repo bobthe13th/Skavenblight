@@ -240,14 +240,20 @@ public class StaircaseSiegeGroupGameTests {
         BlockPos absoluteNexusPos = helper.absolutePos(relativeNexusPos);
 
         helper.succeedWhen(() -> {
+            // Counted BEFORE the arrival checks purely so the arrival failure message can carry it:
+            // "rat never arrived" on its own can't distinguish "no staircase was ever built" from
+            // "a staircase exists but the rats couldn't or wouldn't climb it", and those point at
+            // completely different subsystems. Both checks still have to pass either way.
+            int stairsFound = countStairsInZone(helper, relativeGroundEdge, relativeNexusPos);
+
             for (ClanratEntity rat : rats) {
                 check(rat.isAlive(), "every rat must still be alive - one dying mid-crossing is a failure, not a pass");
                 check(rat.blockPosition().closerThan(absoluteNexusPos, arrivalRadius),
                         rat + " has not yet arrived within " + arrivalRadius + " blocks of the nexus at "
-                                + absoluteNexusPos + " (currently at " + rat.blockPosition() + ")");
+                                + absoluteNexusPos + " (currently at " + rat.blockPosition() + "); "
+                                + stairsFound + " stair block(s) built in the crossing zone so far");
             }
 
-            int stairsFound = countStairsInZone(helper, relativeGroundEdge, relativeNexusPos);
             check(stairsFound >= minStairsExpected,
                     "expected at least " + minStairsExpected + " COBBLESTONE_STAIRS blocks between "
                             + relativeGroundEdge + " and " + relativeNexusPos + ", found " + stairsFound
