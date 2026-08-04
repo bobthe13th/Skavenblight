@@ -185,6 +185,19 @@ public class SiegeProjectManager {
         return Optional.empty();
     }
 
+    /**
+     * The already-active project (if any) whose own {@code entryPos} is exactly {@code pos} -
+     * used by {@link #evaluateSingleLine} to scope its self-collision guard to the ONE project
+     * being re-entered, not every active project in the region. See that method's own doc for why
+     * this distinction matters.
+     */
+    private Optional<SiegeProject> activeProjectWithEntryPos(BlockPos pos) {
+        for (SiegeProject project : activeProjects) {
+            if (project.getEntryPos().equals(pos)) return Optional.of(project);
+        }
+        return Optional.empty();
+    }
+
     public int getActiveProjectCount() { return this.activeProjects.size(); }
     /** Always 0 once a pass has finished - see the field doc on lastPassCandidatesGenerated/Survived for the real per-pass numbers. */
     public int getCandidateProjectCount() { return this.candidateProjects.size(); }
@@ -262,8 +275,39 @@ public class SiegeProjectManager {
                                     Map<BlockPos, Integer> nextCostMap,
                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
 
+        // A blanket "abort on ANY locked cell" was tried first and reverted: it also blocked a
+        // fresh line the instant it merely crossed a DIFFERENT, unrelated active project's cell -
+        // confirmed live (2026-08-04 field report: a clanrat's own staircase-climb line stopped
+        // being attempted at all) and reproduced in SiegeProjectManagerTest
+        // (freshTraceAbortsEntirelyWhenItCrossesAnUnrelatedActiveProjectsLockedCellEvenWithoutFormingACycle,
+        // now superseded). Temporary diagnostic logging against that same live repro (see
+        // docs/superpowers/specs/2026-08-04-flow-field-locked-cycle-drops-build-stair-bug.md)
+        // showed the actual bug is narrower: 11 of 13 blocked directions had
+        // `owner.getEntryPos().equals(anchorPos)` - i.e. the SAME project anchorPos itself belongs
+        // to, re-entered via its own entryPos (see injectActiveProjects - entryPos is
+        // unconditionally re-added to nextInstructionMap AND calcQueue every pass, so ordinary
+        // Dijkstra can pop it again and re-fire evaluateMacroProjects on it). Only 2 of 13 were a
+        // genuine different-project collision.
+        //
+        // So this guard is scoped to self-collision only: if anchorPos IS an active project's own
+        // entryPos, refuse to let a fresh line overwrite any position STILL locked as one of THAT
+        // SAME project's own cells (lockedPositions.contains(pos) - not the project's full static
+        // instructions set, so a cell that's since actually been built is no longer protected and
+        // a legitimate forward continuation can still walk across it). evaluateSingleLine's own
+        // nextInstructionMap.putAll below writes with no cost comparison (see FlowFieldCalculator's
+        // comment above breakMutualCycles), so without this a self-re-entering line would silently
+        // flip one of its own project's cells to point back at the anchor - a direct mutual cycle
+        // against the anchor's own untouched, still-locked instruction.
+        //
+        // This deliberately does NOT block crossing a DIFFERENT active project's cell (the 2-of-13
+        // case above) - that risk is accepted and falls back to FlowFieldCalculator's existing
+        // breakMutualCycles/pickCyclePositionToDrop cycle-breaker if it ever forms a cycle, rather
+        // than reintroducing the over-broad block that caused the regression this replaces.
+        Optional<SiegeProject> reenteredProject = activeProjectWithEntryPos(anchorPos);
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos),
+                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
+                        || (reenteredProject.isPresent() && lockedPositions.contains(pos)
+                                && reenteredProject.get().getInstructions().containsKey(pos)),
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
