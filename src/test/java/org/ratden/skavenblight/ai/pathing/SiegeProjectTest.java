@@ -55,24 +55,11 @@ class SiegeProjectTest {
         assertEquals(step.action(), planned.get(0).action());
     }
 
-    @Test
-    void countCompletableCountsWhileWorkCoversCost() {
-        assertEquals(0, SiegeProject.countCompletable(List.of(150, 150, 150), 100.0));
-        assertEquals(1, SiegeProject.countCompletable(List.of(150, 150, 150), 150.0));
-        assertEquals(2, SiegeProject.countCompletable(List.of(150, 150, 150), 300.0));
-        assertEquals(3, SiegeProject.countCompletable(List.of(150, 150, 150), 999.0));
-    }
-
-    @Test
-    void countCompletableStopsAtFirstUncoverableCost() {
-        // A large second cost blocks the third even though total work would otherwise cover it.
-        assertEquals(1, SiegeProject.countCompletable(List.of(100, 5000, 100), 250.0));
-    }
-
-    @Test
-    void countCompletableHandlesEmptyList() {
-        assertEquals(0, SiegeProject.countCompletable(List.of(), 999.0));
-    }
+    // The three countCompletable tests that used to sit here were deleted alongside the method
+    // itself: Task 4 reimplemented its stop-at-the-first-uncoverable-cost semantics inline in
+    // SiegeProject.tick()'s own placement loop and never called countCompletable, so it had zero
+    // production callers and these tests only ever exercised dead code. tick()'s loop is what
+    // covers that behavior now (see SiegeProjectTickGameTests).
 
     @Test
     void effectiveCapForBuildStairScalesWithWidth() {
@@ -180,6 +167,44 @@ class SiegeProjectTest {
         // Blocked on the still-solid MINE step (handled by the old per-rat SmartBreachGoal path,
         // untouched by this overhaul) - must not skip ahead to the BUILD_BRIDGE step past it.
         assertTrue(project.nextUnbuiltInstruction(terrain, evaluator).isEmpty());
+    }
+
+    /**
+     * Mirror case to {@link #nextUnbuiltInstructionStopsAtAnIncompleteMineStep}: once
+     * SmartBreachGoal has actually cleared the MINE step in the real world, the project must
+     * CONTINUE past it to the next real build step - not keep reporting empty forever. Before the
+     * whole-branch review's Fix 2, the MINE branch had no completion check at all, so any project
+     * whose build order contained a MINE step stalled permanently, even after the obstacle was
+     * gone. Asserts the specific step that comes after the mine, not merely "non-empty".
+     */
+    @Test
+    void nextUnbuiltInstructionContinuesPastAnAlreadyClearedMineStep() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        BlockPos minePos = new BlockPos(1, 64, 0);
+        BlockPos buildPos = new BlockPos(2, 64, 0);
+        List<SiegeNode> orderedSteps = List.of(
+                new SiegeNode(minePos, SiegeNode.SiegeAction.MINE),
+                new SiegeNode(buildPos, SiegeNode.SiegeAction.BUILD_BRIDGE)
+        );
+        Map<BlockPos, SiegeNode> instructions = Map.of(
+                minePos, new SiegeNode(anchor, SiegeNode.SiegeAction.MINE),
+                buildPos, new SiegeNode(minePos, SiegeNode.SiegeAction.BUILD_BRIDGE)
+        );
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, buildPos, 500);
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        // minePos deliberately left unset: FakeTerrain reports air for it AND for its head/ceiling
+        // cells, which is exactly what TerrainEvaluator.isActionCompleted requires of a completed
+        // MINE (see its own MINE case - all three cells must be open).
+        FakeTerrain terrain = new FakeTerrain();
+
+        assertTrue(evaluator.isActionCompleted(terrain, new SiegeNode(minePos, SiegeNode.SiegeAction.MINE)),
+                "setup sanity: the MINE step must read as already cleared, or this test proves nothing");
+
+        java.util.Optional<SiegeProject.PlannedStep> next = project.nextUnbuiltInstruction(terrain, evaluator);
+
+        assertTrue(next.isPresent(), "a cleared MINE step must not block the rest of the build order");
+        assertEquals(buildPos, next.get().pos());
+        assertEquals(SiegeNode.SiegeAction.BUILD_BRIDGE, next.get().action());
     }
 
     @Test

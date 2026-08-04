@@ -50,6 +50,10 @@ public class SiegeProject {
     private int cachedEffectiveCap = Integer.MAX_VALUE;
     private int width = 1;
     private double accumulatedWork = 0.0;
+    // See tick()'s own doc for why this exists. -1 can never collide with a real
+    // ServerLevel.getGameTime() (which is >= 0 for the entire life of any level), so the very
+    // first tick() call of a project's life always passes the guard.
+    private long lastTickedGameTime = -1L;
 
     public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
                          BlockPos entryPos, int expectedEntryCost) {
@@ -164,20 +168,6 @@ public class SiegeProject {
         return Direction.NORTH; // pure-vertical step (BUILD_PILLAR/SPIRAL/LADDER) - facing unused for these.
     }
 
-    /** How many of `orderedRemainingCosts` (in build order) `availableWork` fully covers, stopping
-     * at the first one it can't - a large mid-sequence cost blocks everything after it even if the
-     * total would otherwise suffice, matching "build in order" semantics. */
-    static int countCompletable(List<Integer> orderedRemainingCosts, double availableWork) {
-        int completed = 0;
-        double remaining = availableWork;
-        for (int cost : orderedRemainingCosts) {
-            if (remaining < cost) break;
-            remaining -= cost;
-            completed++;
-        }
-        return completed;
-    }
-
     /** BUILD_STAIR/BUILD_BRIDGE scale their worker cap with `width` (see the auto-widening design);
      * every other action type gets a flat cap regardless of `width`. */
     static int effectiveCapFor(SiegeNode.SiegeAction action, int width, int maxProjectWorkers, int workersPerWidenStep) {
@@ -186,14 +176,25 @@ public class SiegeProject {
     }
 
     /** The first not-yet-built step in build order, or empty if the project is fully built OR
-     * currently blocked on an incomplete MINE step (handled entirely by the old per-rat
+     * currently blocked on an INCOMPLETE MINE step (handled entirely by the old per-rat
      * SmartBreachGoal/flowField.tryClaimTarget path - out of scope for this mechanism; skipping
      * PAST an unmined obstacle to a build step beyond it would be physically wrong, since that
-     * later step may depend on the obstacle already being cleared). */
+     * later step may depend on the obstacle already being cleared).
+     *
+     * <p>The completion check on the MINE branch is load-bearing, not defensive: without it this
+     * method aborted on the mere PRESENCE of a MINE step anywhere in the build order, so once a
+     * project's traced line contained one, every build step after it was unreachable forever -
+     * even after SmartBreachGoal had actually cleared the obstacle in the real world. That is a
+     * permanent project stall, and it silently contradicted this method's own documented contract
+     * ("blocked on an incomplete MINE step"). Found by the whole-branch review; see
+     * nextUnbuiltInstructionContinuesPastAnAlreadyClearedMineStep for the mirror-case test. */
     public Optional<PlannedStep> nextUnbuiltInstruction(TerrainAccess terrain, TerrainEvaluator evaluator) {
         for (PlannedStep step : buildOrder) {
             if (step.action() == SiegeNode.SiegeAction.WALK || step.action() == SiegeNode.SiegeAction.LEAP) continue;
-            if (step.action() == SiegeNode.SiegeAction.MINE) return Optional.empty();
+            if (step.action() == SiegeNode.SiegeAction.MINE) {
+                if (!evaluator.isActionCompleted(terrain, new SiegeNode(step.pos(), step.action()))) return Optional.empty();
+                continue;
+            }
             if (!evaluator.isActionCompleted(terrain, new SiegeNode(step.pos(), step.action()))) return Optional.of(step);
         }
         return Optional.empty();
@@ -226,6 +227,50 @@ public class SiegeProject {
         return true;
     }
 
+    /**
+     * Non-mutating "would {@link #tryRegisterWorker} succeed for {@code mob} right now?" - the same
+     * radius and capacity preconditions, in the same order, with nothing written and no widen
+     * attempted. Exists for AbstractSiegeProjectGoal's canUse()/canContinueToUse(), which need to
+     * decide whether to take (and keep) the mob's MOVE flag BEFORE start() gets a chance to try the
+     * real registration. Without it, canUse() only checked "does some project exist here", so a rat
+     * whose registration then failed in start() sat holding {MOVE, LOOK} at priority 6 doing
+     * literally nothing (tick() returns immediately with no registered project), permanently
+     * starving AwaitFormationGoal (8) and FollowFlowFieldGoal (9) of the MOVE flag they need - and
+     * making AwaitFormationGoal's own at-capacity mechanism unreachable whenever ANY project
+     * existed near a rat. Found by the whole-branch review.
+     *
+     * <p>Radius is checked BEFORE the already-registered short-circuit, exactly as
+     * tryRegisterWorker does, so this doubles as the "has this worker drifted too far to still be
+     * working here?" test canContinueToUse needs.
+     *
+     * <p>Deliberately answers TRUE for an over-cap project that is still eligible to widen, rather
+     * than running the widen itself: {@link #tryWiden} runs a real {@link SiegeLineTracer} trace,
+     * and canUse() is called for every rat on every tick, so attempting it here would turn a
+     * demand-bounded retry into a per-rat-per-tick trace. The residual imprecision is narrow and
+     * one-directional - a widen-eligible project whose trace actually fails (terrain won't take
+     * another lane) still reports true here and then fails in start(), the one case where the old
+     * MOVE-holding behavior survives. Every other rejection reason is now caught before the goal
+     * ever starts.
+     */
+    public boolean canAcceptWorker(Mob mob, TerrainAccess terrain, TerrainEvaluator evaluator, double workRadius,
+                                    int maxProjectWorkers, int workersPerWidenStep) {
+        Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
+        if (next.isEmpty()) return false;
+        PlannedStep step = next.get();
+        if (!mob.blockPosition().closerThan(step.pos(), workRadius)) return false;
+        if (workers.contains(mob)) return true;
+        if (workers.size() < effectiveCapFor(step.action(), this.width, maxProjectWorkers, workersPerWidenStep)) return true;
+        return isWidenEligible(step.action());
+    }
+
+    /** tryWiden's own eligibility preamble, extracted so {@link #canAcceptWorker} can ask the same
+     * question without tracing anything. Says nothing about whether the trace itself would
+     * succeed - only whether attempting it is allowed at all. */
+    private boolean isWidenEligible(SiegeNode.SiegeAction currentAction) {
+        boolean widenable = currentAction == SiegeNode.SiegeAction.BUILD_STAIR || currentAction == SiegeNode.SiegeAction.BUILD_BRIDGE;
+        return widenable && this.width < org.ratden.skavenblight.Config.maxProjectWidth && !buildOrder.isEmpty();
+    }
+
     /** Attempts to trace one more parallel lane, alternating sides on successive widens, when a
      * BUILD_STAIR/BUILD_BRIDGE project is at capacity - see the design doc's Auto-widening
      * section. No-ops (returns false) for non-widenable actions, once maxProjectWidth is reached,
@@ -233,8 +278,7 @@ public class SiegeProject {
      * - a failed attempt leaves width unchanged and is simply retried on the next rejected
      * registration, never per-tick, bounding retry frequency to actual demand. */
     private boolean tryWiden(SiegeNode.SiegeAction currentAction, TerrainAccess terrain, TerrainEvaluator evaluator) {
-        boolean widenable = currentAction == SiegeNode.SiegeAction.BUILD_STAIR || currentAction == SiegeNode.SiegeAction.BUILD_BRIDGE;
-        if (!widenable || this.width >= org.ratden.skavenblight.Config.maxProjectWidth || buildOrder.isEmpty()) return false;
+        if (!isWidenEligible(currentAction)) return false;
 
         PlannedStep first = buildOrder.get(0);
         // Perpendicular horizontal axis to the trace direction, alternating sides per widen: even
@@ -293,6 +337,17 @@ public class SiegeProject {
         return buildOrder.stream().map(PlannedStep::pos).toList();
     }
 
+    /** Test-support accessor (same role as {@link #getBuildOrderPositions}): build progress banked
+     * but not yet spent on a placement. Exists so a test can assert tick()'s accumulation SCALING
+     * directly - N workers must add {@code min(N, cap) * workPerRatPerTick} per game tick, however
+     * many separate goal instances call tick() within that tick (see tick()'s own idempotency doc)
+     * - rather than inferring it from how many blocks happened to get placed. Public rather than
+     * package-private because the GameTests that need it live in
+     * org.ratden.skavenblight.gametest, not this package. */
+    public double getAccumulatedWork() {
+        return this.accumulatedWork;
+    }
+
     public void unregisterWorker(Mob mob) {
         workers.remove(mob);
     }
@@ -304,12 +359,29 @@ public class SiegeProject {
         return workers.size() >= this.cachedEffectiveCap;
     }
 
-    /** Advances this project's construction by one tick: adds work proportional to registered
+    /** Advances this project's construction by one GAME tick: adds work proportional to registered
      * worker count (capped), then places as many now-affordable not-yet-built steps as the
      * accumulated work covers, in build order. A project whose next step is blocked on an
      * incomplete MINE (see nextUnbuiltInstruction) or that's fully built is a no-op - callers
-     * don't need to check either case first. */
+     * don't need to check either case first.
+     *
+     * <p><b>Idempotent per game tick.</b> Every registered worker runs its OWN
+     * AbstractSiegeProjectGoal instance, and vanilla's GoalSelector ticks every running goal once
+     * per server tick - so with W workers registered on one project, this method is called W times
+     * within a single game tick, all from AbstractSiegeProjectGoal.tick() (its only production
+     * call site). Without this guard, each of those W calls added
+     * {@code min(W, cap) * workPerRatPerTick}, making real per-game-tick progress
+     * {@code W * min(W, cap) * workPerRatPerTick} - quadratic in worker count, and with the cap
+     * (the design's ONLY bound on build rate) rendered meaningless past a handful of rats. The
+     * guard makes every call after the first in the same game tick a complete no-op: no worker
+     * pruning, no accumulation, no placement, since all of that already ran this tick for whichever
+     * goal happened to call first. Found by the whole-branch review; the idempotency guard was
+     * called for during planning but never made it into the written task brief. */
     public void tick(ServerLevel level, RegionFlowField flowField, TerrainEvaluator evaluator) {
+        long now = level.getGameTime();
+        if (now == this.lastTickedGameTime) return;
+        this.lastTickedGameTime = now;
+
         workers.removeIf(mob -> !mob.isAlive());
 
         LiveTerrainAccess terrain = new LiveTerrainAccess(level);
@@ -334,9 +406,7 @@ public class SiegeProject {
             // own doc, which explicitly says it's "never true for a macro SiegeProject's next unbuilt
             // chain step") guards the old per-mob claim-then-execute race window - a real multi-tick
             // gap between "support looked solid when claimed" and "support got mined out from under
-            // it before execute() ran". No such window exists here: nextUnbuiltInstruction() (just
-            // above) and this placement both run synchronously against the same `terrain` snapshot,
-            // so there is nothing stale to guard against. A hardcoded `true` here was wrong, not
+            // it before execute() ran". A hardcoded `true` here was wrong, not
             // merely redundant: for a diagonal chain (the exact case this method exists to build),
             // step N's OWN pos().below() is essentially never the previous step's position (a
             // +1X/+1Y trace has chain[N].below() = (x+N, y+N-1, z) while chain[N-1] = (x+N-1, y+N-1,
