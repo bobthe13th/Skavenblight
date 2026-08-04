@@ -130,6 +130,81 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderDetailPane(guiGraphics);
         renderTooltip(guiGraphics, mouseX, mouseY);
+
+        renderWindMeterTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
+        renderProgressAreaTooltip(guiGraphics, mouseX, mouseY, this.leftPos, this.topPos);
+    }
+
+    private void renderWindMeterTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y) {
+        if (isMouseAboveArea(mouseX, mouseY, x, y, METER_X, METER_Y, METER_W, METER_H)) {
+            PreviewState preview = computePreviewState();
+            if (preview.spell != null && !preview.known) {
+                Spell spell = preview.spell;
+                int current = Math.max(0, preview.windLevel);
+                int required = Math.max(1, Math.round(ResearchFormulas.requiredWindLevel(spell.tier(), Config.researchWindThreshold)));
+
+                List<Component> tooltipLines = new ArrayList<>();
+
+                // Line 1: Wind Level (current / required)
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind", current, required)
+                        .withStyle(net.minecraft.ChatFormatting.GOLD));
+
+                // Line 2: Status
+                if (preview.windSufficient) {
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_sufficient")
+                            .withStyle(net.minecraft.ChatFormatting.GREEN));
+
+                    // Line 3: Multiplier
+                    float multiplier = ResearchFormulas.speedMultiplier(current, required,
+                            Config.researchWindBonusReference, Config.researchWindMaxBonusMultiplier);
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.speed", String.format("%.2f", multiplier))
+                            .withStyle(net.minecraft.ChatFormatting.AQUA));
+                } else {
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_insufficient")
+                            .withStyle(net.minecraft.ChatFormatting.RED));
+                }
+
+                guiGraphics.renderComponentTooltip(this.font, tooltipLines, mouseX, mouseY);
+            }
+        }
+    }
+
+    private void renderProgressAreaTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y) {
+        if (isMouseAboveArea(mouseX, mouseY, x, y, PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H)) {
+            PreviewState preview = computePreviewState();
+            if (preview.spell != null && !preview.known) {
+                List<Component> tooltipLines = new ArrayList<>();
+
+                int progress = menu.getProgress();
+                int maxProgress = Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE;
+
+                if (preview.isActiveResearch && progress > 0 && maxProgress > 0) {
+                    int percent = (int) Math.min(100, Math.max(0, (long) progress * 100 / maxProgress));
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress", percent)
+                            .withStyle(net.minecraft.ChatFormatting.GREEN));
+
+                    if (preview.windSufficient) {
+                        tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_status_active")
+                                .withStyle(net.minecraft.ChatFormatting.GREEN));
+                    } else {
+                        tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_status_paused")
+                                .withStyle(net.minecraft.ChatFormatting.YELLOW));
+                    }
+                } else {
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_idle")
+                            .withStyle(net.minecraft.ChatFormatting.GRAY));
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_status_idle")
+                            .withStyle(net.minecraft.ChatFormatting.GRAY));
+                }
+
+                guiGraphics.renderComponentTooltip(this.font, tooltipLines, mouseX, mouseY);
+            }
+        }
+    }
+
+    private boolean isMouseAboveArea(int mouseX, int mouseY, int x, int y, int offsetX, int offsetY, int width, int height) {
+        return mouseX >= (x + offsetX) && mouseX <= (x + offsetX) + width &&
+                mouseY >= (y + offsetY) && mouseY <= (y + offsetY) + height;
     }
 
     @Override

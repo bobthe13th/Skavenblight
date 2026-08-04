@@ -1,0 +1,3 @@
+## 2026-07-31 - [Graphical Gauge Interactive Tooltips]
+**Learning:** Custom block screens with complex graphical gauges (like the Wind Meter and Progress Bar) lack descriptive text labels, making hidden sub-systems (like the continuous wind speed multiplier and paused research states) completely opaque. By implementing bounding-box-aware dynamic tooltips on graphical screen areas using `isMouseAboveArea`, we can expose real-time stats, numeric requirements, and detailed multi-line status alerts.
+**Action:** Always provide interactive, multi-line tooltips for custom graphical gauges or visual bars in custom screens. Ensure they are localized, color-coded for fast scanning, and detail current vs. required thresholds, multipliers, and warning states (such as being paused).
