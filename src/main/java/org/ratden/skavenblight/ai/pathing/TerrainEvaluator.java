@@ -204,6 +204,15 @@ public class TerrainEvaluator {
                     && isOpenOrWalkable(terrain, node.pos().above())
                     && isOpenOrWalkable(terrain, node.pos().above(2));
             case BUILD_STAIR, BUILD_BRIDGE, BUILD_PILLAR, BUILD_LADDER, BUILD_SPIRAL -> state.blocksMotion() || isWalkableScaffold(state);
+            // A WALK step places/removes nothing, so it's trivially "already done" the moment the
+            // mob can genuinely stand there. Safe to check the real position here: every caller
+            // (SiegeProject.isCompleted/getRemainingInstructions) now passes the instructions map's
+            // KEY, not the raw stored value's predecessor-position .pos() - see those methods' own
+            // docs. Every reactive macro-project trace ends its instructions map with a WALK entry
+            // at its own entryPos (SiegeLineTracer.trace terminates exactly when isWalkableTerrain
+            // first becomes true), so without this case that entry could never report completed,
+            // keeping a fully-built project in SiegeProjectManager's activeProjects forever.
+            case WALK -> isWalkableTerrain(terrain, node.pos());
             default -> false;
         };
     }

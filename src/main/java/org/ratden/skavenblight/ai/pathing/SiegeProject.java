@@ -71,7 +71,13 @@ public class SiegeProject {
     }
 
     public boolean isCompleted(TerrainAccess terrain, TerrainEvaluator evaluator) {
-        return instructions.values().stream().allMatch(node -> evaluator.isActionCompleted(terrain, node));
+        // Must check at entry.getKey() (the real position), not the stored node's own .pos() (the
+        // PREDECESSOR position - see this class's own Javadoc on the anchor-ward `instructions`
+        // convention). Checking the predecessor meant a fully-built project could never be detected
+        // as complete - nextUnbuiltInstruction already gets this right by reconstructing a
+        // SiegeNode from the real position; this mirrors that.
+        return instructions.entrySet().stream()
+                .allMatch(entry -> evaluator.isActionCompleted(terrain, new SiegeNode(entry.getKey(), entry.getValue().action())));
     }
 
     public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
@@ -91,9 +97,11 @@ public class SiegeProject {
     }
 
     public Map<BlockPos, SiegeNode> getRemainingInstructions(TerrainAccess terrain, TerrainEvaluator evaluator) {
+        // Same real-position fix as isCompleted() above - node.pos() is the predecessor position,
+        // not pos (the map key) the action actually applies to.
         Map<BlockPos, SiegeNode> remaining = new HashMap<>();
         instructions.forEach((pos, node) -> {
-            if (!evaluator.isActionCompleted(terrain, node)) {
+            if (!evaluator.isActionCompleted(terrain, new SiegeNode(pos, node.action()))) {
                 remaining.put(pos, node);
             }
         });

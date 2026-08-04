@@ -185,6 +185,19 @@ public class SiegeProjectManager {
         return Optional.empty();
     }
 
+    /**
+     * The already-active project (if any) whose own {@code entryPos} is exactly {@code pos} - used
+     * by {@link #evaluateSingleLine} to scope its self-collision guard to the ONE project being
+     * re-entered, not every active project in the region. See that method's own doc for why this
+     * distinction matters.
+     */
+    private Optional<SiegeProject> activeProjectWithEntryPos(BlockPos pos) {
+        for (SiegeProject project : activeProjects) {
+            if (project.getEntryPos().equals(pos)) return Optional.of(project);
+        }
+        return Optional.empty();
+    }
+
     public int getActiveProjectCount() { return this.activeProjects.size(); }
     /** Always 0 once a pass has finished - see the field doc on lastPassCandidatesGenerated/Survived for the real per-pass numbers. */
     public int getCandidateProjectCount() { return this.candidateProjects.size(); }
@@ -262,8 +275,27 @@ public class SiegeProjectManager {
                                     Map<BlockPos, Integer> nextCostMap,
                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
 
+        // An active project's own entryPos is unconditionally re-added to nextInstructionMap AND
+        // calcQueue every pass (see injectActiveProjects), so ordinary Dijkstra can pop it again
+        // and re-fire evaluateMacroProjects on it as a brand-new obstacle anchor. Without a guard,
+        // one of the 14 fanned directions below could trace straight back over a cell that SAME
+        // project already owns - nextInstructionMap.putAll further down writes with no cost
+        // comparison (see FlowFieldCalculator's own comment above breakMutualCycles), so it would
+        // silently overwrite that cell's correct instruction to point back at the anchor, forming a
+        // direct mutual 2-cycle with the anchor's own still-standing instruction.
+        //
+        // Scoped to self-collision only (anchorPos IS an active project's own entryPos, AND the
+        // position being traced onto is still locked as one of THAT SAME project's own cells) -
+        // deliberately not "abort on any locked cell": that blanket version also blocks a fresh
+        // line merely crossing a DIFFERENT, unrelated project's cell, which poses no cycle risk at
+        // all and would otherwise stop real construction from ever being planned. A cross-project
+        // collision that does form a cycle still falls back to FlowFieldCalculator's existing
+        // breakMutualCycles/pickCyclePositionToDrop.
+        Optional<SiegeProject> reenteredProject = activeProjectWithEntryPos(anchorPos);
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos),
+                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
+                        || (reenteredProject.isPresent() && lockedPositions.contains(pos)
+                                && reenteredProject.get().getInstructions().containsKey(pos)),
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
