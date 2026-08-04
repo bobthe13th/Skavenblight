@@ -139,6 +139,20 @@ public class SiegeProjectManager {
             BlockPos entry = project.getEntryPos();
             int entryCost = project.getExpectedEntryCost();
 
+            // entryPos is, by construction, the far side of a gap the ordinary Dijkstra flood
+            // cannot independently cross while this project's own interior cells are still
+            // unbuilt/locked - so once TerrainEvaluator.isActionCompleted correctly reports its own
+            // WALK action as already done (see that class's own doc), the getRemainingInstructions
+            // loop above stops re-seeding it, since nothing needs BUILDING there. But nothing needs
+            // building there is not the same as nothing needs to ROUTE there: without this,
+            // entryPos gets no instruction at all on the very next pass, stranding a mob standing on
+            // it with no way to be told to walk onward into the project's still-unbuilt interior.
+            // putIfAbsent so a genuinely cheaper real route the ordinary flood found elsewhere in
+            // this SAME pass (or the project's own BUILD_LANDING case, already put above) is never
+            // overwritten - this is a fallback for "nothing else provides an instruction here", not
+            // a preference over one that already exists.
+            nextInstructionMap.putIfAbsent(entry, project.getInstructions().get(entry));
+
             if (entryCost < nextCostMap.getOrDefault(entry, Integer.MAX_VALUE)) {
                 nextCostMap.put(entry, entryCost);
                 calcQueue.add(new FlowFieldCalculator.QueueNode(entry, entryCost));

@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -175,5 +176,60 @@ class SiegeProjectManagerTest {
                         + "`anchor` here is not `unrelatedProject`'s entryPos, so this otherwise-identical "
                         + "line (same terrain, same direction, same endpoint as the passing baseline above) "
                         + "must still complete even though it crosses a cell locked by a different project");
+    }
+
+    // --- injectActiveProjects must keep routing mobs TO an active project's entryPos even once
+    // TerrainEvaluator.isActionCompleted correctly reports its WALK action as already done (see
+    // that class's own doc on the WALK case). entryPos is, by construction, on the far side of a
+    // gap the ordinary Dijkstra flood cannot independently cross while the project's own interior
+    // cells are still unbuilt/locked - it's excluded from getRemainingInstructions precisely
+    // because nothing needs building there, but that must not mean nothing ROUTES there either, or
+    // a mob standing at entryPos is left with no instruction at all and can never be told to walk
+    // onward into the project's still-unbuilt interior.
+
+    @Test
+    void entryPosStaysRoutableOnceItsOwnWalkStepReadsCompleteButTheProjectsInteriorIsStillUnbuilt() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = new SiegeProjectManager(new TerrainEvaluator());
+
+        BlockPos hop1 = new BlockPos(0, 50, 1);   // interior BUILD_STAIR step - still unbuilt
+        BlockPos entryPos = new BlockPos(0, 49, 2); // far side of the gap - already genuinely walkable
+
+        terrain.set(entryPos.below(), Blocks.STONE.defaultBlockState()); // real support under entryPos
+
+        Map<BlockPos, SiegeNode> instructions = Map.of(
+                hop1, new SiegeNode(new BlockPos(0, 50, 0), SiegeNode.SiegeAction.BUILD_STAIR),
+                entryPos, new SiegeNode(hop1, SiegeNode.SiegeAction.WALK));
+        SiegeProject project = new SiegeProject(instructions,
+                List.of(new SiegeNode(hop1, SiegeNode.SiegeAction.BUILD_STAIR), new SiegeNode(entryPos, SiegeNode.SiegeAction.WALK)),
+                new BlockPos(0, 50, 0), entryPos, 4500);
+        manager.addSharedConnectorProject(project);
+
+        // Ground truth matching the doc's own WALK-completion reasoning: entryPos genuinely is
+        // walkable right now, and hop1 genuinely is not yet built.
+        TerrainEvaluator evaluator = new TerrainEvaluator();
+        assertTrue(evaluator.isWalkableTerrain(terrain, entryPos), "setup sanity: entryPos must actually be walkable");
+        assertFalse(evaluator.isActionCompleted(terrain, new SiegeNode(hop1, SiegeNode.SiegeAction.BUILD_STAIR)),
+                "setup sanity: hop1 must not yet be built, or this test proves nothing about the project staying active");
+
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        // No core flood runs in this test - deliberately, to isolate injectActiveProjects' own
+        // seeding from whatever the ordinary Dijkstra flood might separately contribute. If the
+        // ordinary gap really can't be crossed without this project, the flood wouldn't reach
+        // entryPos either, so this is the realistic no-alternative-route case.
+        manager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
+
+        assertEquals(Set.of(hop1), manager.getLockedPositions(),
+                "entryPos needs no construction and must not be locked - only hop1, the genuinely unbuilt step, should be");
+        assertEquals(new SiegeNode(new BlockPos(0, 50, 0), SiegeNode.SiegeAction.BUILD_STAIR), nextInstructionMap.get(hop1),
+                "setup sanity: hop1's own unbuilt instruction must still be seeded");
+        assertEquals(new SiegeNode(hop1, SiegeNode.SiegeAction.WALK), nextInstructionMap.get(entryPos),
+                "a mob standing at entryPos must still be told to WALK onward to hop1 - entryPos being "
+                        + "already-complete means nothing needs BUILDING there, not that nothing ROUTES there; "
+                        + "with no instruction at all a mob here is stranded and can never reach hop1's real "
+                        + "BUILD_STAIR work");
     }
 }
