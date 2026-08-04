@@ -686,6 +686,17 @@ public class PathingGoalRecalculationGameTests {
                 "canUse() must now decline a full, non-widenable project instead of taking the mob's MOVE "
                         + "flag and then silently failing to register in start() - see this method's javadoc");
 
+        // The other half of Fix 3, and the whole point of it: declining must HAND OFF to
+        // AwaitFormationGoal's at-capacity path in the same tick, not merely leave the rat idle.
+        // peekAtCapacityTarget() is exactly what ClanratEntity.peekAnyClaimedConstructionTarget()
+        // (and through it AwaitFormationGoal.canUse()) consults, so a present result here is the
+        // mechanical proof that Task 9's capacity mechanism is now reachable - it never was while
+        // canUse() stayed true for any project near a rat.
+        check(goal.peekAtCapacityTarget().isPresent(),
+                "a declined full project must still be reported as an at-capacity target, so "
+                        + "AwaitFormationGoal (priority 8) can pick the rat up - otherwise Fix 3 just "
+                        + "trades a rat stuck holding MOVE for a rat that walks past the problem");
+
         // start() is still driven, to prove the rejection is real rather than merely predicted: no
         // project gets registered and no widen is attempted, even when start() is called anyway.
         goal.start();
