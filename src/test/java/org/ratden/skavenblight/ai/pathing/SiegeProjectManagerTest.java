@@ -267,4 +267,65 @@ class SiegeProjectManagerTest {
                         + "own instructions map has no entry for it - that would NPE the first caller "
                         + "that reads it back out");
     }
+
+    /**
+     * A reactive candidate project's build order must proceed from entryPos (where rats ENTER the
+     * project - see SiegeProject's own field doc) toward anchorPos (the target/already-reached
+     * side), not the other way around. evaluateSingleLine currently passes
+     * {@code result.orderedSteps()} unreversed with {@code buildOrderAnchor = anchorPos}: since
+     * orderedSteps is recorded walking FROM anchorPos (the target side, reached first by Dijkstra
+     * flooding backward from the goal) OUT to entryPos (the mob's side, discovered last), that
+     * makes {@code nextUnbuiltInstruction()} - which just returns buildOrder's first unbuilt entry -
+     * always prefer whichever unbuilt step is nearest the TARGET, not nearest the mob. For a
+     * physical climbing structure a mob approaches from entryPos, that's backwards: the step
+     * nearest entryPos must be built FIRST or a mob standing on the ground can never reach the
+     * steps above it.
+     *
+     * <p>RegionGraph.registerConnector already gets this right for its own "towardA" direction
+     * (mob entering from the far side): it reverses orderedSteps and re-anchors on that same far
+     * endpoint. This test proves evaluateSingleLine's reactive candidate needs the identical
+     * treatment, since entryPos plays the exact same "where mobs enter" role there.
+     */
+    @Test
+    void reactiveCandidateBuildOrderProceedsFromEntryPosTowardAnchorNotTheOtherWayAround() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = new SiegeProjectManager(new TerrainEvaluator());
+
+        BlockPos anchor = new BlockPos(0, 52, 0);
+        BlockPos hop1 = anchor.offset(1, -1, 0);   // nearest the TARGET/anchor - must be built SECOND
+        BlockPos hop2 = hop1.offset(1, -1, 0);     // nearest the MOB/entryPos - must be built FIRST
+        BlockPos entryPos = hop2.offset(1, -1, 0); // genuinely walkable - where the mob stands
+
+        terrain.set(entryPos.below(), Blocks.STONE.defaultBlockState());
+
+        FlowFieldState state = new FlowFieldState(new BlockPos(0, 0, 0), Collections.emptySet());
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        manager.evaluateMacroProjects(terrain, anchor, state, 0, calcQueue, nextCostMap, nextInstructionMap);
+        manager.finalizeCandidateProjects(nextCostMap, nextInstructionMap);
+
+        SiegeProject project = manager.findProjectContaining(hop1).orElse(null);
+        assertNotNull(project, "setup sanity: the diagonal (1,-1,0) line must have produced a surviving candidate covering hop1");
+        assertEquals(java.util.Optional.of(project), manager.findProjectContaining(hop2),
+                "setup sanity: hop1 and hop2 must belong to the SAME candidate line, or build order between them proves nothing");
+
+        List<BlockPos> buildOrder = project.getBuildOrderPositions();
+        int hop1Index = buildOrder.indexOf(hop1);
+        int hop2Index = buildOrder.indexOf(hop2);
+        assertTrue(hop1Index >= 0 && hop2Index >= 0, "setup sanity: both hops must appear in the build order");
+
+        assertTrue(hop2Index < hop1Index,
+                "hop2 (nearest entryPos, where the mob actually stands) must be built BEFORE hop1 "
+                        + "(nearest the target) - got build order " + buildOrder + ", which builds the "
+                        + "far/target-side step first, leaving the mob unable to reach it from the ground");
+
+        assertFalse(buildOrder.contains(entryPos),
+                "the reversed build order must not include the trace's own degenerate terminal WALK "
+                        + "entry at entryPos - its position equals buildOrderAnchor (also entryPos), so "
+                        + "leaving it as buildOrder.get(0) would make SiegeProject.tryWiden's own "
+                        + "dirFrom/dirTo direction vector degenerate to zero, breaking auto-widening for "
+                        + "this exact BUILD_STAIR project shape");
+    }
 }

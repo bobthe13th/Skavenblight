@@ -328,7 +328,31 @@ public class SiegeProjectManager {
         LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Cost: {})",
                 anchorPos.toShortString(), endPos.toShortString(), totalCost);
 
-        candidateProjects.add(new SiegeProject(result.instructions(), result.orderedSteps(), anchorPos, endPos, totalCost));
+        // result.orderedSteps() is recorded walking FROM anchorPos (the target side, already
+        // reached by Dijkstra flooding backward from the goal) OUT to endPos (the mob's side,
+        // discovered last) - see SiegeLineTracer.trace's own doc. Passing that order unreversed
+        // with buildOrderAnchor=anchorPos would make nextUnbuiltInstruction() (which just returns
+        // build order's first unbuilt entry) always prefer whichever step is nearest the TARGET,
+        // never the one nearest the mob. But endPos IS this project's entryPos - "the block where
+        // rats enter this project" (see SiegeProject's own field doc) - so for a mob to physically
+        // climb/cross from there, the step nearest entryPos must be built FIRST. Reversing here and
+        // re-anchoring on endPos mirrors RegionGraph.registerConnector's own "towardA" direction
+        // (a connector entered from its far side), which already needs and gets this exact
+        // treatment for the identical reason.
+        List<SiegeNode> buildOrderSteps = new ArrayList<>(result.orderedSteps());
+        Collections.reverse(buildOrderSteps);
+        // The reversed list's first entry is SiegeLineTracer.trace's own terminal step AT endPos -
+        // needed only to seed planSteps' walking-facing computation for the step after it, not real
+        // work (its own action is WALK: nothing to build once a trace terminates naturally). Left
+        // in place, its position would equal buildOrderAnchor (both endPos), making
+        // tryWiden's dirFrom/dirTo (widenAnchor vs buildOrder.get(0)) the SAME point - a zero
+        // direction vector that breaks auto-widening for every BUILD_STAIR/BUILD_BRIDGE reactive
+        // project. Drop it; planSteps still starts walking from buildOrderAnchor=endPos, so the
+        // first REAL step's facing is unaffected.
+        if (!buildOrderSteps.isEmpty() && buildOrderSteps.get(0).action() == SiegeNode.SiegeAction.WALK) {
+            buildOrderSteps.remove(0);
+        }
+        candidateProjects.add(new SiegeProject(result.instructions(), buildOrderSteps, endPos, endPos, totalCost));
         lastPassCandidatesGenerated++;
 
         nextCostMap.put(endPos, totalCost);
