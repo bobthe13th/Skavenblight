@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -132,7 +133,18 @@ class FlowFieldCalculatorTest {
         BlockPos b = new BlockPos(1, -61, -20);
         BlockPos c = new BlockPos(1, -62, -20);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
+        // detectMutualCyclePositions walks instructionMap.keySet() in iteration order, resolving
+        // (and thus short-circuiting future walks over) every position it touches along the way.
+        // A plain HashMap's iteration order for these BlockPos keys happens to visit c (or another
+        // cycle member) as a walk's own starting point BEFORE d ever gets its turn - which
+        // resolves the whole {a,b,c} cycle with seenAt=0, so d's run-up never produces a nonzero
+        // seenAt to trim. That made path.subList(seenAt, ...) indistinguishable from a mutated
+        // path.subList(0, ...) for this test, even though the mutation is a real regression (it
+        // would fold a genuine run-up into the reported cycle in other orderings). A LinkedHashMap
+        // with d inserted first forces the intended walk order: start at d, run up through a/b/c,
+        // then close the loop back at a with the cycle already appended after d in `path` - only
+        // then does seenAt land at a nonzero index (1, not 0), actually exercising the trim.
+        Map<BlockPos, SiegeNode> instructions = new LinkedHashMap<>();
         instructions.put(d, new SiegeNode(a, SiegeNode.SiegeAction.WALK));
         instructions.put(a, new SiegeNode(b, SiegeNode.SiegeAction.BUILD_PILLAR));
         instructions.put(b, new SiegeNode(c, SiegeNode.SiegeAction.BUILD_SPIRAL));

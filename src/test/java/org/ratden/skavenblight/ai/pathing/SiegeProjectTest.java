@@ -34,13 +34,19 @@ class SiegeProjectTest {
         BlockPos anchor = new BlockPos(0, 64, 0);
         List<SiegeNode> orderedSteps = List.of(
                 new SiegeNode(new BlockPos(1, 65, 0), SiegeNode.SiegeAction.BUILD_STAIR),
-                new SiegeNode(new BlockPos(1, 66, -1), SiegeNode.SiegeAction.BUILD_STAIR)
+                new SiegeNode(new BlockPos(3, 66, -2), SiegeNode.SiegeAction.BUILD_STAIR)
         );
 
         List<SiegeProject.PlannedStep> planned = SiegeProject.planSteps(orderedSteps, anchor);
 
         assertEquals(Direction.EAST, planned.get(0).facing());
-        // step 1 moves from (1,65,0) to (1,66,-1): dz=-1, dx=0 -> NORTH
+        // step 1's coordinates are deliberately chosen so the anchor and the true predecessor
+        // (step 0) disagree on the dominant axis, not just the sign: from anchor (0,64,0) ->
+        // (3,66,-2), dx=3/dz=-2, |dx|>|dz| -> EAST. From the real predecessor (1,65,0) ->
+        // (3,66,-2), dx=2/dz=-2, a TIE falls through to the dz branch -> NORTH. A mutation that
+        // computed facing from the anchor for every step (instead of updating `previous` per
+        // step) would produce EAST here and get caught; the previous coordinates happened to
+        // agree on NORTH from either reference point, so that mutation went undetected.
         assertEquals(Direction.NORTH, planned.get(1).facing());
     }
 
