@@ -150,8 +150,15 @@ public class SiegeProjectManager {
             // putIfAbsent so a genuinely cheaper real route the ordinary flood found elsewhere in
             // this SAME pass (or the project's own BUILD_LANDING case, already put above) is never
             // overwritten - this is a fallback for "nothing else provides an instruction here", not
-            // a preference over one that already exists.
-            nextInstructionMap.putIfAbsent(entry, project.getInstructions().get(entry));
+            // a preference over one that already exists. Guarded on presence: a route-tree
+            // connector project (RegionGraph.registerConnector's 6-arg constructor) deliberately
+            // does NOT key its own entryPos in `instructions` - "the far region's own pass already
+            // covers it" (see that method's own doc) - so there's nothing to fall back to there,
+            // and inserting a literal null would NPE the first caller that reads it back out.
+            SiegeNode ownEntryInstruction = project.getInstructions().get(entry);
+            if (ownEntryInstruction != null) {
+                nextInstructionMap.putIfAbsent(entry, ownEntryInstruction);
+            }
 
             if (entryCost < nextCostMap.getOrDefault(entry, Integer.MAX_VALUE)) {
                 nextCostMap.put(entry, entryCost);

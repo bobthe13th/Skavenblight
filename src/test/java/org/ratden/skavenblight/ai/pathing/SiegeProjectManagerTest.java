@@ -232,4 +232,39 @@ class SiegeProjectManagerTest {
                         + "with no instruction at all a mob here is stranded and can never reach hop1's real "
                         + "BUILD_STAIR work");
     }
+
+    /**
+     * The entryPos fallback above must not assume every project keys its own entryPos in
+     * `instructions` - a route-tree connector project (the 6-arg constructor, built by
+     * RegionGraph.registerConnector) deliberately does NOT: see that method's own doc, "neither
+     * outboundInstructions nor inboundInstructions keys their own far endpoint... the far region's
+     * own pass already covers it." A naive {@code Map.putIfAbsent(entry, instructions.get(entry))}
+     * would silently insert a literal null value for such a project, which would NPE the first time
+     * any caller (getNextSiegeNode, FollowFlowFieldGoal) reads it back out.
+     */
+    @Test
+    void entryPosFallbackNeverInsertsNullForAConnectorProjectThatDoesNotKeyItsOwnEntryPos() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = new SiegeProjectManager(new TerrainEvaluator());
+
+        BlockPos boundaryCell = new BlockPos(0, 50, 0);
+        BlockPos entryPos = new BlockPos(0, 50, 5); // deliberately NOT a key below - mirrors RegionGraph's connector shape
+
+        Map<BlockPos, SiegeNode> instructions = Map.of(boundaryCell, new SiegeNode(entryPos, SiegeNode.SiegeAction.WALK));
+        SiegeProject connectorProject = new SiegeProject(instructions,
+                List.of(new SiegeNode(boundaryCell, SiegeNode.SiegeAction.WALK)),
+                entryPos, entryPos, 500, boundaryCell);
+        manager.addSharedConnectorProject(connectorProject);
+
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        manager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
+
+        assertFalse(nextInstructionMap.containsKey(entryPos) && nextInstructionMap.get(entryPos) == null,
+                "must never insert a literal null instruction for entryPos just because the project's "
+                        + "own instructions map has no entry for it - that would NPE the first caller "
+                        + "that reads it back out");
+    }
 }
