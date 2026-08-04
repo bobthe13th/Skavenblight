@@ -220,3 +220,43 @@ Following the existing `Config.buildingBasePenalty`-style tunables:
   cap) cause more retracing than expected.
 - `maxProjectWidth` (4) and `workersPerWidenStep` (10) are judgment-call defaults, not derived from
   any in-game balance testing — reasonable starting points, easy to retune via `Config` once played.
+
+## Post-implementation follow-ups (found during SDD execution, not fixed here)
+
+Implementation surfaced four items worth a future plan/task. None block this effort — each was
+explicitly assessed and ruled non-blocking during the final whole-branch review and its one fix
+wave (see `git log` on `SiegeProject.java`/`AbstractSiegeProjectGoal.java` for the commits that
+fixed the three Critical bugs this same review found and fixed in-session).
+
+1. **Auto-widening's alternating-side offset never scales in magnitude.** `tryWiden`'s `side`
+   alternates (`width % 2`) but always shifts exactly one perpendicular unit from the same
+   `widenAnchor`, so widen #3 lands on the exact same position as widen #1 — a duplicate lane, not
+   a new one. Under the default `maxProjectWidth=4`, only ~3 physically distinct lanes are ever
+   reachable, not 4, undermining the "4 lanes × 10 workers = 40" capacity story above. Needs a
+   follow-up that scales offset magnitude with `width` (e.g. `ceil(width/2)` perpendicular units),
+   not just alternates side.
+2. **A narrow residual of the `canUse()`/registration-precondition bug survives for widen-eligible
+   projects whose retrace fails.** A `BUILD_STAIR`/`BUILD_BRIDGE` project with ≥`workersPerWidenStep`
+   co-located rats, below `maxProjectWidth`, whose perpendicular `SiegeLineTracer` trace then fails,
+   still lets one rat hold `MOVE`/`LOOK` while re-attempting that trace every tick — permanent
+   starvation of lower-priority goals for that one rat, plus a per-tick trace cost, in that specific
+   corner case only. No test currently exercises it. Recommended fix: memoize the failed widen
+   attempt with a retry cooldown (re-attempt at most every N ticks), not keyed on `width` (which
+   would permanently blacklist the project instead).
+3. **The four `StaircaseSiegeGroupGameTests` cases still fail — root-caused, not just observed, to a
+   bug entirely outside this effort's scope.** After fixing three real Critical bugs in the
+   project-scoped construction path itself (worker-count accumulation was quadratic instead of
+   linear; a MINE step in a project's chain permanently stalled everything after it once mined; and
+   `canUse()` didn't mirror registration's real preconditions), all four tests still fail identically
+   — because zero `BUILD_STAIR` blocks are ever placed in any of them. Diagnostic logging traced this
+   to `FlowFieldCalculator`'s cycle-breaker dropping the crossing's own locked, genuinely-needed
+   `BUILD_STAIR` instruction on a 2-cell mutual cycle, so no rat is ever handed real construction work
+   — the construction-goal logic this whole effort touched is never even reached. This diagnosis is
+   corroborated by `StaircaseSiegeGroupGameTests.restrictTerritoryToMinimalArea`'s own pre-existing
+   javadoc, which already predicted exactly this failure mode. This is a `FlowFieldCalculator`
+   cycle-breaking bug, pre-dating this effort, and needs its own dedicated investigation/plan.
+4. **`StaircaseSiegeGroupGameTests`' tightened timeouts (Task 12: small-group 8000→5000, large-group
+   12000→3000) were calibrated assuming the (buggy, quadratic) accumulation rate this effort's fix
+   wave corrected.** They can't be meaningfully re-validated until follow-up item 3 above is fixed
+   (today, 0 stairs are ever placed regardless of timeout budget) — re-derive both numbers once that
+   separate bug is resolved and these tests can actually attempt construction.
