@@ -303,15 +303,43 @@ public class SiegeProjectManager {
         // case above) - that risk is accepted and falls back to FlowFieldCalculator's existing
         // breakMutualCycles/pickCyclePositionToDrop cycle-breaker if it ever forms a cycle, rather
         // than reintroducing the over-broad block that caused the regression this replaces.
+        // TEMPORARY DIAGNOSTIC (2026-08-04, round 2): a clanrat's built staircase now shows a real
+        // gap - blocks placed at ...,25,-56,173 then 25,-54,172,... with no valid single macro-hop
+        // connecting them (every direction moves by exactly 1 per nonzero axis; that's a dy=+2
+        // jump). No cycle-break WARN accompanies it, so this isn't the self-collision case the
+        // guard above targets. Logging every one of the 14 fan directions per anchor - not just
+        // the ones that already succeed via the existing "Successful Macro Line" debug log - to
+        // see directly which direction was SUPPOSED to bridge this gap and why it didn't (blocked
+        // by this guard, by isNearExistingProject, out of bounds, or the tracer's own internal
+        // abort e.g. cost ceiling/mine-chain-cap/no-valid-action). Remove once the real gap
+        // producer is identified - see docs/superpowers/specs/2026-08-04-flow-field-locked-cycle-drops-build-stair-bug.md.
         Optional<SiegeProject> reenteredProject = activeProjectWithEntryPos(anchorPos);
+        final boolean[] blockedByGuard = {false};
+        java.util.function.Predicate<BlockPos> stopTrace = pos -> {
+            if (terrainEvaluator.isOutOfBounds(terrain, pos, state)) return true;
+            if (isNearExistingProject(pos, anchorPos)) return true;
+            if (reenteredProject.isPresent() && lockedPositions.contains(pos)
+                    && reenteredProject.get().getInstructions().containsKey(pos)) {
+                blockedByGuard[0] = true;
+                return true;
+            }
+            return false;
+        };
+
         SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
-                        || (reenteredProject.isPresent() && lockedPositions.contains(pos)
-                                && reenteredProject.get().getInstructions().containsKey(pos)),
+                stopTrace,
                 pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
                 this.maxCandidateProjectLength);
 
-        if (!result.completed() || result.instructions().isEmpty()) return;
+        if (!result.completed() || result.instructions().isEmpty()) {
+            LOGGER.warn("[Pathfinder] TEMPORARY DIAGNOSTIC: direction ({},{},{}) from anchor {} did NOT "
+                            + "complete - blockedBySelfCollisionGuard={}, reenteredProjectEntryPos={}",
+                    dx, dy, dz, anchorPos.toShortString(), blockedByGuard[0],
+                    reenteredProject.map(p -> p.getEntryPos().toShortString()).orElse("none"));
+            return;
+        }
+        LOGGER.warn("[Pathfinder] TEMPORARY DIAGNOSTIC: direction ({},{},{}) from anchor {} completed at {}",
+                dx, dy, dz, anchorPos.toShortString(), result.endPos().toShortString());
 
         BlockPos endPos = result.endPos();
         int totalCost = result.totalCost();
