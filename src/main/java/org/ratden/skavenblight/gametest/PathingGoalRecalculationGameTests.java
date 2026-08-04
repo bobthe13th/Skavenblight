@@ -168,6 +168,11 @@ public class PathingGoalRecalculationGameTests {
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
         mob.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        // This test drives ONE hand-built goal instance across real game ticks (see the
+        // succeedWhen below). Suppressing the mob's own goal list keeps that the only driver, and
+        // keeps the mob from strolling onto the build target and blocking isSpaceClear - neither
+        // was possible back when the whole test ran inside a single game tick.
+        mob.setNoAi(true);
         helper.getLevel().addFreshEntity(mob);
 
         BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
@@ -175,19 +180,24 @@ public class PathingGoalRecalculationGameTests {
 
         check(goal.canUse(), "goal should trigger for target " + target.toShortString());
         goal.start();
-        for (int t = 0; t < 60 && !helper.getLevel().getBlockState(target).is(Blocks.COBBLESTONE_STAIRS); t++) {
+
+        // One goal.tick() per REAL game tick, not a synchronous loop: SiegeProject.tick() is now
+        // idempotent per game tick (see its own javadoc - it has to be, since every registered
+        // worker's goal instance calls it once per server tick, which made accumulation quadratic in
+        // worker count), so N calls inside one game tick bank exactly one tick's work. A
+        // BUILD_STAIR costs buildingBasePenalty * 10 = 1500 by default, so one worker at
+        // workPerRatPerTick = 100 needs ~15 game ticks - well inside this test's 200-tick budget.
+        helper.succeedWhen(() -> {
             goal.tick();
-        }
 
-        helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                () -> "BUILD_STAIR should have placed a stair at " + relativeTarget);
+            helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE_STAIRS),
+                    () -> "BUILD_STAIR should have placed a stair at " + relativeTarget);
 
-        check(owner.changes.contains(target),
-                "region map was never told about the stair placement at " + target
-                        + " - SiegeProject.tick() never called forceRecalculation (recorded changes: "
-                        + owner.changes + ")");
-
-        helper.succeed();
+            check(owner.changes.contains(target),
+                    "region map was never told about the stair placement at " + target
+                            + " - SiegeProject.tick() never called forceRecalculation (recorded changes: "
+                            + owner.changes + ")");
+        });
     }
 
     /**
@@ -269,40 +279,56 @@ public class PathingGoalRecalculationGameTests {
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
         mob.setPos(startPos.getX() + 0.5, startPos.getY(), startPos.getZ() + 0.5);
+        // This test used to run all four steps inside a single game tick, which meant the mob was
+        // never subject to its own AI or to gravity while the test repositioned it onto mid-air
+        // chain cells. Now that each step spans real game ticks (see the sequence below - it has
+        // to, because SiegeProject.tick() is idempotent per game tick), both have to be suppressed
+        // explicitly or the mob would fall off the chain and stroll around mid-test.
+        mob.setNoAi(true);
+        mob.setNoGravity(true);
         helper.getLevel().addFreshEntity(mob);
 
+        // One goal.tick() per REAL game tick, four steps back to back: a BUILD_STAIR costs
+        // buildingBasePenalty * 10 = 1500 by default, so a single worker at workPerRatPerTick = 100
+        // needs ~15 game ticks per step, ~60 for the whole chain - inside this test's 400-tick
+        // budget with room to spare.
+        BuildFlowFieldGoal[] currentGoal = new BuildFlowFieldGoal[1];
+        net.minecraft.gametest.framework.GameTestSequence sequence = helper.startSequence();
         for (int i = 0; i < 4; i++) {
+            final int stepIndex = i;
             BlockPos fromPos = helper.absolutePos(relativeChain[i]);
             BlockPos toPos = helper.absolutePos(relativeChain[i + 1]);
-            mob.setPos(fromPos.getX() + 0.5, fromPos.getY(), fromPos.getZ() + 0.5);
 
-            check(!helper.getLevel().getBlockState(toPos.below()).blocksMotion(),
-                    "step " + i + "'s support at " + toPos.below() + " must be air BEFORE building - "
-                            + "this is the whole point of the test (no support ever appears)");
+            sequence = sequence
+                    .thenExecute(() -> {
+                        mob.setPos(fromPos.getX() + 0.5, fromPos.getY(), fromPos.getZ() + 0.5);
 
-            // A fresh goal instance per step - mirrors the mob's real per-tick canUse()/start()
-            // re-evaluation as it moves; the underlying SiegeProject is the SAME instance across
-            // every step, matching how a real rat crossing a macro chain would.
-            BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
-            goal.setFlowField(flowField);
-            check(goal.canUse(), "step " + i + ": goal should trigger for the next unbuilt chain step");
-            goal.start();
+                        check(!helper.getLevel().getBlockState(toPos.below()).blocksMotion(),
+                                "step " + stepIndex + "'s support at " + toPos.below() + " must be air BEFORE building - "
+                                        + "this is the whole point of the test (no support ever appears)");
 
-            // Can't query project.nextUnbuiltInstruction()'s own PlannedStep result directly here
-            // (it's package-private to org.ratden.skavenblight.ai.pathing, not accessible from
-            // this gametest package) - tick until the real world shows the step done instead,
-            // which is exactly what the assertion right after this loop already checks for.
-            for (int t = 0; t < 60 && !helper.getLevel().getBlockState(toPos).is(Blocks.COBBLESTONE_STAIRS); t++) {
-                goal.tick();
-            }
-            goal.stop();
-
-            int stepIndex = i;
-            helper.assertBlockState(relativeChain[stepIndex + 1], s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                    () -> "step " + stepIndex + " should have placed a stair at " + relativeChain[stepIndex + 1]);
+                        // A fresh goal instance per step - mirrors the mob's real per-tick
+                        // canUse()/start() re-evaluation as it moves; the underlying SiegeProject is
+                        // the SAME instance across every step, matching how a real rat crossing a
+                        // macro chain would.
+                        BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
+                        goal.setFlowField(flowField);
+                        check(goal.canUse(), "step " + stepIndex + ": goal should trigger for the next unbuilt chain step");
+                        goal.start();
+                        currentGoal[0] = goal;
+                    })
+                    .thenWaitUntil(() -> {
+                        // Can't query project.nextUnbuiltInstruction()'s own PlannedStep result
+                        // directly here (it's package-private to org.ratden.skavenblight.ai.pathing,
+                        // not accessible from this gametest package) - tick until the real world
+                        // shows the step done instead.
+                        currentGoal[0].tick();
+                        helper.assertBlockState(relativeChain[stepIndex + 1], s -> s.is(Blocks.COBBLESTONE_STAIRS),
+                                () -> "step " + stepIndex + " should have placed a stair at " + relativeChain[stepIndex + 1]);
+                    })
+                    .thenExecute(() -> currentGoal[0].stop());
         }
-
-        helper.succeed();
+        sequence.thenSucceed();
     }
 
     /**
@@ -592,11 +618,21 @@ public class PathingGoalRecalculationGameTests {
      * laterally widenable (see {@code SiegeProject#effectiveCapFor} - only BUILD_STAIR/
      * BUILD_BRIDGE scale with width), mirroring {@code SiegeProjectAutoWidenGameTests
      * #testDoesNotWidenWhenActionIsNotLaterallyWidenable} but driven through a real goal instead
-     * of a direct {@code tryRegisterWorker} call. {@code canUse()} only checks that SOME project
-     * exists for the target (it doesn't know about capacity), so it's still expected to return
-     * true here - the rejection has to show up in {@code start()}'s registration itself, observed
-     * via {@code canContinueToUse()} returning false (no project ever got registered) and the
-     * project's own width staying at 1.
+     * of a direct {@code tryRegisterWorker} call.
+     *
+     * <p><b>Updated for the whole-branch review's Fix 3.</b> This test previously asserted
+     * {@code canUse() == true} here, on the grounds that "canUse() only checks a project exists, not
+     * capacity" - it was documenting, and locking in, the very bug Fix 3 removed. Holding
+     * {MOVE, LOOK} at priority 6 while {@code start()}'s registration silently failed left
+     * {@code tick()} a permanent no-op ({@code registeredProject == null}) AND starved
+     * {@code AwaitFormationGoal} (8) / {@code FollowFlowFieldGoal} (9) of the MOVE flag - so the rat
+     * did nothing at all instead of falling through to a goal that could act. {@code canUse()} now
+     * mirrors {@code start()}'s real preconditions via {@code SiegeProject#canAcceptWorker} and must
+     * decline outright, in the same tick, freeing the rat to fall through.
+     *
+     * <p>{@code canContinueToUse() == false} and {@code width == 1} are still asserted: they prove
+     * the declining is because registration genuinely couldn't happen (no project registered, no
+     * widen attempted), not because the goal simply failed to find a target.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
     public static void testBuildFlowFieldGoalDoesNotRegisterOnAFullNonWidenableProject(GameTestHelper helper) {
@@ -638,7 +674,20 @@ public class PathingGoalRecalculationGameTests {
         BuildFlowFieldGoal goal = new BuildFlowFieldGoal(extraRat);
         goal.setFlowField(flowField);
 
-        check(goal.canUse(), "goal should still propose the target - canUse() only checks a project exists, not capacity");
+        // Sanity: the ONLY reason canUse() may decline below is capacity. Confirm a target is
+        // genuinely proposed here, so a false from canUse() can't be mistaken for "no work found".
+        check(flowField.findProjectFor(target).isPresent(),
+                "setup sanity: the BUILD_PILLAR target's owning project must be findable, or canUse()'s "
+                        + "capacity check below isn't what's being observed");
+        check(project.isAtCapacity(),
+                "setup sanity: the project must actually be full, or there'd be nothing for canUse() to decline");
+
+        check(!goal.canUse(),
+                "canUse() must now decline a full, non-widenable project instead of taking the mob's MOVE "
+                        + "flag and then silently failing to register in start() - see this method's javadoc");
+
+        // start() is still driven, to prove the rejection is real rather than merely predicted: no
+        // project gets registered and no widen is attempted, even when start() is called anyway.
         goal.start();
 
         check(!goal.canContinueToUse(),

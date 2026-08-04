@@ -4,6 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.gametest.framework.GameTestSequence;
+import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -32,7 +34,16 @@ import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
  * SiegeInteractionHandler.constructSiegeBlock's early return for both) via the same
  * SmartBreachGoal/BuildFlowFieldGoal + SiegeInteractionHandler path production code uses, laid
  * out as 7 independent lanes along the same Z row so each action's terrain setup can't interfere
- * with its neighbors (see runBuildLane's own comments for the exact spacing reasoning).
+ * with its neighbors (see appendLane's own comments for the exact spacing reasoning).
+ *
+ * <p><b>Why the 7 lanes run as a GameTestSequence across real game ticks</b> rather than as 7
+ * synchronous loops inside one method body (the original shape): {@code SiegeProject.tick()} is
+ * idempotent per game tick - it has to be, because every registered worker's own goal instance
+ * calls it once per server tick, which made build-progress accumulation quadratic in worker count
+ * (see that method's javadoc). Ticking a goal N times inside a single game tick therefore banks
+ * exactly one tick's worth of work, so every BUILD_* lane needs real ticks to finish. The mob also
+ * gets {@code setNoAi(true)} for the same reason it didn't need it before: across ~100 real ticks
+ * its own goal list would stroll it out of the lane it's being hand-driven in.
  *
  * <p>Uses the same hand-built-pathing-objects pattern established in
  * {@code PathingGoalRecalculationGameTests}: a real {@code FlowFieldState} with its instruction
@@ -43,7 +54,7 @@ import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 @PrefixGameTestTemplate(false)
 public class SiegeConstructionActionsGameTests {
 
-    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
+    @GameTest(template = "pathing_test", timeoutTicks = 600, skyAccess = true)
     public static void testClanratExecutesEverySiegeConstructionAction(GameTestHelper helper) {
         TerrainEvaluator evaluator = new TerrainEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
@@ -55,36 +66,56 @@ public class SiegeConstructionActionsGameTests {
         // (helper-Y=1) - see PathingRegionGameTests' class javadoc for the +1 helper-Y offset.
         // 7 lanes along the same Z=4 row, X anchors spaced 4 apart (2, 6, 10, 14, 18, 22, 26):
         // wide enough that BUILD_LANDING's 3x3 platform (the widest side-effect of any single
-        // action) never reaches a neighboring lane's own target - see runBuildLane's own comment.
+        // action) never reaches a neighboring lane's own target - see appendLane's own comment.
         BlockPos relativeAnchor = new BlockPos(4, 2, 4);
         FlowFieldState state = new FlowFieldState(helper.absolutePos(relativeAnchor), Set.of());
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+        // See the class javadoc: the lanes now span real game ticks, so the mob's own goal list has
+        // to be suppressed or it strolls out of whichever lane is being hand-driven.
+        mob.setNoAi(true);
         helper.getLevel().addFreshEntity(mob);
 
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 2, SiegeNode.SiegeAction.MINE);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 6, SiegeNode.SiegeAction.BUILD_STAIR);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 10, SiegeNode.SiegeAction.BUILD_BRIDGE);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 14, SiegeNode.SiegeAction.BUILD_PILLAR);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 18, SiegeNode.SiegeAction.BUILD_LANDING);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 22, SiegeNode.SiegeAction.BUILD_LADDER);
-        runBuildLane(helper, mob, flowField, state, projectManager, evaluator, 26, SiegeNode.SiegeAction.BUILD_SPIRAL);
-
-        helper.succeed();
+        GameTestSequence sequence = helper.startSequence();
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 2, SiegeNode.SiegeAction.MINE);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 6, SiegeNode.SiegeAction.BUILD_STAIR);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 10, SiegeNode.SiegeAction.BUILD_BRIDGE);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 14, SiegeNode.SiegeAction.BUILD_PILLAR);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 18, SiegeNode.SiegeAction.BUILD_LANDING);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 22, SiegeNode.SiegeAction.BUILD_LADDER);
+        sequence = appendLane(helper, sequence, mob, flowField, state, projectManager, 26, SiegeNode.SiegeAction.BUILD_SPIRAL);
+        sequence.thenSucceed();
     }
 
     /**
-     * Terrain setup + goal drive + assertion for one lane, dispatched by action type. Lanes are
-     * spaced 4 blocks apart on X, each target 1 block east of its own mob anchor - BUILD_LANDING
-     * (the widest side-effect: a 3x3 platform centered on target.below(), plus headroom one
-     * block on every side) reaches at most target X +/- 1, e.g. lane X=18's target at X=19
-     * spans platform X=18..20 - 2 clear blocks from lane X=14's target (X=15) and lane X=22's mob
-     * anchor (X=22), so no lane's setup or execution can touch a neighbor's.
+     * Appends one lane's terrain setup + goal start (one sequence step) and its per-game-tick goal
+     * drive + assertion (a second, retried-every-tick step) to {@code sequence}, dispatched by
+     * action type. Lanes are spaced 4 blocks apart on X, each target 1 block east of its own mob
+     * anchor - BUILD_LANDING (the widest side-effect: a 3x3 platform centered on target.below(),
+     * plus headroom one block on every side) reaches at most target X +/- 1, e.g. lane X=18's
+     * target at X=19 spans platform X=18..20 - 2 clear blocks from lane X=14's target (X=15) and
+     * lane X=22's mob anchor (X=22), so no lane's setup or execution can touch a neighbor's.
      */
-    private static void runBuildLane(GameTestHelper helper, ClanratEntity mob, RegionFlowField flowField,
-                                      FlowFieldState state, SiegeProjectManager projectManagerRef, TerrainEvaluator evaluatorRef,
-                                      int mobX, SiegeNode.SiegeAction action) {
+    private static GameTestSequence appendLane(GameTestHelper helper, GameTestSequence sequence, ClanratEntity mob,
+                                                RegionFlowField flowField, FlowFieldState state,
+                                                SiegeProjectManager projectManagerRef,
+                                                int mobX, SiegeNode.SiegeAction action) {
+        Goal[] laneGoal = new Goal[1];
+        return sequence
+                .thenExecute(() -> laneGoal[0] = setUpLaneAndStartGoal(helper, mob, flowField, state,
+                        projectManagerRef, mobX, action))
+                .thenWaitUntil(() -> {
+                    laneGoal[0].tick();
+                    assertLaneOutcome(helper, mobX, action);
+                });
+    }
+
+    /** First half of a lane: terrain setup, instruction injection, project registration, and the
+     * canUse()/start() handshake - everything that must happen exactly once, before any ticking. */
+    private static Goal setUpLaneAndStartGoal(GameTestHelper helper, ClanratEntity mob, RegionFlowField flowField,
+                                               FlowFieldState state, SiegeProjectManager projectManagerRef,
+                                               int mobX, SiegeNode.SiegeAction action) {
         BlockPos relativeMobPos = new BlockPos(mobX, 2, 4);
         BlockPos relativeTargetPos = relativeMobPos.relative(Direction.EAST);
 
@@ -125,26 +156,30 @@ public class SiegeConstructionActionsGameTests {
             goal.setFlowField(flowField);
             check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
             goal.start();
-            for (int i = 0; i < 20; i++) goal.tick();
-        } else {
-            // Every real BUILD_* node belongs to a SiegeProject - only SiegeProjectManager ever
-            // writes them in production. A single-instruction project here mirrors that
-            // invariant instead of adding a "no owning project" fallback to production code for a
-            // case that can't happen for real.
-            List<SiegeNode> orderedSteps = List.of(new SiegeNode(targetPos, action));
-            Map<BlockPos, SiegeNode> instructions = Map.of(targetPos, new SiegeNode(mobPos, action));
-            SiegeProject project = new SiegeProject(instructions, orderedSteps, mobPos, targetPos, 500);
-            projectManagerRef.addSharedConnectorProject(project);
-
-            BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
-            goal.setFlowField(flowField);
-
-            check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
-            goal.start();
-            for (int i = 0; i < 200 && project.nextUnbuiltInstruction(new org.ratden.skavenblight.ai.pathing.LiveTerrainAccess(helper.getLevel()), evaluatorRef).isPresent(); i++) {
-                goal.tick();
-            }
+            return goal;
         }
+
+        // Every real BUILD_* node belongs to a SiegeProject - only SiegeProjectManager ever
+        // writes them in production. A single-instruction project here mirrors that
+        // invariant instead of adding a "no owning project" fallback to production code for a
+        // case that can't happen for real.
+        List<SiegeNode> orderedSteps = List.of(new SiegeNode(targetPos, action));
+        Map<BlockPos, SiegeNode> instructions = Map.of(targetPos, new SiegeNode(mobPos, action));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, mobPos, targetPos, 500);
+        projectManagerRef.addSharedConnectorProject(project);
+
+        BuildFlowFieldGoal goal = new BuildFlowFieldGoal(mob);
+        goal.setFlowField(flowField);
+
+        check(goal.canUse(), action + " lane: goal should trigger for target " + targetPos.toShortString());
+        goal.start();
+        return goal;
+    }
+
+    /** Second half of a lane: the per-action world-state assertion, retried once per game tick
+     * (via thenWaitUntil) while the lane's goal is driven, until it holds or the test times out. */
+    private static void assertLaneOutcome(GameTestHelper helper, int mobX, SiegeNode.SiegeAction action) {
+        BlockPos relativeTargetPos = new BlockPos(mobX, 2, 4).relative(Direction.EAST);
 
         switch (action) {
             case MINE -> helper.assertBlockState(relativeTargetPos, s -> s.isAir(),
