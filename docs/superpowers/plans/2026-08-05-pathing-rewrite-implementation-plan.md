@@ -443,16 +443,34 @@ git commit -m "feat(pathing): add PathStepEvaluator cost model with cost-orderin
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/PathStepEvaluator.java`
 - Test: `src/test/java/org/ratden/skavenblight/ai/pathing/PathStepEvaluatorStepGenerationTest.java`
 
-**Interfaces:**
+**Interfaces (as actually implemented — the `costBiasTarget` parameter from the original draft was
+dropped: it traced back to `determineMacroAction`'s old vertical-shaft LADDER/SPIRAL/PILLAR distance
+check, which no longer exists post-climb-removal, and nothing else in the new classification needs
+it — keeping an unused parameter around "for later" would violate this plan's own YAGNI guidance):**
 - Consumes: `Task 2`'s cost methods, `TerrainAccess`.
 - Produces: `PathStepEvaluator.EvaluatedStep(BlockPos pos, int cost, PathAction action)` record (same
   shape as today's `TerrainEvaluator.EvaluatedStep`). `PathStepEvaluator.candidateSteps(TerrainAccess
-  terrain, BlockPos current, Set<BlockPos> lockedPositions, Predicate<BlockPos> outOfBounds,
-  BlockPos costBiasTarget)` → `List<EvaluatedStep>` — the ONE method both ordinary walking and
-  construction discovery call (replaces the old split between `getValidOrthogonalSteps` and
-  `determineMacroAction`/`SiegeLineTracer`). `PathStepEvaluator.isWalkableTerrain(TerrainAccess,
-  BlockPos)` and `PathStepEvaluator.isOutOfBounds(...)` — ported verbatim from `TerrainEvaluator`
-  (these two are pure terrain predicates, not part of the old duplication problem).
+  terrain, BlockPos current, Set<BlockPos> lockedPositions, Predicate<BlockPos> outOfBounds)` →
+  `List<EvaluatedStep>` — the ONE method both ordinary walking and construction discovery call
+  (replaces the old split between `getValidOrthogonalSteps` and `determineMacroAction`/
+  `SiegeLineTracer`). `PathStepEvaluator.isWalkableTerrain(TerrainAccess, BlockPos)` and
+  `PathStepEvaluator.isOutOfBounds(...)` — ported verbatim from `TerrainEvaluator` (these two are
+  pure terrain predicates, not part of the old duplication problem).
+
+**Classification, precisely (the original draft's "TUNNEL if the neighbor blocks motion" shorthand
+undersold this — implemented against `determineMacroAction`'s real MINE-vs-support layering, not a
+single-cell blocksMotion check):** for a neighbor that already failed `isWalkableTerrain` (so either
+lacks support, or its own foot/head aren't clear): if pure vertical (`dy != 0 && dx == 0 && dz == 0`),
+no step at all, full stop, regardless of what's blocking or missing. Otherwise, check whether the
+neighbor's own foot (`getBlockState(neighbor)`) OR its head (`getBlockState(neighbor.above())`) is a
+genuine blocking obstacle (`blocksMotion() && !isWalkableScaffold(...)`) — this is the "mining case."
+`dy != 0` → `CARVED_STAIR` if mining case else `AIR_STAIR`; `dy == 0` → `TUNNEL` if mining case else
+`BRIDGE`. Cost is `baseCostFor(action)`, plus `miningCost(terrain, neighbor)` only for the mining
+case. The old 3-cell ceiling pre-check (`pos.above(2)`) is dropped entirely — it only mattered for
+`SiegeLineTracer`'s old unconditional per-hop classification (every hop got classified regardless of
+whether it was already walkable); the new isWalkableTerrain-first gate makes it unreachable, since a
+genuinely walkable diagonal step-up (ordinary 2-cell foot+head clearance, which is all vanilla
+Navigation itself ever needs) now short-circuits to `WALK` before classification runs at all.
 
 **Step generation spec (the load-bearing algorithmic core of the whole rewrite):**
 
