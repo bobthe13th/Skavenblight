@@ -352,6 +352,26 @@ public class SiegeProjectManager {
         if (!buildOrderSteps.isEmpty() && buildOrderSteps.get(0).action() == SiegeNode.SiegeAction.WALK) {
             buildOrderSteps.remove(0);
         }
+
+        // An anchor can itself already be a locked cell of an active project - not just that
+        // project's own entryPos (see the self-collision guard above `reenteredProject`), but any
+        // interior cell, including a region's own nexus/target position, which
+        // FlowFieldCalculator.startCalculation seeds onto calcQueue unconditionally regardless of
+        // lock state. If a genuinely-walkable cell sits one step away, the trace above terminates
+        // in a single WALK hop - SiegeLineTracer.trace's own termination condition fires
+        // immediately - and after the leading-WALK-drop just above, buildOrderSteps ends up EMPTY:
+        // a "project" with nothing to build. Committing it anyway still writes its one
+        // instructions() entry into nextInstructionMap with no cost comparison (see this class's
+        // own comment on FlowFieldCalculator's cycle-risk), silently overwriting whatever that far
+        // cell already had with a brand-new instruction pointing straight back at this anchor -
+        // which, paired with the anchor's own pre-existing instruction pointing forward at that
+        // same far cell, forms a direct mutual 2-cycle. Confirmed live via
+        // testParentRegionGetsRealInstructionsForSharedConnectorCells: the cycle-breaker resolved
+        // exactly this cycle by dropping the far cell's (unlocked) entry entirely, leaving it with
+        // no instruction at all. A candidate with an empty build order does no useful work and
+        // exists only to overwrite something real - discard it before it can.
+        if (buildOrderSteps.isEmpty()) return;
+
         candidateProjects.add(new SiegeProject(result.instructions(), buildOrderSteps, endPos, endPos, totalCost));
         lastPassCandidatesGenerated++;
 

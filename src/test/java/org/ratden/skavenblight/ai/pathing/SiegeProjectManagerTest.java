@@ -328,4 +328,74 @@ class SiegeProjectManagerTest {
                         + "dirFrom/dirTo direction vector degenerate to zero, breaking auto-widening for "
                         + "this exact BUILD_STAIR project shape");
     }
+
+    /**
+     * Reproduces the bug behind testParentRegionGetsRealInstructionsForSharedConnectorCells:
+     * evaluateMacroProjects can fire on an anchor that is ALREADY a locked cell of an active
+     * project - not just at that project's own entryPos (already guarded, see the self-collision
+     * test above), but at any locked interior cell, including a region's own nexus/target position
+     * (which injectActiveProjects/startCalculation seed onto calcQueue unconditionally, regardless
+     * of lock state). If a genuinely-walkable cell sits one step away in some direction, the fresh
+     * trace terminates in a single WALK hop - SiegeLineTracer.trace's own termination condition
+     * fires immediately - producing a "successful" candidate whose buildOrder, after
+     * evaluateSingleLine's existing reversal + leading-WALK-drop, is EMPTY: a project with nothing
+     * to build. Confirmed live via siege_dump/GameTest log: such a candidate's single instructions
+     * entry still gets putAll'd into nextInstructionMap with no cost comparison, silently
+     * overwriting whatever the far cell already had (here, its own genuinely-correct fallback
+     * instruction) with a brand-new one pointing straight back at the anchor - which, paired with
+     * the anchor's own pre-existing instruction pointing forward at that same far cell, forms a
+     * direct mutual 2-cycle. FlowFieldCalculator's cycle-breaker then drops the (unlocked) far
+     * cell's entry entirely, leaving it with no instruction at all.
+     */
+    @Test
+    void evaluateMacroProjectsMustNotOverwriteAGenuinelyWalkableCellWithADegenerateEmptyBuildOrderLine() {
+        FakeTerrain terrain = new FakeTerrain();
+        SiegeProjectManager manager = new SiegeProjectManager(new TerrainEvaluator());
+
+        BlockPos upstream = new BlockPos(0, 64, 0); // locked cell of an active project; itself genuinely walkable
+        BlockPos farSide = new BlockPos(0, 65, 0);   // directly above upstream - also genuinely walkable
+
+        // upstream supports farSide, and is itself supported (STONE below) - both cells are
+        // genuinely walkable right now, matching the real bug's geometry (a connector's own
+        // second-to-last cell, one step from its genuinely-open far/exit side).
+        terrain.set(upstream.below(), Blocks.STONE.defaultBlockState());
+        terrain.set(upstream, Blocks.STONE.defaultBlockState());
+
+        // An active project already correctly instructs upstream -> farSide (mirrors a connector's
+        // own outboundInstructions entry). upstream is locked via this project.
+        BlockPos entryPos = new BlockPos(0, 63, 0);
+        Map<BlockPos, SiegeNode> instructions = Map.of(
+                upstream, new SiegeNode(farSide, SiegeNode.SiegeAction.WALK),
+                entryPos, new SiegeNode(upstream, SiegeNode.SiegeAction.WALK));
+        SiegeProject activeProject = new SiegeProject(instructions,
+                List.of(new SiegeNode(upstream, SiegeNode.SiegeAction.WALK), new SiegeNode(entryPos, SiegeNode.SiegeAction.WALK)),
+                farSide, entryPos, 500);
+        manager.addSharedConnectorProject(activeProject);
+
+        FlowFieldState state = new FlowFieldState(new BlockPos(0, 0, 0), Collections.emptySet());
+        PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue = new PriorityQueue<>();
+        Map<BlockPos, Integer> nextCostMap = new HashMap<>();
+        Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
+
+        manager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
+        assertTrue(manager.getLockedPositions().contains(upstream), "setup sanity: upstream must be locked");
+
+        // farSide's own genuinely-correct existing instruction (e.g. a trivial self-referencing
+        // fallback, as a region's own target/exitPos gets from injectActiveProjects/
+        // startCalculation) - must survive evaluateMacroProjects firing AT upstream.
+        SiegeNode farSideExistingInstruction = new SiegeNode(farSide, SiegeNode.SiegeAction.WALK);
+        nextInstructionMap.put(farSide, farSideExistingInstruction);
+
+        // Mirrors a region's own target/nexus position being seeded onto calcQueue unconditionally
+        // (FlowFieldCalculator.startCalculation) and then popped by the ordinary Dijkstra loop,
+        // re-firing evaluateMacroProjects on it even though it's already a locked cell.
+        manager.evaluateMacroProjects(terrain, upstream, state, 500, calcQueue, nextCostMap, nextInstructionMap);
+
+        assertEquals(farSideExistingInstruction, nextInstructionMap.get(farSide),
+                "a macro-line trace that terminates in a single WALK hop (nothing to build) must not "
+                        + "overwrite farSide's own existing instruction - doing so here replaced a correct "
+                        + "instruction with one pointing straight back at `upstream`, which combined with "
+                        + "upstream's own pre-existing forward-pointing instruction forms a direct mutual "
+                        + "2-cycle that the cycle-breaker then resolves by deleting farSide's entry entirely");
+    }
 }

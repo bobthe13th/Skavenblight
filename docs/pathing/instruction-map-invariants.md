@@ -102,15 +102,34 @@ cheaper real route the ordinary flood found elsewhere in the same pass is never 
 
 **Test-enforced:** `SiegeProjectManagerTest.entryPosStaysRoutableOnceItsOwnWalkStepReadsCompleteButTheProjectsInteriorIsStillUnbuilt`.
 
-## Connector projects don't self-key their own entryPos
+## What a connector project does and doesn't self-key
 
-`RegionGraph.registerConnector`'s route-tree-assigned connector projects deliberately do **not**
-key their own `entryPos` in `instructions` — "the far region's own pass already covers it" (see that
-method's own doc). This means the `entryPos` fallback above must null-guard:
-`project.getInstructions().get(entry)` can genuinely return `null` for a connector project, and
-inserting that `null` into `nextInstructionMap` would NPE the first caller that reads it back out.
+**Correction (2026-08-04, later the same session):** an earlier version of this section claimed
+`RegionGraph.registerConnector`'s connector projects don't key their own `entryPos`. That was
+wrong, found by directly tracing `outboundInstructions`/`inboundInstructions` rather than trusting
+the paraphrase that produced it — the exact same doc-drift failure mode this whole document exists
+to stop, so it's worth recording the correction rather than quietly fixing it.
 
-**Test-enforced:** `SiegeProjectManagerTest.entryPosFallbackNeverInsertsNullForAConnectorProjectThatDoesNotKeyItsOwnEntryPos`.
+**What's actually true:** both `towardA` and `towardB` DO key their own `entryPos` — trace it
+yourself before relying on this: `outboundInstructions(anchor, steps)` puts `anchor` (towardB's
+entryPos) as its very first key; `inboundInstructions(anchor, steps)` puts `steps.get(size-1).pos()`
+(towardA's entryPos, since `orderedSteps`' last element is `endPos`) at `i = size-1`. **What
+neither one keys is its own `exitPos` (the far endpoint)** — `outboundInstructions` never keys
+`steps.get(size-1).pos()`, and `inboundInstructions` never keys `anchor` — matching
+`registerConnector`'s own doc comment ("neither outboundInstructions nor inboundInstructions keys
+their own far endpoint"). That's why `exitPos` gets its own separate trivial self-WALK fallback in
+`injectActiveProjects` (see `SiegeProjectManager.java:176-179`), distinct from the entryPos
+fallback.
+
+The `entryPos` fallback's null-guard (`SiegeProjectManager.java:158-161`) is still correct
+defensive code — a `SiegeProject` CAN in principle be constructed without its `entryPos` keyed
+(the null-guard test builds exactly that directly), so the guard should stay — but as of this
+session's `RegionGraph.registerConnector`, no real connector project actually exercises that path.
+If you're debugging a null-instruction-at-entryPos case, look elsewhere first.
+
+**Test-enforced:** `SiegeProjectManagerTest.entryPosFallbackNeverInsertsNullForAConnectorProjectThatDoesNotKeyItsOwnEntryPos`
+(proves the guard itself works, using a hand-built project shaped that way — not evidence that a
+real connector produces one).
 
 ## A reactive project's own entryPos must not overwrite its own locked interior on re-entry
 
@@ -128,6 +147,31 @@ cycle risk and would otherwise stop real construction from ever being planned).
 **Test-enforced:** `SiegeProjectManagerTest.reEvaluatingAnActiveProjectsEntryPosMustNotOverwriteThatSameProjectsOwnLockedInteriorCell`
 (the guard fires), `freshTraceSucceedsWhenItCrossesAnUnrelatedActiveProjectsLockedCellWithoutFormingACycle`
 (the guard does NOT over-block cross-project crossings).
+
+## A degenerate, empty-build-order candidate line must not be committed
+
+The self-collision guard above only covers an anchor re-entering its OWN project's cells at that
+project's `entryPos`. It does not cover a broader case: **any** anchor that's already a locked cell
+of an active project — including a region's own nexus/target position, which
+`FlowFieldCalculator.startCalculation` seeds onto `calcQueue` unconditionally regardless of lock
+state — can still have `evaluateMacroProjects` fire on it. If a genuinely-walkable cell sits one
+step away in some direction, `SiegeLineTracer.trace` terminates in a single WALK hop immediately
+(its own termination condition: the first step is already walkable), and after
+`evaluateSingleLine`'s existing reversal + leading-WALK-drop, `buildOrderSteps` ends up **empty** —
+a "successful" candidate with nothing to build. Before the fix below, this got committed anyway:
+its one `instructions()` entry was `putAll`'d into `nextInstructionMap` with no cost comparison,
+silently overwriting whatever the far cell already had with a new instruction pointing straight
+back at the anchor — which, paired with the anchor's own pre-existing forward-pointing instruction,
+forms a direct mutual 2-cycle. `FlowFieldCalculator`'s cycle-breaker then resolves it by dropping
+the far cell's (unlocked) entry entirely, leaving it with no instruction at all.
+
+Confirmed live via `testParentRegionGetsRealInstructionsForSharedConnectorCells`: the region's own
+nexus/target sat one step from a connector's genuinely-walkable far/exit side, and this exact
+sequence left that far side with no flow-field instruction. The fix (`evaluateSingleLine`): if
+`buildOrderSteps.isEmpty()` after the leading-WALK-drop, return before committing the candidate at
+all — don't add it to `candidateProjects`, don't touch `nextCostMap`/`nextInstructionMap`/`calcQueue`.
+
+**Test-enforced:** `SiegeProjectManagerTest.evaluateMacroProjectsMustNotOverwriteAGenuinelyWalkableCellWithADegenerateEmptyBuildOrderLine`.
 
 ## Stacked stair columns cannot be re-traversed from below once built (known, unfixed limitation)
 
