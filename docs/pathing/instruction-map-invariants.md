@@ -204,15 +204,29 @@ deliberate follow-up decision.
 Every bug and near-miss in this document's central invariant traces to one root cause: `SiegeNode`
 is used both as "the action at a known position" (unambiguous on its own) and as "a map value whose
 `.pos()` means something else entirely" (ambiguous, and every reader has to already know which role
-they're in). The durable fix is a distinct map-value type that can't be confused with a standalone
-`SiegeNode` — e.g. `record FlowStep(BlockPos next, SiegeAction actionHere)` — so the type system
-itself rules out passing a map value where a real-position `SiegeNode` is expected. This was
-investigated this session and deliberately **not started**: it spans all producers/consumers listed
-above (at least `FlowFieldCalculator`, `SiegeLineTracer`, `SiegeProjectManager`, `SiegeProject`,
-`RegionGraph`, plus every `TerrainEvaluator` call site that takes a `SiegeNode`) — real scope, not a
-same-session patch. Until it happens, the central-invariant rule above (reconstruct before checking
-completion) is the load-bearing safety net, and it's test-enforced (see citations above) — but it
-depends on every future call site remembering to apply it by hand.
+they're in).
+
+**Correction (2026-08-05, a later session): it's not a two-shape problem, it's three.** The
+paragraph originally here proposed a two-type split (a `FlowStep` map-value type, `SiegeNode`
+narrowed to standalone) as the durable fix. A full-codebase Explore survey done to scope that split
+found a THIRD shape hiding in `RegionGraph.outboundInstructions`/`inboundInstructions`: connector
+projects pair `.pos()`/`.action()` the OPPOSITE way from the core flood and reactive macro-tracer
+(forward pairing — `.pos()` is the real action position one step ahead — instead of the predecessor
+pairing everything else uses), and that shape gets copied verbatim into the same
+`Map<BlockPos, SiegeNode>` by `SiegeProjectManager.injectActiveProjects` with no tag distinguishing
+it. A naive two-type split doesn't remove this — it just relocates the ambiguity to "is this map
+entry actually a `FlowStep` or a `SiegeNode` wearing a `FlowStep`'s map slot?" The real fix
+canonicalizes `RegionGraph` to emit the same predecessor-pairing everything else already uses,
+*then* the two-type split becomes sound. Two runtime-unverified risks were also found in the same
+survey and need resolving before or during the fix, not assumed away: whether
+`SiegeProject.isCompleted`/`getRemainingInstructions`'s unconditional reconstruction is actually
+correct for a connector-sourced (not reactively-traced) project, and whether
+`RegionFlowField.getNextSiegeNode` — which reads a raw map value without reconstructing, the
+single highest-traffic call site in the whole system — happens to be coincidentally correct today
+only because of which shape currently reaches it in practice. See
+`docs/superpowers/plans/2026-08-05-siegenode-dual-meaning-split-plan.md` for the full scoped plan,
+file-by-file impact list, and migration order. Still **not started** — this correction only fixes
+the scoping, not the code.
 
 ## Next-session breadcrumb: the 4 remaining `StaircaseSiegeGroupGameTests` failures
 
@@ -222,12 +236,19 @@ As of this session's last full run, `testSingleRatBuildsStaircaseAcrossSmallGap`
 run, including with this session's head-clearance fix fully reverted (so that fix is not the
 cause). All four fail identically — not "some rats are slow," a single shared root cause.
 
-**Confirmed:** the diagonal `BUILD_STAIR` crossing line IS still being discovered — a
-`"Successful Macro Line built ... (Cost: 5275)"` entry (matching the known-good cost from earlier
-verification this session) appears in a completed run's log. That rules out "discovery never
-happens" as the explanation and points at **execution**: claim/goal-priority
-(`AbstractSiegeConstructionGoal`/`BuildFlowFieldGoal`/`tryRegisterWorker`), not
-`evaluateMacroProjects`/`evaluateSingleLine`/cost gating.
+**Retracted (2026-08-05, later session):** the paragraph that used to sit here claimed the diagonal
+`BUILD_STAIR` crossing line was "confirmed still being discovered" via a `"Cost: 5275"` log entry.
+That entry was never bounds-checked against the actual test structure it was cited for — `pathing_test_giant`
+gets placed at a different world offset every run, so proximity between a candidate's coordinates
+and a test's own nexus/rat position in a *different* run's log proves nothing. Bounds-checking
+properly (structure origin from the failure line, 96×96 footprint) in a later pass found no
+in-bounds macro-line/candidate at all for the single-rat test in that run — a different result from
+what's asserted above. See `docs/superpowers/plans/2026-08-04-staircase-siege-zero-stairs-investigation-plan.md`'s
+"Step 1 result (corrected)" section for what's actually confirmed: this test's crossing is a
+route-tree **connector** (already correctly shaped, real `WALK`/`MINE`/`BUILD_STAIR` actions,
+entryPos exactly under the rat), not a reactively-discovered candidate — so the whole
+discovery-vs-Stage-B framing below doesn't apply to this test. Don't cite the retracted claim; read
+the plan doc's corrected section instead.
 
 **A separate, likely-unrelated observation from the same run:** `StrandedGoal` logs many rats
 "stalled ... heading toward <same X,Y, Z+1>" with `issued=false hasPath=true canReach=true

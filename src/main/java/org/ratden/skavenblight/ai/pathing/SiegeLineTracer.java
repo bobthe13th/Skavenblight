@@ -131,7 +131,7 @@ public class SiegeLineTracer {
             orderedSteps.add(new SiegeNode(nextPos, action));
 
             if (terrainEvaluator.isWalkableTerrain(terrain, nextPos)) {
-                return new TraceResult(instructions, List.copyOf(orderedSteps), nextPos, totalCost, true);
+                return finishNaturalTermination(terrain, instructions, orderedSteps, nextPos, totalCost);
             }
 
             if (i == maxLength) {
@@ -148,5 +148,43 @@ public class SiegeLineTracer {
         }
 
         return TraceResult.aborted();
+    }
+
+    /**
+     * A trace's fixed (dx,dy,dz) stride can overshoot real terrain by exactly one tread: the
+     * single step immediately before natural termination gets tagged BUILD_STAIR/BUILD_BRIDGE/
+     * etc only because determineMacroAction's own support check (pos.below() open) never looks
+     * any further down than that - but if genuinely walkable ground already exists one level
+     * below THAT (i.e. two below the tread itself), the tread is unnecessary: a mob can already
+     * walk there directly, one level lower, with no construction at all. Reported live as "the
+     * first stair was built on top of a [fill] block, when it should have been placed on the
+     * already-existing ground."
+     *
+     * Scoped to a trace that is EXACTLY this one tread plus its terminal WALK
+     * (orderedSteps.size() == 2, i.e. nothing between the tread and the anchor). A longer
+     * chain's own second-to-last tread would need the same check, but its corrected ground
+     * position sits a dy=-2 hop from whatever tread precedes it - not an ordinary walkable step
+     * - so trimming there would strand the remaining chain. No confirmed case needs that;
+     * leaving longer chains untouched avoids introducing an unreachable gap for one that hasn't
+     * been seen.
+     *
+     * Scoped to BUILD_STAIR specifically, not every support-triggered action. A one-segment
+     * vertical trace (dx=0, dz=0) has tread.pos() == anchorPos.above(), so
+     * tread.pos().below() == anchorPos itself - the cell the mob is already standing on, which
+     * is walkable by construction (that's why the flood is here). Applying this check to
+     * BUILD_PILLAR/BUILD_LADDER/BUILD_SPIRAL would abort every one-segment vertical climb,
+     * mistaking "the anchor is walkable" (always true, no overshoot involved) for "the tread
+     * overshot real terrain" (the actual, diagonal-only failure mode this fixes).
+     */
+    private TraceResult finishNaturalTermination(TerrainAccess terrain, Map<BlockPos, SiegeNode> instructions,
+                                                  List<SiegeNode> orderedSteps, BlockPos endPos, int totalCost) {
+        if (orderedSteps.size() == 2) {
+            SiegeNode tread = orderedSteps.get(0);
+            if (tread.action() == SiegeNode.SiegeAction.BUILD_STAIR
+                    && terrainEvaluator.isWalkableTerrain(terrain, tread.pos().below())) {
+                return TraceResult.aborted();
+            }
+        }
+        return new TraceResult(instructions, List.copyOf(orderedSteps), endPos, totalCost, true);
     }
 }
