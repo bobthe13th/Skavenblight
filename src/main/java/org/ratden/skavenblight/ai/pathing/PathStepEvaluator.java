@@ -117,6 +117,30 @@ public class PathStepEvaluator {
         return state.blocksMotion() && !isWalkableScaffold(state);
     }
 
+    /**
+     * Is the construction step at {@code pos} already done in the real world? TUNNEL/CARVED_STAIR
+     * check all three of foot/head/ceiling (not just foot) - checking foot alone let a mining step
+     * approaching an overhang from below be reported "already completed" the moment the foot cell
+     * happened to already be open air, even though the actual obstruction (the overhang itself) was
+     * untouched (see the old TerrainEvaluator.isActionCompleted's identical MINE-branch fix, ported
+     * verbatim here since a TUNNEL/CARVED_STAIR step's "done" condition is exactly the same check).
+     */
+    public boolean isActionCompleted(TerrainAccess terrain, BlockPos pos, PathAction action) {
+        BlockState state = terrain.getBlockState(pos);
+        return switch (action) {
+            case TUNNEL, CARVED_STAIR -> (!state.blocksMotion() || isWalkableScaffold(state))
+                    && isOpenOrWalkable(terrain, pos.above())
+                    && isOpenOrWalkable(terrain, pos.above(2));
+            case BRIDGE, AIR_STAIR -> state.blocksMotion() || isWalkableScaffold(state);
+            case WALK -> isWalkableTerrain(terrain, pos);
+        };
+    }
+
+    private boolean isOpenOrWalkable(TerrainAccess terrain, BlockPos pos) {
+        BlockState state = terrain.getBlockState(pos);
+        return !state.blocksMotion() || isWalkableScaffold(state);
+    }
+
     // =================================================================================
     // TERRAIN PREDICATES (ported verbatim from TerrainEvaluator - unrelated to the
     // WALK/construction duplication this class exists to unify)

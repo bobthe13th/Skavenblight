@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * A data class representing an active multi-block building or mining project.
@@ -22,7 +23,10 @@ import java.util.Set;
  */
 public class SiegeProject {
 
-    private final Map<BlockPos, SiegeNode> instructions;
+    private final UUID id;
+    private final UUID networkId;
+
+    private final Map<BlockPos, FlowStep> instructions;
     private final BlockPos entryPos; // The block where rats enter this project (can be on ground or a mid-air landing)
     private final int expectedEntryCost; // The massive penalty cost assigned to this project
     // The block where this project hands off to whatever region/field is supposed to take over
@@ -30,12 +34,16 @@ public class SiegeProject {
     // fallback for (see getExitPos's own doc for why this is nullable and what it's for).
     private final BlockPos exitPos;
 
-    // Geometry-ordered build sequence, sourced from SiegeLineTracer.TraceResult.orderedSteps() -
+    // Geometry-ordered build sequence, sourced from the chained-hop trace's own ordered steps -
     // NOT derived from `instructions` above, whose values point one step BACKWARD in trace order
     // (see this class's own Javadoc / the design doc's Background for why that convention is
     // wrong for "what to build, in what order, facing which way", and why RegionGraph's own
     // outboundInstructions/inboundInstructions already avoid it for the identical reason).
     private final List<PlannedStep> buildOrder;
+
+    // Positions in buildOrder where PlatformInserter found a construction-type seam - see
+    // PlatformInserter's own doc for why this is a side-channel set rather than a 6th PathAction.
+    private final Set<BlockPos> platformPositions;
 
     /** The original build order's own starting anchor (the position its first step was traced
      * from) - stored so tryWiden can reconstruct the same trace direction from a shifted anchor.
@@ -44,9 +52,9 @@ public class SiegeProject {
     private final BlockPos widenAnchor;
 
     private final Set<Mob> workers = new HashSet<>();
-    // Updated by nextUnbuiltInstruction()'s callers (tryRegisterWorker, Task 4's tick()) each time
+    // Updated by nextUnbuiltInstruction()'s callers (tryRegisterWorker, tick()) each time
     // they have real terrain access; isAtCapacity() reads this cheaply for callers (AwaitFormationGoal)
-    // that don't want to thread a TerrainAccess/TerrainEvaluator through just to ask "is this full".
+    // that don't want to thread a TerrainAccess/PathStepEvaluator through just to ask "is this full".
     private int cachedEffectiveCap = Integer.MAX_VALUE;
     private int width = 1;
     private double accumulatedWork = 0.0;
@@ -55,32 +63,44 @@ public class SiegeProject {
     // first tick() call of a project's life always passes the guard.
     private long lastTickedGameTime = -1L;
 
-    public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
-                         BlockPos entryPos, int expectedEntryCost) {
-        this(instructions, orderedSteps, buildOrderAnchor, entryPos, expectedEntryCost, null);
+    public SiegeProject(Map<BlockPos, FlowStep> instructions, List<FlowStep> orderedSteps, BlockPos buildOrderAnchor,
+                         BlockPos entryPos, int expectedEntryCost, UUID networkId) {
+        this(instructions, orderedSteps, buildOrderAnchor, entryPos, expectedEntryCost, null, networkId);
     }
 
-    public SiegeProject(Map<BlockPos, SiegeNode> instructions, List<SiegeNode> orderedSteps, BlockPos buildOrderAnchor,
-                         BlockPos entryPos, int expectedEntryCost, BlockPos exitPos) {
+    public SiegeProject(Map<BlockPos, FlowStep> instructions, List<FlowStep> orderedSteps, BlockPos buildOrderAnchor,
+                         BlockPos entryPos, int expectedEntryCost, BlockPos exitPos, UUID networkId) {
+        this.id = UUID.randomUUID();
+        this.networkId = networkId;
         this.instructions = new HashMap<>(instructions);
         this.buildOrder = planSteps(orderedSteps, buildOrderAnchor);
+        PlatformInserter.Result platformResult = PlatformInserter.insertPlatforms(this.buildOrder);
+        this.platformPositions = platformResult.platformPositions();
         this.widenAnchor = buildOrderAnchor;
         this.entryPos = entryPos;
         this.expectedEntryCost = expectedEntryCost;
         this.exitPos = exitPos;
     }
 
-    public boolean isCompleted(TerrainAccess terrain, TerrainEvaluator evaluator) {
-        // Must check at entry.getKey() (the real position), not the stored node's own .pos() (the
-        // PREDECESSOR position - see this class's own Javadoc on the anchor-ward `instructions`
-        // convention). Checking the predecessor meant a fully-built project could never be detected
-        // as complete - nextUnbuiltInstruction already gets this right by reconstructing a
-        // SiegeNode from the real position; this mirrors that.
-        return instructions.entrySet().stream()
-                .allMatch(entry -> evaluator.isActionCompleted(terrain, new SiegeNode(entry.getKey(), entry.getValue().action())));
+    public UUID getId() {
+        return this.id;
     }
 
-    public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
+    public UUID getNetworkId() {
+        return this.networkId;
+    }
+
+    public boolean isCompleted(TerrainAccess terrain, PathStepEvaluator evaluator) {
+        // Must check at entry.getKey() (the real position), not the stored step's own .pos() (the
+        // PREDECESSOR position - see this class's own Javadoc on the anchor-ward `instructions`
+        // convention). Checking the predecessor meant a fully-built project could never be detected
+        // as complete - nextUnbuiltInstruction already gets this right by reconstructing from the
+        // real position; this mirrors that.
+        return instructions.entrySet().stream()
+                .allMatch(entry -> evaluator.isActionCompleted(terrain, entry.getKey(), entry.getValue().action()));
+    }
+
+    public boolean survivedMapOverwrite(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, FlowStep> finalInstructionMap) {
         // 1. ENTRY POINT VALIDATION
         // If the final Dijkstra map gave our entry point (whether ground or chained landing)
         // a cheaper cost than the project's massive penalty, a walkable highway exists! Kill the project.
@@ -91,18 +111,18 @@ public class SiegeProject {
 
         // 2. Fallback check for the project blocks themselves
         return instructions.entrySet().stream().allMatch(entry -> {
-            SiegeNode finalNode = finalInstructionMap.get(entry.getKey());
-            return finalNode != null && finalNode.action() == entry.getValue().action();
+            FlowStep finalStep = finalInstructionMap.get(entry.getKey());
+            return finalStep != null && finalStep.action() == entry.getValue().action();
         });
     }
 
-    public Map<BlockPos, SiegeNode> getRemainingInstructions(TerrainAccess terrain, TerrainEvaluator evaluator) {
-        // Same real-position fix as isCompleted() above - node.pos() is the predecessor position,
+    public Map<BlockPos, FlowStep> getRemainingInstructions(TerrainAccess terrain, PathStepEvaluator evaluator) {
+        // Same real-position fix as isCompleted() above - step.pos() is the predecessor position,
         // not pos (the map key) the action actually applies to.
-        Map<BlockPos, SiegeNode> remaining = new HashMap<>();
-        instructions.forEach((pos, node) -> {
-            if (!evaluator.isActionCompleted(terrain, new SiegeNode(pos, node.action()))) {
-                remaining.put(pos, node);
+        Map<BlockPos, FlowStep> remaining = new HashMap<>();
+        instructions.forEach((pos, step) -> {
+            if (!evaluator.isActionCompleted(terrain, pos, step.action())) {
+                remaining.put(pos, step);
             }
         });
         return remaining;
@@ -121,7 +141,7 @@ public class SiegeProject {
      * whatever comes next - null for projects with no distinct handoff position (e.g. a reactive
      * macro-project discovered mid-flood, whose far end is already covered by the very flood that
      * discovered it). Deliberately NOT part of {@code instructions} (see
-     * SiegeProjectManager#injectActiveProjects's use of this): a self-referential fallback node
+     * SiegeProjectManager#injectActiveProjects's use of this): a self-referential fallback step
      * seeded there would make {@link #isCompleted} and {@link #survivedMapOverwrite} - which both
      * iterate {@code instructions} as their ground truth for "is this project done/still needed" -
      * see a permanently-incomplete, permanently-necessary entry that can never be satisfied by any
@@ -134,29 +154,26 @@ public class SiegeProject {
     /**
      * The full instruction map this project was built with, regardless of how much of it is
      * already complete - see {@link #getRemainingInstructions} for the completion-filtered view.
-     * Added for task-8's orphaned-connector-cell test, which needs every position a mob could be
-     * standing on mid-crossing, not just what's left to build.
+     * Needed by orphaned-connector-cell coverage: every position a mob could be standing on
+     * mid-crossing, not just what's left to build.
      */
-    public Map<BlockPos, SiegeNode> getInstructions() {
+    public Map<BlockPos, FlowStep> getInstructions() {
         return Collections.unmodifiableMap(instructions);
     }
 
-    /**
-     * One position this project still needs to act on, in build order: the real position the
-     * action applies to (unlike `instructions`' values - see this class's own background doc),
-     * the action, and the facing derived purely from trace geometry (predecessor step -> this
-     * step), never from any mob's position - so placement can be centralized and driven by
-     * whichever/however many workers are registered, not tied to whoever happens to execute it.
-     */
-    record PlannedStep(BlockPos pos, SiegeNode.SiegeAction action, Direction facing) {}
+    /** Every position in this project's build order that PlatformInserter marked as a
+     * construction-type seam - see PlatformInserter's own doc. */
+    public Set<BlockPos> getPlatformPositions() {
+        return Collections.unmodifiableSet(platformPositions);
+    }
 
     /** Package-private + static for direct unit testing, mirroring FlowFieldCalculator's own
      * detectMutualCyclePositions/pickCyclePositionToDrop pattern for pure logic extracted out of
      * a Minecraft-coupled class. */
-    static List<PlannedStep> planSteps(List<SiegeNode> orderedSteps, BlockPos anchor) {
+    static List<PlannedStep> planSteps(List<FlowStep> orderedSteps, BlockPos anchor) {
         List<PlannedStep> planned = new ArrayList<>(orderedSteps.size());
         BlockPos previous = anchor;
-        for (SiegeNode step : orderedSteps) {
+        for (FlowStep step : orderedSteps) {
             planned.add(new PlannedStep(step.pos(), step.action(), approachFacing(previous, step.pos())));
             previous = step.pos();
         }
@@ -173,49 +190,32 @@ public class SiegeProject {
         } else if (dz != 0) {
             return dz > 0 ? Direction.SOUTH : Direction.NORTH;
         }
-        return Direction.NORTH; // pure-vertical step (BUILD_PILLAR/SPIRAL/LADDER) - facing unused for these.
+        return Direction.NORTH; // pure-vertical step - facing unused (no PathAction is pure-vertical anymore).
     }
 
-    /** BUILD_STAIR/BUILD_BRIDGE scale their worker cap with `width` (see the auto-widening design);
-     * every other action type gets a flat cap regardless of `width`. */
-    static int effectiveCapFor(SiegeNode.SiegeAction action, int width, int maxProjectWorkers, int workersPerWidenStep) {
-        boolean widenable = action == SiegeNode.SiegeAction.BUILD_STAIR || action == SiegeNode.SiegeAction.BUILD_BRIDGE;
+    /** All four construction actions scale their worker cap with `width` (see the auto-widening
+     * design) - every action is parallel-lane-capable now, not just two of the old five. */
+    static int effectiveCapFor(PathAction action, int width, int maxProjectWorkers, int workersPerWidenStep) {
+        boolean widenable = action != PathAction.WALK;
         return widenable ? width * workersPerWidenStep : maxProjectWorkers;
     }
 
-    /** The first not-yet-built step in build order, or empty if the project is fully built OR
-     * currently blocked on an INCOMPLETE MINE step (handled entirely by the old per-rat
-     * SmartBreachGoal/flowField.tryClaimTarget path - out of scope for this mechanism; skipping
-     * PAST an unmined obstacle to a build step beyond it would be physically wrong, since that
-     * later step may depend on the obstacle already being cleared).
-     *
-     * <p>The completion check on the MINE branch is load-bearing, not defensive: without it this
-     * method aborted on the mere PRESENCE of a MINE step anywhere in the build order, so once a
-     * project's traced line contained one, every build step after it was unreachable forever -
-     * even after SmartBreachGoal had actually cleared the obstacle in the real world. That is a
-     * permanent project stall, and it silently contradicted this method's own documented contract
-     * ("blocked on an incomplete MINE step"). Found by the whole-branch review; see
-     * nextUnbuiltInstructionContinuesPastAnAlreadyClearedMineStep for the mirror-case test. */
-    public Optional<PlannedStep> nextUnbuiltInstruction(TerrainAccess terrain, TerrainEvaluator evaluator) {
+    /** The first not-yet-built step in build order, or empty if the project is fully built. */
+    public Optional<PlannedStep> nextUnbuiltInstruction(TerrainAccess terrain, PathStepEvaluator evaluator) {
         for (PlannedStep step : buildOrder) {
-            if (step.action() == SiegeNode.SiegeAction.WALK || step.action() == SiegeNode.SiegeAction.LEAP) continue;
-            if (step.action() == SiegeNode.SiegeAction.MINE) {
-                if (!evaluator.isActionCompleted(terrain, new SiegeNode(step.pos(), step.action()))) return Optional.empty();
-                continue;
-            }
-            if (!evaluator.isActionCompleted(terrain, new SiegeNode(step.pos(), step.action()))) return Optional.of(step);
+            if (step.action() == PathAction.WALK) continue;
+            if (!evaluator.isActionCompleted(terrain, step.pos(), step.action())) return Optional.of(step);
         }
         return Optional.empty();
     }
 
     /** Registers `mob` as a worker if there's real build work nearby (within `workRadius` of the
      * next unbuilt step) and the project isn't already at capacity - see effectiveCapFor for how
-     * capacity scales with width for BUILD_STAIR/BUILD_BRIDGE. Idempotent: re-registering an
-     * already-registered mob succeeds trivially. When a registration is rejected purely for being
-     * over cap, this retries once against a freshly-widened cap (see tryWiden) before giving up -
-     * so a growing crowd of rats spreads out into a new parallel lane instead of all queuing for
-     * the same single-file line. */
-    public boolean tryRegisterWorker(Mob mob, TerrainAccess terrain, TerrainEvaluator evaluator, double workRadius,
+     * capacity scales with width. Idempotent: re-registering an already-registered mob succeeds
+     * trivially. When a registration is rejected purely for being over cap, this retries once
+     * against a freshly-widened cap (see tryWiden) before giving up - so a growing crowd of rats
+     * spreads out into a new parallel lane instead of all queuing for the same single-file line. */
+    public boolean tryRegisterWorker(Mob mob, TerrainAccess terrain, PathStepEvaluator evaluator, double workRadius,
                                       int maxProjectWorkers, int workersPerWidenStep) {
         Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
         if (next.isEmpty()) return false;
@@ -240,27 +240,21 @@ public class SiegeProject {
      * radius and capacity preconditions, in the same order, with nothing written and no widen
      * attempted. Exists for AbstractSiegeProjectGoal's canUse()/canContinueToUse(), which need to
      * decide whether to take (and keep) the mob's MOVE flag BEFORE start() gets a chance to try the
-     * real registration. Without it, canUse() only checked "does some project exist here", so a rat
-     * whose registration then failed in start() sat holding {MOVE, LOOK} at priority 6 doing
-     * literally nothing (tick() returns immediately with no registered project), permanently
-     * starving AwaitFormationGoal (8) and FollowFlowFieldGoal (9) of the MOVE flag they need - and
-     * making AwaitFormationGoal's own at-capacity mechanism unreachable whenever ANY project
-     * existed near a rat. Found by the whole-branch review.
+     * real registration.
      *
      * <p>Radius is checked BEFORE the already-registered short-circuit, exactly as
      * tryRegisterWorker does, so this doubles as the "has this worker drifted too far to still be
      * working here?" test canContinueToUse needs.
      *
      * <p>Deliberately answers TRUE for an over-cap project that is still eligible to widen, rather
-     * than running the widen itself: {@link #tryWiden} runs a real {@link SiegeLineTracer} trace,
-     * and canUse() is called for every rat on every tick, so attempting it here would turn a
-     * demand-bounded retry into a per-rat-per-tick trace. The residual imprecision is narrow and
-     * one-directional - a widen-eligible project whose trace actually fails (terrain won't take
-     * another lane) still reports true here and then fails in start(), the one case where the old
-     * MOVE-holding behavior survives. Every other rejection reason is now caught before the goal
-     * ever starts.
+     * than running the widen itself: {@link #tryWiden} runs a real chained-hop trace, and canUse()
+     * is called for every rat on every tick, so attempting it here would turn a demand-bounded
+     * retry into a per-rat-per-tick trace. The residual imprecision is narrow and one-directional -
+     * a widen-eligible project whose trace actually fails (terrain won't take another lane) still
+     * reports true here and then fails in start(), the one case where the old MOVE-holding behavior
+     * survives. Every other rejection reason is now caught before the goal ever starts.
      */
-    public boolean canAcceptWorker(Mob mob, TerrainAccess terrain, TerrainEvaluator evaluator, double workRadius,
+    public boolean canAcceptWorker(Mob mob, TerrainAccess terrain, PathStepEvaluator evaluator, double workRadius,
                                     int maxProjectWorkers, int workersPerWidenStep) {
         Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
         if (next.isEmpty()) return false;
@@ -274,18 +268,18 @@ public class SiegeProject {
     /** tryWiden's own eligibility preamble, extracted so {@link #canAcceptWorker} can ask the same
      * question without tracing anything. Says nothing about whether the trace itself would
      * succeed - only whether attempting it is allowed at all. */
-    private boolean isWidenEligible(SiegeNode.SiegeAction currentAction) {
-        boolean widenable = currentAction == SiegeNode.SiegeAction.BUILD_STAIR || currentAction == SiegeNode.SiegeAction.BUILD_BRIDGE;
+    private boolean isWidenEligible(PathAction currentAction) {
+        boolean widenable = currentAction != PathAction.WALK;
         return widenable && this.width < org.ratden.skavenblight.Config.maxProjectWidth && !buildOrder.isEmpty();
     }
 
     /** Attempts to trace one more parallel lane, alternating sides on successive widens, when a
-     * BUILD_STAIR/BUILD_BRIDGE project is at capacity - see the design doc's Auto-widening
-     * section. No-ops (returns false) for non-widenable actions, once maxProjectWidth is reached,
-     * or when the trace itself fails (terrain doesn't support it, out of bounds, too much mining)
-     * - a failed attempt leaves width unchanged and is simply retried on the next rejected
-     * registration, never per-tick, bounding retry frequency to actual demand. */
-    private boolean tryWiden(SiegeNode.SiegeAction currentAction, TerrainAccess terrain, TerrainEvaluator evaluator) {
+     * construction-type project is at capacity - see the design doc's Auto-widening section.
+     * No-ops (returns false) once maxProjectWidth is reached, or when the trace itself fails
+     * (terrain doesn't support it, out of bounds, too much mining) - a failed attempt leaves width
+     * unchanged and is simply retried on the next rejected registration, never per-tick, bounding
+     * retry frequency to actual demand. */
+    private boolean tryWiden(PathAction currentAction, TerrainAccess terrain, PathStepEvaluator evaluator) {
         if (!isWidenEligible(currentAction)) return false;
 
         PlannedStep first = buildOrder.get(0);
@@ -299,9 +293,7 @@ public class SiegeProject {
         // with each one. `widenAnchor` and `buildOrder.get(0)` are both stable for the project's
         // entire life (new lanes are only ever appended, never inserted before index 0, and
         // `widenAnchor` never changes), so this is the only pairing that stays correct across
-        // repeated widens - and for any straight trace it's the same unit direction as any two
-        // consecutive original steps anyway, since SiegeLineTracer walks a fixed (dx,dy,dz) the
-        // entire length (see its own doc), so this changes nothing for multi-step build orders.
+        // repeated widens.
         BlockPos dirFrom = this.entryAnchorForWidenTrace();
         BlockPos dirTo = first.pos();
         int dx = dirTo.getX() - dirFrom.getX();
@@ -313,19 +305,59 @@ public class SiegeProject {
 
         BlockPos newAnchor = this.entryAnchorForWidenTrace().offset(offset.getX(), 0, offset.getZ());
         int traceDy = first.pos().getY() - this.entryAnchorForWidenTrace().getY();
+        int traceDx = Integer.signum(first.pos().getX() - this.entryAnchorForWidenTrace().getX());
+        int traceDz = Integer.signum(first.pos().getZ() - this.entryAnchorForWidenTrace().getZ());
 
-        SiegeLineTracer tracer = new SiegeLineTracer(evaluator);
-        SiegeLineTracer.TraceResult result = tracer.trace(terrain, newAnchor,
-                Integer.signum(first.pos().getX() - this.entryAnchorForWidenTrace().getX()),
-                Integer.signum(traceDy),
-                Integer.signum(first.pos().getZ() - this.entryAnchorForWidenTrace().getZ()),
-                newAnchor, 0, pos -> false, pos -> Integer.MAX_VALUE, buildOrder.size());
+        List<FlowStep> traced = traceChainedHops(terrain, evaluator, newAnchor, traceDx, Integer.signum(traceDy), traceDz,
+                buildOrder.size());
+        if (traced == null || traced.isEmpty()) return false;
 
-        if (!result.completed() || result.orderedSteps().isEmpty()) return false;
-
-        buildOrder.addAll(planSteps(result.orderedSteps(), newAnchor));
+        buildOrder.addAll(planSteps(traced, newAnchor));
         this.width++;
         return true;
+    }
+
+    /**
+     * Walks a FIXED (dx, dy, dz) direction one hop at a time from {@code start}, classifying each
+     * hop via {@link PathStepEvaluator#candidateSteps} (the same per-neighbor classification the
+     * main flood uses), until either a genuinely walkable cell is reached or {@code maxHops} is
+     * exhausted - both are SUCCESS (matching old SiegeLineTracer.trace's own contract: hitting its
+     * length cap returned {@code completed=true}, appending a synthetic BUILD_LANDING; that action
+     * type is gone, so this simply stops collecting instead of synthesizing a replacement marker,
+     * one cell short of where the old landing would have sat - see this task's own commit message).
+     * Returns null (real failure) only when candidateSteps offers no step at all at the exact fixed
+     * offset from the current cursor - the equivalent of the old tracer's aborted() cases
+     * (out-of-bounds/invalid). Replaces the old SiegeLineTracer.trace call this method used to
+     * make: SiegeLineTracer always walked a single fixed direction the entire length (see its own
+     * now-deleted doc), so filtering candidateSteps' fan-out down to the one neighbor at the exact
+     * (dx, dy, dz) offset reproduces the identical fixed-direction behavior without a dedicated
+     * tracer class.
+     *
+     * <p>Package-private + static for direct unit testing (same rationale as {@link #planSteps}/
+     * {@link #effectiveCapFor}): {@link #tryWiden} is only reachable through
+     * {@link #tryRegisterWorker}, which needs a real {@code Mob} - this method is the actual new
+     * logic worth testing directly, without one.
+     */
+    static List<FlowStep> traceChainedHops(TerrainAccess terrain, PathStepEvaluator evaluator, BlockPos start,
+                                            int dx, int dy, int dz, int maxHops) {
+        List<FlowStep> traced = new ArrayList<>();
+        BlockPos cursor = start;
+        for (int hop = 0; hop < maxHops; hop++) {
+            BlockPos neighbor = cursor.offset(dx, dy, dz);
+            List<PathStepEvaluator.EvaluatedStep> steps = evaluator.candidateSteps(
+                    terrain, cursor, Collections.emptySet(), pos -> false);
+            PathStepEvaluator.EvaluatedStep matching = steps.stream()
+                    .filter(s -> s.pos().equals(neighbor)).findFirst().orElse(null);
+            if (matching == null) return null; // no valid step in this exact direction - real trace failure
+
+            if (matching.action() == PathAction.WALK) {
+                return traced; // reached genuinely walkable ground - trace complete
+            }
+
+            traced.add(new FlowStep(matching.pos(), matching.action(), cursor));
+            cursor = neighbor;
+        }
+        return traced; // maxHops exhausted while still legitimately building - success, same as the old cap
     }
 
     private BlockPos entryAnchorForWidenTrace() {
@@ -339,8 +371,8 @@ public class SiegeProject {
     /** Test-support accessor: every position currently in build order (original steps first, then
      * each widen's appended lane, in the order they were added) - lets tests verify tryWiden's
      * geometry actually lands on genuinely different positions across successive widens, without
-     * depending on real terrain's action classification (BUILD_STAIR vs WALK) at each lane, which
-     * calling tick() and asserting on placed blocks would. */
+     * depending on real terrain's action classification at each lane, which calling tick() and
+     * asserting on placed blocks would. */
     public List<BlockPos> getBuildOrderPositions() {
         return buildOrder.stream().map(PlannedStep::pos).toList();
     }
@@ -362,16 +394,15 @@ public class SiegeProject {
 
     /** Cheap, terrain-free capacity check for callers (AwaitFormationGoal) that just need "is
      * there room here right now" without re-deriving the next unbuilt step - reads whatever
-     * tryRegisterWorker/Task 4's tick() last computed, so it can lag by up to one tick. */
+     * tryRegisterWorker/tick() last computed, so it can lag by up to one tick. */
     public boolean isAtCapacity() {
         return workers.size() >= this.cachedEffectiveCap;
     }
 
     /** Advances this project's construction by one GAME tick: adds work proportional to registered
      * worker count (capped), then places as many now-affordable not-yet-built steps as the
-     * accumulated work covers, in build order. A project whose next step is blocked on an
-     * incomplete MINE (see nextUnbuiltInstruction) or that's fully built is a no-op - callers
-     * don't need to check either case first.
+     * accumulated work covers, in build order. A project that's fully built is a no-op - callers
+     * don't need to check first.
      *
      * <p><b>Idempotent per game tick.</b> Every registered worker runs its OWN
      * AbstractSiegeProjectGoal instance, and vanilla's GoalSelector ticks every running goal once
@@ -383,9 +414,8 @@ public class SiegeProject {
      * (the design's ONLY bound on build rate) rendered meaningless past a handful of rats. The
      * guard makes every call after the first in the same game tick a complete no-op: no worker
      * pruning, no accumulation, no placement, since all of that already ran this tick for whichever
-     * goal happened to call first. Found by the whole-branch review; the idempotency guard was
-     * called for during planning but never made it into the written task brief. */
-    public void tick(ServerLevel level, RegionFlowField flowField, TerrainEvaluator evaluator) {
+     * goal happened to call first. */
+    public void tick(ServerLevel level, RegionFlowField flowField, PathStepEvaluator evaluator) {
         long now = level.getGameTime();
         if (now == this.lastTickedGameTime) return;
         this.lastTickedGameTime = now;
@@ -406,7 +436,10 @@ public class SiegeProject {
 
         PlannedStep step = next.get();
         while (step != null) {
-            int cost = evaluator.calculateActionCostForAction(terrain, step.pos(), step.action());
+            int cost = evaluator.baseCostFor(step.action());
+            if (step.action() == PathAction.TUNNEL || step.action() == PathAction.CARVED_STAIR) {
+                cost += evaluator.miningCost(terrain, step.pos());
+            }
             if (this.accumulatedWork < cost) break;
 
             this.accumulatedWork -= cost;
@@ -421,35 +454,25 @@ public class SiegeProject {
             // z) - different cells), so it is normal for pos().below() to still be open air right up
             // to and through this exact placement. Passing `true` made
             // SiegeInteractionHandler.constructSiegeBlock's own no-support guard fire on literally
-            // the first step of every such chain, forever refusing to place it - confirmed via
-            // testBuildFlowFieldGoalCompletesMultiStepMacroChainWithNoPriorSupport, which failed at
-            // step 0 until this was corrected. A placed stair/pillar/spiral is self-supporting for
-            // pathing purposes regardless of what ends up below it once built (see
-            // TerrainEvaluator.isWalkableTerrain's scaffold short-circuit) - there is no floating-step
-            // risk here for tick() to guard against in the first place.
+            // the first step of every such chain, forever refusing to place it.
+            // A placed stair/pillar is self-supporting for pathing purposes regardless of what ends
+            // up below it once built - there is no floating-step risk here for tick() to guard
+            // against in the first place.
             SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false);
 
-            // The old per-goal onChainComplete (AbstractSiegeConstructionGoal's default, and
-            // BuildFlowFieldGoal's own override before Task 8 migrated it onto this class) was the
-            // ONLY thing that ever told the region system "a rat just built something here" -
-            // SiegeInteractionHandler's direct level.setBlockAndUpdate/destroyBlock calls don't
-            // fire the NeoForge BlockEvents SiegeBlockEventHandler listens for, and
-            // TerritoryRegionMap.tick() early-returns with nothing to do when there are no dirty
-            // regions (no periodic fallback refresh). Without this call, a placement here would
-            // never get discovered - the exact "built a real pillar, but that position stayed
-            // 'wilderness' three rebuild generations later" bug forceRecalculation's own javadoc
-            // describes. Called once per PLACEMENT (not once per tick(), and not batched/cooldown-
-            // gated here) deliberately: forceRecalculation/onBlockChanged must be given the EXACT
-            // position that changed (see its own doc - passing a proxy position marks the wrong
-            // chunk's terrain snapshot stale), and this loop can place more than one step per
-            // tick() call when a step's cost is cheap relative to Config.workPerRatPerTick - each
-            // placement can land in a different chunk, so each needs its own call. This is cheap to
-            // call this often: TerritoryRegionMap.onBlockChanged is an O(1)
-            // ConcurrentLinkedQueue.add, and the actual expensive recompute it can eventually
-            // trigger is already independently rate-limited by TerritoryRegionMap's own
-            // RECALC_COOLDOWN_TICKS (80 ticks) and Config.minimumSettleDelayMs (1000ms settle
-            // delay) - unlike the old goal-level 100-tick recalculateCooldown, which was extra
-            // insurance on top of that, not the only thing standing between this and a real cost.
+            // The old per-goal onChainComplete was the ONLY thing that ever told the region system
+            // "a rat just built something here" - SiegeInteractionHandler's direct
+            // level.setBlockAndUpdate/destroyBlock calls don't fire the NeoForge BlockEvents
+            // SiegeBlockEventHandler listens for, and TerritoryRegionMap.tick() early-returns with
+            // nothing to do when there are no dirty regions (no periodic fallback refresh). Without
+            // this call, a placement here would never get discovered - the exact "built a real
+            // pillar, but that position stayed 'wilderness' three rebuild generations later" bug
+            // forceRecalculation's own javadoc describes. Called once per PLACEMENT (not once per
+            // tick(), and not batched/cooldown-gated here) deliberately: forceRecalculation/
+            // onBlockChanged must be given the EXACT position that changed, and this loop can place
+            // more than one step per tick() call when a step's cost is cheap relative to
+            // Config.workPerRatPerTick - each placement can land in a different chunk, so each
+            // needs its own call.
             if (flowField != null) {
                 flowField.forceRecalculation(step.pos());
             }

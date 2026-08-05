@@ -142,9 +142,28 @@ entirely.
    replace theirs: a direct chained-hop loop over `PathStepEvaluator.candidateSteps` in the widen
    direction, same `maxCandidateProjectLength`-equivalent cap `tryWiden` already enforces. Implement
    this as part of Task 12, verified by extending `SiegeProjectTest` with a widen-still-works case.
-6. **Task 5** (`FlowFieldState` → `FlowStep`) — the breaking commit. From here through Task 14, nothing
-   is independently compilable or testable; see the "why section order isn't execution order" note
-   above. Needs only Task 1 (done).
+
+   **Correction (2026-08-05, confirmed via direct reads + advisor review): the breaking commit is
+   THIS task, not Task 5 next.** The "Once Task 5 lands, compileJava stays red until Task 14" framing
+   below is off by one step. `SiegeProject`'s new constructor signature (retyped to
+   `Map<BlockPos, FlowStep>`/`List<FlowStep>`, plus the new trailing `networkId` param) breaks BOTH of
+   `RegionGraph.registerConnector`'s calls (still `Map<BlockPos, SiegeNode>`-shaped, 6-arg, no
+   `networkId`) and `SiegeProjectManager.evaluateSingleLine`'s call (5-arg, no `exitPos`, no
+   `networkId`) the moment this task's constructor change lands — on two independent counts each
+   (wrong element type AND wrong arity), not one. Neither fix is Task 12's own job (Tasks 9/11 already
+   own porting those two call sites' surrounding methods) and no shim/compatibility overload should be
+   added to paper over it — per this plan's own explicit anti-shim guidance, and confirmed by the
+   advisor as not changing the red window's overall shape, only which task is correctly labeled its
+   start. Practical effect: `./gradlew test` cannot run (`compileTestJava` depends on `compileJava`)
+   from THIS task through Task 14, one task earlier than previously documented. Use `./gradlew
+   compileJava` alone at every intervening task (it still reports every error across `src/main`
+   per-source-set before failing - the same signal that caught Task 16's four gaps) and confirm every
+   reported error names a file with an already-scheduled fix task; write each task's own test file as
+   normal but note in its commit message that it is written-and-not-yet-executed until Task 14 restores
+   a compiling state, then run every accumulated test file as one batch once it does.
+6. **Task 5** (`FlowFieldState` → `FlowStep`) — needs only Task 1 (done). (Compile-red already started
+   at Task 12, previous step — see that step's correction note. This task doesn't newly break
+   anything; it continues the same already-red state.)
 7. **Task 6** (`FlowFieldCalculator` rewrite) — needs Task 3 (done) + Task 5. Still uses the
    `SiegeProjectManagerStub` from its own Step 0 (Task 11 isn't done yet at this point).
 8. **Task 9** (`RegionGraph` rewrite) — needs Task 3 (done) + Task 5 + Task 12 (now real, no stub
@@ -1623,7 +1642,7 @@ type's completion resolution continuously."
 - Create: `src/main/java/org/ratden/skavenblight/ai/pathing/SiegeProjectManager.java` (replaces the
   old file)
 - Test: `src/test/java/org/ratden/skavenblight/ai/pathing/SiegeProjectManagerTest.java` (ported from
-  the existing file)
+  the existing file — this task owns its full retype; no other task touches this file)
 
 **Interfaces:**
 - Consumes: `PathStepEvaluator` (Tasks 2-3), `SiegeProject` (Task 13 — build against the same
@@ -2304,9 +2323,14 @@ git commit -m "refactor(goal): port SiegeNodeLookahead/AbstractSiegeProjectGoal/
 
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/goal/clanrat/AwaitFormationGoal.java`
-- Test: `src/main/java/org/ratden/skavenblight/gametest/AwaitFormationGoalGameTests.java` (new — this
-  is real new scope per the design doc; "never observed working" means there is no existing test to
-  port)
+- Test: `src/main/java/org/ratden/skavenblight/gametest/AwaitFormationGoalGameTests.java` ("new" here
+  means the formation-grid coverage below is new scope per the design doc ("never observed working" —
+  there's no existing formation-grid test to port). The file itself already exists, though, with other
+  test methods that directly construct `SiegeProject` (old 5-arg constructor) and call
+  `tryRegisterWorker`/similar with a `TerrainEvaluator` — confirmed via Task 12's `compileJava` run
+  (3 errors in this file). This task's implementer must retype those existing methods to the new
+  `SiegeProject`(`FlowStep`/`networkId`)/`PathStepEvaluator` API in the same commit as the new grid
+  tests, not just add the grid tests alongside a still-broken file.
 
 **Interfaces:**
 - Consumes: `RegionFlowField` (Task 10), `Region` (kept, `contains`/`getBoundaryCells`).
@@ -2426,12 +2450,38 @@ task's own Step 4 (`./gradlew compileJava`) runs. Add `git rm
 src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java` to this task's
 Step 4/Step 6 alongside `SiegeConstructionActionsGameTests.java`'s already-departed sibling deletion.
 
+**Gap found during exec-5/Task 12 (2026-08-05), not previously in this document's file-disposition
+survey or Task 20's own file list — confirmed via advisor review of Task 12's `compileJava` output
+(39 errors), add both to this task's own scope, don't silently re-derive their fate when you get
+here:**
+- `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectTickGameTests.java` is not mentioned
+  anywhere in this plan. It's `SiegeProject.tick()`'s only real coverage (accumulation scaling,
+  per-tick idempotency, the block-placement loop) — it must be PORTED to the new `SiegeProject`
+  (`FlowStep`/`PlannedStep`/`UUID id`/`networkId`) and `PathStepEvaluator` API, not deleted. Add its
+  full retype to this task's own commit.
+- `src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java`'s entry
+  above (Task 16's "Executed reality" note, point 3) only ever covered ONE method
+  (`testDeployClimbableGoalMarksRegionDirty`) plus a stale javadoc sweep. That undersold the file's
+  real remaining scope: roughly five OTHER test methods in this same file (methods exercising
+  `BuildFlowFieldGoal`'s region-dirty marking and `maxCandidateProjectLength` capping) directly
+  construct `SiegeProject` with the old 5-arg constructor and pass `TerrainEvaluator` where
+  `PathStepEvaluator` is now required — confirmed via Task 12's `compileJava` run (6 errors in this
+  file, none of them the already-deleted method). This task's own Step 4 must retype those methods to
+  the new API in full, not just the javadoc sweep the file's earlier entry described.
+
 **Files:**
 - Create: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecoveryGameTests.java`
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java`
-  (rewrite `BUILD_PILLAR` fixture to `AIR_STAIR`/`BRIDGE`)
+  (rewrite `BUILD_PILLAR` fixture to `AIR_STAIR`/`BRIDGE`, and retype its other `SiegeProject`/
+  `TerrainEvaluator` construction sites to the new API — same `compileJava` confirmation as above,
+  6 errors in this file)
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java` (delete the
   stale LEAP-javadoc comment reference)
+- Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java`
+  (full retype of its remaining `SiegeProject`/`TerrainEvaluator`-consuming methods — see gap note
+  above; this is broader than the javadoc-sweep-only scope this file was originally given)
+- Modify: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectTickGameTests.java` (full port
+  to the new `SiegeProject`/`PathStepEvaluator` API — see gap note above)
 - Delete: `src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java`
 - Delete: `src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java`
 - Delete: `src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java`
@@ -2490,7 +2540,9 @@ Expected: PASS
 ```bash
 git add src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecoveryGameTests.java \
         src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java \
-        src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java
+        src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java \
+        src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java \
+        src/main/java/org/ratden/skavenblight/gametest/SiegeProjectTickGameTests.java
 git rm src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java \
        src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java \
        src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java
