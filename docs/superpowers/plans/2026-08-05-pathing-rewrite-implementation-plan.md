@@ -661,13 +661,26 @@ Expected: FAIL (compile error — `candidateSteps` doesn't exist yet).
 
 - [ ] **Step 3: Implement `candidateSteps`, `isWalkableTerrain`, `isOutOfBounds`**
 
-Port `isWalkableTerrain`, `isFitForWalking`, `isOverheadClear`, `isWalkableScaffold` (drop the
-`StairBlock`/`SlabBlock`/`LadderBlock` scaffold exemptions specific to climbing — with climbing gone,
-only `Blocks.COBBLESTONE` and `Blocks.COBBLESTONE_STAIRS`/bridge fill blocks need the "can stand on
-this even though it also blocks motion" exemption), `isOutOfBounds`, and `HORIZONTAL_OFFSETS` from
-`TerrainEvaluator` verbatim (these are pure terrain predicates unrelated to the WALK/construction
-duplication being fixed). Implement `candidateSteps` following the spec above — the single method
-that replaces both `getValidOrthogonalSteps` and `determineMacroAction`.
+Port `isWalkableTerrain`, `isFitForWalking`, `isOverheadClear`, `isWalkableScaffold`, `isOutOfBounds`,
+and `HORIZONTAL_OFFSETS` from `TerrainEvaluator` verbatim (these are pure terrain predicates unrelated
+to the WALK/construction duplication being fixed). **Implemented decision, don't "fix" this back:**
+`isWalkableScaffold`'s `StairBlock`/`SlabBlock`/`LadderBlock`/`COBBLESTONE` exemptions are kept
+verbatim, NOT narrowed to just `StairBlock`/`COBBLESTONE` as an earlier draft of this task suggested —
+`isWalkableScaffold` is a general "can a mob stand on this material despite `blocksMotion()` saying
+otherwise" terrain classification, used for ANY terrain a rat might cross (including pre-existing
+world terrain this system never placed, like a player-built ladder or slab), not only for materials
+this rewrite's own construction actions place. Narrowing it on the assumption that "we don't place
+ladders anymore" conflates "what we build" with "what a rat can ever stand on," which are different
+questions — the second one is broader and unrelated to climbing removal. Implement `candidateSteps`
+following the spec above — the single method that replaces both `getValidOrthogonalSteps` and
+`determineMacroAction`.
+
+**Cross-task note for whoever implements Task 5:** `isOutOfBounds` takes a `FlowFieldState` parameter
+and only calls `state.isOutOfBounds(pos)` on it — this compiles today against the OLD (`SiegeNode`-
+typed) `FlowFieldState` because that call site doesn't touch the value type at all. Confirm it still
+compiles once Task 5 retypes `FlowFieldState` to `FlowStep` (it should — nothing here should need to
+change), rather than assuming silently; if it doesn't compile cleanly, that's a sign `isOutOfBounds`'s
+signature needs revisiting, not a sign to add an unrelated cast.
 
 - [ ] **Step 4: Run test to verify it passes**
 
