@@ -244,10 +244,30 @@ public class ClanratEntity extends Monster implements GeoEntity {
         return names != null ? names : "<idle>";
     }
 
-    /** No goal extends AbstractSiegeConstructionGoal anymore (removed with the last concrete
-     * implementation, SmartBreachGoal) - always the "none registered" fallback. */
+    /**
+     * Diagnostic-only: for every registered siege-project goal on this rat (now just
+     * BuildFlowFieldGoal - AbstractSiegeConstructionGoal and its one subclass, SmartBreachGoal,
+     * are gone), reports whether it's currently RUNNING alongside a fresh {@code canUse()} call,
+     * even for goals that aren't running right now. {@code canUse()} here is a pure read, so
+     * calling it on top of the goal selector's own calls is side-effect-free.
+     */
     public String describeSiegeGoalCanUseState() {
-        return "<no siege construction goals registered>";
+        String result = this.goalSelector.getAvailableGoals().stream()
+                .filter(wrapped -> wrapped.getGoal() instanceof AbstractSiegeProjectGoal)
+                .map(wrapped -> {
+                    var goal = wrapped.getGoal();
+                    boolean canUseNow;
+                    try {
+                        canUseNow = goal.canUse();
+                    } catch (Exception e) {
+                        canUseNow = false;
+                    }
+                    return goal.getClass().getSimpleName() + "[running=" + wrapped.isRunning()
+                            + ", canUseNow=" + canUseNow + "]";
+                })
+                .reduce((a, b) -> a + " " + b)
+                .orElse(null);
+        return result != null ? result : "<no siege construction goals registered>";
     }
 
     /**

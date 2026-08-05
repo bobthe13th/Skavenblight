@@ -2128,11 +2128,18 @@ already-decided-elsewhere fates this task's own scope didn't mention pulling for
 in-place rather than deferred, since each is a zero-new-judgment mechanical fix:**
 1. `ClanratEntity.describeSiegeGoalCanUseState()`/`describeActiveSiegeGoalState()` reference
    `AbstractSiegeConstructionGoal` directly (not just via a deleted-goal instance) — beyond the
-   `registerGoals()` edit this task's Step 2 already described. Confirmed via grep that
-   `SmartBreachGoal` was the class's ONLY subclass, so both methods can only ever produce their own
-   "none registered"/"none running" fallback string once it's gone — bodies replaced with that literal
-   fallback, signatures/callers (`PathingDebugFileWriter`, `AwaitFormationGoalGameTests`) untouched.
-   Left `PathingDebugFileWriter`'s own `SiegeNode`-typed body alone; it's genuinely Task 25's scope.
+   `registerGoals()` edit this task's Step 2 already described. `describeActiveSiegeGoalState()`
+   has no successor (`describeState()` died with the class) — hardcoded to its existing "none
+   running" fallback string, since with `SmartBreachGoal` gone that's the only value it could ever
+   produce anyway. `describeSiegeGoalCanUseState()` only ever needed `wrapped.isRunning()` +
+   `goal.canUse()`, both available on any `Goal` — retargeted its filter from
+   `instanceof AbstractSiegeConstructionGoal` to `instanceof AbstractSiegeProjectGoal` (still
+   present, still imported, already used by `peekAnyClaimedConstructionTarget`), which keeps this
+   diagnostic alive for `BuildFlowFieldGoal` (Task 18 makes it the ONLY project-execution goal) —
+   the same "canUse()=true but the selector never picked it" question Task 21's go/no-go gate will
+   need. Both signatures/callers (`PathingDebugFileWriter`, `AwaitFormationGoalGameTests`)
+   untouched. Left `PathingDebugFileWriter`'s own `SiegeNode`-typed body alone; it's genuinely
+   Task 25's scope.
 2. `AwaitFormationGoal.java:191` references `AbstractSiegeConstructionGoal.MAX_TARGET_CLAIM_DISTANCE`
    (a bare `2.5D` constant, same-package access, no other coupling) in already-existing `tick()` logic
    unrelated to this task. Inlined the same literal as a local `private static final double

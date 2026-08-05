@@ -338,7 +338,7 @@ public class PathingGoalRecalculationGameTests {
      * though the parameter itself works correctly.
      *
      * <p>This test proves the parameter itself, using the SAME hand-built-pathing-objects pattern
-     * this file already established for {@link #testDeployClimbableGoalMarksRegionDirty}: a real
+     * this file already established elsewhere: a real
      * {@code FlowFieldState}, but constructed via the 2-arg constructor so {@code cellFilter} is
      * {@code null} and {@code territoryChunks} is empty ("Global scope" per
      * {@code FlowFieldState#isOutOfBounds}) - deliberately bypassing the region-scoping machinery
