@@ -2377,6 +2377,21 @@ both got pulled forward to Task 16 (see that task's "Executed reality" note) —
 re-do them here; if either file/method still existed by the time this task runs, that would itself
 be a sign something regressed.
 
+**Gap found during exec-2/Task 4 (2026-08-05), not previously in this document's file-disposition
+survey — add to this task's own Delete list, don't silently re-derive its fate when you get here:**
+`src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java` (one test,
+`testRatCrossesAnAlreadyBuiltDiagonalStairStep`) directly exercises `FollowFlowFieldGoal`'s
+ballistic-jump `tryClimb` mechanism — exactly what Task 17 deletes outright, and exactly the same
+"tests the climb mechanics being removed" reasoning already used to delete
+`RegionFlowFieldClimbResolutionGameTests`/`SiegeConstructionActionsGameTests`. It also hand-builds
+`SiegeNode`/`FlowFieldState`/`TerrainEvaluator`/`SiegeProjectManager`/`FlowFieldCalculator`/
+`CalculationThrottler`/`RegionFlowField` directly (old API), so it breaks the moment Task 5 lands —
+harmlessly, since nothing compiles between Task 5 and Task 14 anyway — but nothing in this plan
+previously scheduled its removal, so it would otherwise sit as an unexplained compile error when this
+task's own Step 4 (`./gradlew compileJava`) runs. Add `git rm
+src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java` to this task's
+Step 4/Step 6 alongside `SiegeConstructionActionsGameTests.java`'s already-departed sibling deletion.
+
 **Files:**
 - Create: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecoveryGameTests.java`
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java`
@@ -2385,6 +2400,8 @@ be a sign something regressed.
   stale LEAP-javadoc comment reference)
 - Delete: `src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java`
 - Delete: `src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java`
+- Delete: `src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java`
+  (see the gap note above)
 
 **Grief-recovery test spec (the design doc's own explicit requirement — "write a test proving this
 before considering the feature done, or you will ship a flow field that lies forever about a griefed
@@ -2441,7 +2458,8 @@ git add src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecovery
         src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java \
         src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java
 git rm src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java \
-       src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java
+       src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java \
+       src/main/java/org/ratden/skavenblight/gametest/FollowFlowFieldGoalClimbGameTests.java
 git commit -m "test(pathing): add grief-recovery GameTest, retire legacy climb/line-tracer test files"
 ```
 
