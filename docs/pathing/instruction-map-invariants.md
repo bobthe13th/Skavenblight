@@ -213,3 +213,29 @@ above (at least `FlowFieldCalculator`, `SiegeLineTracer`, `SiegeProjectManager`,
 same-session patch. Until it happens, the central-invariant rule above (reconstruct before checking
 completion) is the load-bearing safety net, and it's test-enforced (see citations above) — but it
 depends on every future call site remembering to apply it by hand.
+
+## Next-session breadcrumb: the 4 remaining `StaircaseSiegeGroupGameTests` failures
+
+As of this session's last full run, `testSingleRatBuildsStaircaseAcrossSmallGap`,
+`testSmallGroupBuildsStaircaseAcrossSmallGap`, `testLargeGroupBuildsStaircaseAcrossSmallGap`, and
+`testLargeGroupBuildsChainedStaircaseAcrossGiantGap` all still fail with **0 stairs built**, every
+run, including with this session's head-clearance fix fully reverted (so that fix is not the
+cause). All four fail identically — not "some rats are slow," a single shared root cause.
+
+**Confirmed:** the diagonal `BUILD_STAIR` crossing line IS still being discovered — a
+`"Successful Macro Line built ... (Cost: 5275)"` entry (matching the known-good cost from earlier
+verification this session) appears in a completed run's log. That rules out "discovery never
+happens" as the explanation and points at **execution**: claim/goal-priority
+(`AbstractSiegeConstructionGoal`/`BuildFlowFieldGoal`/`tryRegisterWorker`), not
+`evaluateMacroProjects`/`evaluateSingleLine`/cost gating.
+
+**A separate, likely-unrelated observation from the same run:** `StrandedGoal` logs many rats
+"stalled ... heading toward <same X,Y, Z+1>" with `issued=false hasPath=true canReach=true
+nextIdx==nodes` and "no obstacle to breach (trace is all WALK/LEAP)". The stall axis (Z) is
+orthogonal to this test's actual gap-crossing axis (X/Y, Z constant) — these are rats doing
+ordinary flat-ground lateral repositioning near spawn, not stuck at the gap edge, and "trace is all
+WALK/LEAP" is the CORRECT thing to report on flat ground with nothing to build. `issued=false` from
+vanilla `PathNavigation.moveTo` is also the documented return when the recomputed path is unchanged
+from the existing one. Investigated and set aside as plausible benign noise, not chased further -
+verify this reading (do any rats' logged positions ever approach the platform's X, or do they stay
+in the spawn zone for the whole run?) before treating it as a lead.
