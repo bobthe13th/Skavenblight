@@ -109,7 +109,7 @@ public class DebugPathingCommands {
                                             level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE);
 
                             org.ratden.skavenblight.ai.pathing.region.RegionScanner scanner =
-                                    new org.ratden.skavenblight.ai.pathing.region.RegionScanner(evaluator);
+                                    new org.ratden.skavenblight.ai.pathing.region.RegionScanner(new org.ratden.skavenblight.ai.pathing.PathStepEvaluator());
                             java.util.List<org.ratden.skavenblight.ai.pathing.region.Region> regions =
                                     scanner.scan(result.snapshot(), network.getTerritoryChunks(), pos, level.getMinBuildHeight(), level.getMaxBuildHeight());
 

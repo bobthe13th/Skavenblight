@@ -1379,10 +1379,44 @@ path that used to feed it (enqueueing MINE candidates at all) no longer exists.
   already proves end-to-end. Don't add one; record this reasoning in the commit message instead so
   a future reader doesn't wonder why this task skipped its own test.
 
+  **Executed reality (2026-08-05): this claim was empirically WRONG — don't repeat it when planning
+  Tasks 22-24.** `PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount`
+  (an EXISTING test, not the deferred GameTest matrix) caught a real regression from the WALK-only
+  filter on the very first `./gradlew runGameTestServer` run after this task's edit: `nearProbe` —
+  a position at the exact coordinates of this test's own solid nexus block — used to resolve to a
+  region (167 cells) because the OLD MINE-step flood swept that non-walkable cell in as a side
+  effect; the new WALK-only flood correctly excludes it (166 cells), and `nearProbe` had been
+  silently relying on the old bug rather than probing real region floor. Fixed by moving
+  `nearProbe`'s z-coordinate off the nexus's own cell (see that test's own updated comment) — the
+  production change was correct, the existing test fixture was latently wrong. Also grepped every
+  `Region.addCell`/`.contains()`/`cellsNotIn` consumer in `src/main` per this discovery:
+  `RegionGraph.registerConnector`'s and `TerritoryRegionMap.reclaimConnectorCells`'s own `addCell`
+  calls are deliberate, additive, unaffected (they claim connector cells on top of the scanner's
+  output, not through the flood itself); `TerritoryRegionMap`'s `cellsNotIn`-based merge detection
+  only inspects ADDED cells, not removed ones, so the shrink is invisible to it and doesn't cause a
+  false positive. No other fix needed there.
+
+- [ ] **Step 3.5 (added 2026-08-05): fix the two production `RegionScanner` construction call sites**
+  the original file list didn't mention — this task's own constructor signature change
+  (`TerrainEvaluator` → `PathStepEvaluator`) breaks `TerritoryRegionMap.java`'s and
+  `DebugPathingCommands.java`'s existing `new RegionScanner(terrainEvaluator)`/`new
+  RegionScanner(evaluator)` calls immediately, well before Task 5's acknowledged breaking-commit
+  window starts. Both files are otherwise untouched until their own later tasks (Task 14, Task 9)
+  — this only adds the ONE new `PathStepEvaluator` instance each needs to keep compiling, exactly
+  the same "fix the one call site the signature change dictates, not the whole file" pattern this
+  plan's execution-order section already used for `DebugPathingCommands`'s `RegionGraph.build` call
+  in Task 9. `TerritoryRegionMap` gets a new `pathStepEvaluator` field alongside its existing
+  `terrainEvaluator` (which everything else there still needs, until Task 14);
+  `DebugPathingCommands` gets an inline `new PathStepEvaluator()` at its one `RegionScanner`
+  construction site.
+
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionScanner.java
+git add src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionScanner.java \
+        src/main/java/org/ratden/skavenblight/ai/pathing/region/TerritoryRegionMap.java \
+        src/main/java/org/ratden/skavenblight/command/debug/DebugPathingCommands.java \
+        src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java
 git commit -m "refactor(pathing): port RegionScanner to PathStepEvaluator, filter floodFill to WALK-only"
 ```
 

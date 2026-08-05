@@ -25,7 +25,10 @@ public class TerritoryRegionMap {
 
     private final TerrainEvaluator terrainEvaluator = new TerrainEvaluator();
     private final SiegeLineTracer lineTracer = new SiegeLineTracer(terrainEvaluator);
-    private final RegionScanner regionScanner = new RegionScanner(terrainEvaluator);
+    // Only RegionScanner has been ported to PathStepEvaluator so far (Task 8) - everything else
+    // here still uses terrainEvaluator until its own task lands.
+    private final PathStepEvaluator pathStepEvaluator = new PathStepEvaluator();
+    private final RegionScanner regionScanner = new RegionScanner(pathStepEvaluator);
     private final SiegeProjectManager projectManager = new SiegeProjectManager(terrainEvaluator);
     private final CalculationThrottler throttler = new CalculationThrottler();
     private final FlowFieldCalculator calculator = new FlowFieldCalculator(terrainEvaluator, projectManager, throttler);

@@ -1337,7 +1337,16 @@ public class PathingRegionGameTests {
             // region's id happened to be processed last in updatedRegions, even though
             // finalRegions.size() still reports >= 2 (the orphaned duplicate never gets removed
             // from the list, only masked from lookups).
-            BlockPos nearProbe = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ + fillLocalZ));
+            //
+            // nearProbe deliberately uses local z=0, NOT fillLocalZ: relativeNexusPos sits at
+            // exactly (local x=1, local z=fillLocalZ) and is solid stone for this test's entire
+            // run, so a probe at that same z would target the nexus's own non-walkable cell, not
+            // real near-region floor. Under the old TerrainEvaluator-based flood (which enqueued
+            // MINE steps into solid neighbors up to a depth cap), that solid cell still ended up
+            // as a region member as a side effect, masking the collision; RegionScanner's
+            // WALK-only flood (Task 8) correctly excludes it, which is what exposed this probe was
+            // never actually reading near-region floor.
+            BlockPos nearProbe = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ));
             BlockPos farProbe = helper.absolutePos(new BlockPos(baseX + 6 + FILL_COLUMN_COUNT + 1, 2, baseZ + fillLocalZ));
             Integer nearProbeId = regionMap.getRegionIndex().regionIdAt(nearProbe);
             Integer farProbeId = regionMap.getRegionIndex().regionIdAt(farProbe);
