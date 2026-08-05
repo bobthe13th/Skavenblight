@@ -255,20 +255,52 @@ git commit -m "feat(pathing): add PathAction/FlowStep/PlannedStep replacing Sieg
   (25 rats working together finish in 1 minute) — no second constant needed; see Task 13's
   `SiegeProject` cap plumbing for how the worker count that achieves this is bounded.
 
+**No Mockito in this codebase — confirmed by checking `build.gradle` and every existing test under
+`src/test/java`** (e.g. `TerrainEvaluatorTest`'s `FakeTerrain`, a small hand-written
+`implements TerrainAccess`). Use the same convention, not a mocking library: `TerrainAccess`'s whole
+purpose is being a small, faithfully-fakeable interface (see its own class javadoc) — reach for the
+established pattern, don't introduce a new test dependency for something the codebase already solved.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```java
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.Test;
 import org.ratden.skavenblight.Config;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class PathStepEvaluatorCostTest {
+
+    /** Same hand-written double TerrainEvaluatorTest already uses - see that file's own
+     * FakeTerrain for the established convention this mirrors exactly. */
+    private static class FakeTerrain implements TerrainAccess {
+        private final Map<BlockPos, Float> destroySpeeds = new HashMap<>();
+
+        void setDestroySpeed(BlockPos pos, float speed) { destroySpeeds.put(pos, speed); }
+
+        @Override
+        public BlockState getBlockState(BlockPos pos) { return Blocks.AIR.defaultBlockState(); }
+
+        @Override
+        public boolean isLoaded(BlockPos pos) { return true; }
+
+        @Override
+        public boolean isOutsideBuildHeight(BlockPos pos) { return false; }
+
+        @Override
+        public boolean isSolidRender(BlockPos pos) { return false; }
+
+        @Override
+        public float getDestroySpeed(BlockPos pos) { return destroySpeeds.getOrDefault(pos, 1.0F); }
+    }
 
     @Test
     void baseCostsAreStrictlyOrderedTunnelBridgeCarvedStairAirStair() {
@@ -287,9 +319,9 @@ class PathStepEvaluatorCostTest {
     @Test
     void bedrockLikeBlockCostsExactlyOneRatMinuteOfWorkForOneRat() {
         PathStepEvaluator evaluator = new PathStepEvaluator();
-        TerrainAccess terrain = mock(TerrainAccess.class);
+        FakeTerrain terrain = new FakeTerrain();
         BlockPos pos = new BlockPos(0, 0, 0);
-        when(terrain.getDestroySpeed(pos)).thenReturn(-1.0F);
+        terrain.setDestroySpeed(pos, -1.0F);
 
         int expectedWorkUnits = (int) (Config.bedrockFailsafeRatMinutes * 1200 * Config.workPerRatPerTick);
         assertEquals(expectedWorkUnits, evaluator.miningCost(terrain, pos));
@@ -298,9 +330,9 @@ class PathStepEvaluatorCostTest {
     @Test
     void ordinaryBlockUsesHardnessDrivenCostNotBedrockFailsafe() {
         PathStepEvaluator evaluator = new PathStepEvaluator();
-        TerrainAccess terrain = mock(TerrainAccess.class);
+        FakeTerrain terrain = new FakeTerrain();
         BlockPos pos = new BlockPos(0, 0, 0);
-        when(terrain.getDestroySpeed(pos)).thenReturn(2.0F);
+        terrain.setDestroySpeed(pos, 2.0F);
 
         int expected = (int) (2.0F * Config.miningPenaltyMultiplier) + Config.miningBasePenalty;
         assertEquals(expected, evaluator.miningCost(terrain, pos));
@@ -639,7 +671,9 @@ git commit -m "feat(pathing): unify WALK and construction step generation into o
 
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/TerrainSnapshot.java`
-- Test: `src/test/java/org/ratden/skavenblight/ai/pathing/TerrainSnapshotPlannedOverrideTest.java`
+- Test: `src/main/java/org/ratden/skavenblight/gametest/TerrainSnapshotPlannedOverrideGameTests.java`
+  (a GameTest, not a `src/test` unit test — see the note below Step 1 for why this task is the one
+  exception to this plan's usual "plain JUnit unless proven otherwise" default).
 
 **Interfaces:**
 - Consumes: nothing new.
@@ -654,71 +688,85 @@ git commit -m "feat(pathing): unify WALK and construction step generation into o
   function gets built and passed in, and why this must NOT be wired at TerrainSnapshot's own level
   (this class has no idea what a SiegeProject is, by design — it stays a pure terrain-capture type).
 
-- [ ] **Step 1: Write the failing test** — asserts against `captureColumn`'s real derived values
-  (`destroySpeed`/`isSolidRender`), not just the override function's own contract in isolation, since
-  those two derived values are what `PathStepEvaluator` actually reads and the easiest thing to get
-  wrong (compute them from the real block, forget to recompute from the override).
+**Why a GameTest, not a `src/test` unit test:** `captureColumn` takes a raw `ServerLevel` and calls
+real Minecraft methods on it (`level.getBlockState`, `BlockState.getDestroySpeed(level, pos)`,
+`BlockState.isSolidRender(level, pos)`) — unlike everywhere else in `ai.pathing`, there is no
+`TerrainAccess` indirection here to fake against, because this class's entire job is the capture step
+that PRODUCES a `TerrainAccess` implementation from a real level. This codebase already draws exactly
+this line elsewhere: anything abstracted behind `TerrainAccess` gets a plain JUnit test with a
+hand-written fake (see Task 2/3's `FakeTerrain`); anything that must touch a real `ServerLevel`
+directly gets a GameTest under `src/main/java/.../gametest` (see every existing file in that
+package). Follow the existing convention, don't invent a third approach.
+
+- [ ] **Step 1: Write the failing GameTest** — asserts against the resulting `TerrainSnapshot`'s real
+  derived values (`getDestroySpeed`/`isSolidRender`), not just the override function's own contract
+  in isolation, since those two derived values are what `PathStepEvaluator` actually reads and the
+  easiest thing to get wrong (compute them from the real block, forget to recompute from the
+  override).
 
 ```java
-package org.ratden.skavenblight.ai.pathing;
+package org.ratden.skavenblight.gametest;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import org.junit.jupiter.api.Test;
+import net.neoforged.neoforge.gametest.GameTestHolder;
+import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import org.ratden.skavenblight.Skavenblight;
+import org.ratden.skavenblight.ai.pathing.TerrainSnapshot;
 
 import java.util.Set;
-import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 
-class TerrainSnapshotPlannedOverrideTest {
+@GameTestHolder(Skavenblight.MODID)
+@PrefixGameTestTemplate(false)
+public class TerrainSnapshotPlannedOverrideGameTests {
 
-    @Test
-    void overriddenPositionReportsTheOverrideBlocksDestroySpeedNotTheRealBlocksDestroySpeed() {
-        BlockPos overriddenPos = new BlockPos(1, 64, 1);
-        BlockPos ordinaryPos = new BlockPos(2, 64, 1);
-        ServerLevel level = mock(ServerLevel.class);
-        BlockState realBedrock = Blocks.BEDROCK.defaultBlockState();
+    @GameTest(template = "pathing_test_giant", timeoutTicks = 40)
+    public static void overriddenPositionReportsTheOverrideBlocksDestroySpeedNotTheRealBlocksDestroySpeed(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos overriddenRelative = new BlockPos(5, 2, 5);
+        BlockPos ordinaryRelative = new BlockPos(6, 2, 5);
+        BlockPos overriddenAbsolute = helper.absolutePos(overriddenRelative);
+        BlockPos ordinaryAbsolute = helper.absolutePos(ordinaryRelative);
+
+        // Real bedrock at both positions - both would report destroySpeed < 0 with no override.
+        helper.setBlock(overriddenRelative, Blocks.BEDROCK.defaultBlockState());
+        helper.setBlock(ordinaryRelative, Blocks.BEDROCK.defaultBlockState());
+
         BlockState overrideAir = Blocks.AIR.defaultBlockState();
-        when(level.getBlockState(any(BlockPos.class))).thenReturn(realBedrock);
-        when(level.getMinBuildHeight()).thenReturn(0);
-        when(level.getMaxBuildHeight()).thenReturn(128);
-        // real bedrock reports destroySpeed < 0; overridden position must NOT reflect that.
-        when(realBedrock.getDestroySpeed(level, overriddenPos)).thenReturn(-1.0F);
-        when(realBedrock.getDestroySpeed(level, ordinaryPos)).thenReturn(-1.0F);
-        when(overrideAir.getDestroySpeed(any(), any())).thenReturn(0.0F);
+        java.util.function.Function<BlockPos, BlockState> override =
+                pos -> pos.equals(overriddenAbsolute) ? overrideAir : null;
 
-        Function<BlockPos, BlockState> override = pos -> pos.equals(overriddenPos) ? overrideAir : null;
+        TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(level, null,
+                Set.of(new ChunkPos(overriddenAbsolute)), Set.of(new ChunkPos(overriddenAbsolute)),
+                level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE, override);
+        TerrainSnapshot snapshot = result.snapshot();
 
-        TerrainSnapshot.SnapshotChunkColumn column = TerrainSnapshot.captureColumn(
-                level, new ChunkPos(overriddenPos), 0, 128, override);
-
-        assertEquals(0.0F, column.getDestroySpeed(overriddenPos.getX() & 15, overriddenPos.getY(), overriddenPos.getZ() & 15),
-                "the overridden position must report the OVERRIDE block's destroySpeed, not the real bedrock's");
-        assertEquals(-1.0F, column.getDestroySpeed(ordinaryPos.getX() & 15, ordinaryPos.getY(), ordinaryPos.getZ() & 15),
-                "a position with no override must still report the real block's destroySpeed unchanged");
+        helper.succeedWhen(() -> {
+            check(snapshot.getDestroySpeed(overriddenAbsolute) >= 0,
+                    "overridden position must report the OVERRIDE block's destroySpeed (air, >= 0), not real bedrock's (-1)");
+            check(snapshot.getDestroySpeed(ordinaryAbsolute) < 0,
+                    "a position with no override must still report the real bedrock's destroySpeed unchanged");
+        });
     }
 }
 ```
 
-(`SnapshotChunkColumn`'s package-private `getDestroySpeed` and the new package-private
-`captureColumn(level, chunk, minY, maxYExclusive, override)` overload — see Step 2 — are what make
-this test possible without a full `ServerLevel`/GameTest fixture. This unit test is this task's real
-verification; Task 20's grief-recovery GameTest additionally proves the override's end-to-end effect
-on flow-field behavior, but this task doesn't need to wait for that to be verified.)
+(This is this task's real verification. Task 20's grief-recovery GameTest additionally proves the
+override's end-to-end effect on flow-field behavior once `TerritoryRegionMap` wires it in during
+Task 14, but this task doesn't need to wait for that.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Check for orphaned `gameTestServer` java.exe processes, then run
+  `./gradlew runGameTestServer` to verify it fails** (compile error — the 8-arg `refresh` overload
+  doesn't exist yet).
 
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.TerrainSnapshotPlannedOverrideTest"`
-Expected: FAIL (compile error — `captureColumn`/`SnapshotChunkColumn` aren't package-private/don't
-take an override parameter yet).
-
-- [ ] **Step 3: Add the override parameter to `TerrainSnapshot.refresh`/`captureColumn`, and make
-  `captureColumn` and `SnapshotChunkColumn` package-private (not `private`) for this test**
+- [ ] **Step 3: Add the override parameter to `TerrainSnapshot.refresh`/`captureColumn`**
 
 Add the 8th parameter to `refresh`'s signature and thread it through to `captureColumn`. Inside
 `captureColumn`'s per-cell loop, after computing `BlockState bs = level.getBlockState(cursor);`,
@@ -726,20 +774,17 @@ check `BlockState overridden = plannedStateOverride.apply(cursor.immutable()); i
 null) bs = overridden;` before computing `destroySpeeds[idx]`/`solidRender.set(idx)` — both derived
 values must reflect the override, not the real block, since they're what `PathStepEvaluator` actually
 reads. Add a 7-arg overload that forwards `pos -> null` to the new 8-arg method, so every existing
-call site (Task 11's `TerritoryRegionMap` edits aside) keeps compiling unchanged until Task 11
-explicitly upgrades them. Widen `captureColumn` and `SnapshotChunkColumn` from `private` to
-package-private so this test can call them directly.
+call site (Task 14's `TerritoryRegionMap` edits aside) keeps compiling unchanged until Task 14
+explicitly upgrades them.
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.TerrainSnapshotPlannedOverrideTest"`
-Expected: PASS
+- [ ] **Step 4: Check for orphaned processes, then run `./gradlew runGameTestServer` to verify it
+  passes.**
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/main/java/org/ratden/skavenblight/ai/pathing/TerrainSnapshot.java \
-        src/test/java/org/ratden/skavenblight/ai/pathing/TerrainSnapshotPlannedOverrideTest.java
+        src/main/java/org/ratden/skavenblight/gametest/TerrainSnapshotPlannedOverrideGameTests.java
 git commit -m "feat(pathing): add planned-cell terrain override hook to TerrainSnapshot"
 ```
 
@@ -1700,7 +1745,7 @@ filter):**
    fall through to the real, unoverridden world state exactly as today — the override function above
    already does this correctly (`return null` when no project claims `pos`, and `TerrainSnapshot`
    Task 4 already treats `null` as "no override"), but this is exactly the kind of "should be obvious"
-   correctness property that needs its own test, not just code review — see Task 19's grief-recovery
+   correctness property that needs its own test, not just code review — see Task 20's grief-recovery
    GameTest, which is this property's real end-to-end proof.
 
 - [ ] **Step 1: Write the failing test**
