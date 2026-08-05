@@ -87,11 +87,135 @@ with no remaining subclass/caller, so it goes too):
 
 **Existing tests — targeted edits** (mostly still-valid coverage of region dirty-tracking/cycle-
 breaking/project logic; only the type references and the specific climb-action test methods change):
-`PathingGoalRecalculationGameTests` (drop `testDeployClimbableGoalMarksRegionDirty` and siblings),
-`PathingRegionGameTests` (drop the one LEAP-javadoc comment reference), `FlowFieldCalculatorTest`,
-`SiegeProjectManagerTest`, `SiegeProjectTest`, `SiegeProjectAutoWidenGameTests` (rewrite its
-`BUILD_PILLAR` fixture to `AIR_STAIR`/`BRIDGE` — auto-widening itself survives, only climb actions
-don't).
+`PathingGoalRecalculationGameTests` (drop `testDeployClimbableGoalMarksRegionDirty` and siblings, and
+sweep stale `SiegeLineTracer` javadoc references — see the Execution Order section's Task 28 note),
+`PathingRegionGameTests` (drop the one LEAP-javadoc comment reference, same `SiegeLineTracer` sweep),
+`FlowFieldCalculatorTest`, `SiegeProjectManagerTest`, `SiegeProjectTest`, `SiegeProjectAutoWidenGameTests`
+(rewrite its `BUILD_PILLAR` fixture to `AIR_STAIR`/`BRIDGE` — auto-widening itself survives, only climb
+actions don't), `StackedStairColumnReTraversalGameTests` (same `SiegeLineTracer` javadoc sweep, no
+behavioral change).
+
+---
+
+## Execution order (supersedes section order — read this before starting any task)
+
+**The task numbers below (Task 1, Task 2, ...) are stable identifiers matching each task's own
+section further down this document — they are NOT the order to execute them in.** The order below is
+the corrected one, derived from direct reads of the actual production source (not from this plan's own
+prose, which got several orderings backwards on first draft). Follow this list; a task's own section
+tells you *what* to do, this list tells you *when*.
+
+**Why section order isn't execution order:** this rewrite retypes one value class (`SiegeNode` →
+`FlowStep`/`PlannedStep`) threaded through roughly fifteen mutually-referencing classes. There is no
+way to shrink that into a small compile-clean slice — confirmed by reading `RegionConnector.java` (a
+record with concrete `SiegeProject projectTowardA/projectTowardB` fields) and `RegionFlowField.java`
+(a constructor holding concrete `SiegeProjectManager`/`FlowFieldCalculator`/`TerrainEvaluator` fields).
+Once Task 5 lands, `compileJava` stays red until Task 14 is done — that's real, not an artifact of bad
+sequencing, and no reordering removes it. What reordering DOES fix: (a) two real production-code
+ordering bugs the first draft got backwards, (b) pulling every task that has zero dependency on the
+breaking chain to the front, so the red-build window is as short as it can be, and (c) an entire
+category of consumer files outside `ai.pathing`/`ai.goal.clanrat` that the original scope survey missed
+entirely.
+
+1. **Task 16** (delete dead goal-layer files) — already user-confirmed, zero production dependencies.
+   Moved to the very front for a concrete reason, not just tidiness: Task 13 changes
+   `SiegeInteractionHandler.constructSiegeBlock`'s signature, and `SmartBreachGoal`/
+   `DeployClimbableGoal`/`SpiralSapperGoal`/`WarpSapperGoal`/`AbstractSiegeConstructionGoal` all call
+   the OLD signature. Deleting them first means that signature change (wherever it lands) never has a
+   moment of being both "changed" and "still called by a file scheduled for deletion anyway."
+2. **Task 4** (`TerrainSnapshot` override hook) — additive 8th-parameter overload, zero dependency on
+   the `FlowStep` retype.
+3. **Task 7** (`PlatformInserter`) — pure function over `PlannedStep`/`PathAction` only. Also a real
+   prerequisite for Task 12 (next), whose constructor calls it.
+4. **Task 8** (`RegionScanner` port) — needs only Task 3 (done).
+5. **Task 12** (`SiegeProject` rewrite) — **moved far ahead of its section position.** Confirmed via
+   direct reads that `RegionGraph.registerConnector` (line ~157) and `SiegeProjectManager
+   .evaluateSingleLine` (line ~375) both call `new SiegeProject(...)` directly in production code, with
+   a `Map<BlockPos, SiegeNode>`-shaped first argument today. Tasks 9 and 11 cannot write their new
+   `Map<BlockPos, FlowStep>`-shaped versions of that call against the OLD `SiegeProject` constructor —
+   so Task 12 must land before both, not after. Task 12's own real dependencies are only Task 1 (done)
+   and Task 7 (previous step), so this costs nothing to move. **One addition to Task 12's own spec,
+   not previously written down:** confirmed via `grep` that `SiegeProject.tryWiden` (lines ~316-318)
+   directly constructs `new SiegeLineTracer(evaluator)` and calls `.trace(...)` — this is real
+   production logic, not a comment, and "port `tryWiden` verbatim" (as Task 12's section currently
+   reads) is impossible once `SiegeLineTracer` is gone. Replace that call the same way Tasks 9 and 11
+   replace theirs: a direct chained-hop loop over `PathStepEvaluator.candidateSteps` in the widen
+   direction, same `maxCandidateProjectLength`-equivalent cap `tryWiden` already enforces. Implement
+   this as part of Task 12, verified by extending `SiegeProjectTest` with a widen-still-works case.
+6. **Task 5** (`FlowFieldState` → `FlowStep`) — the breaking commit. From here through Task 14, nothing
+   is independently compilable or testable; see the "why section order isn't execution order" note
+   above. Needs only Task 1 (done).
+7. **Task 6** (`FlowFieldCalculator` rewrite) — needs Task 3 (done) + Task 5. Still uses the
+   `SiegeProjectManagerStub` from its own Step 0 (Task 11 isn't done yet at this point).
+8. **Task 9** (`RegionGraph` rewrite) — needs Task 3 (done) + Task 5 + Task 12 (now real, no stub
+   needed — this is the payoff of moving Task 12 up). **One file added to Task 9's own Files list:**
+   `src/main/java/org/ratden/skavenblight/command/debug/DebugPathingCommands.java` (Modify) — confirmed
+   via direct read that it calls `new TerrainEvaluator()`, `new SiegeLineTracer(evaluator)`, and
+   `RegionGraph.build(..., evaluator, lineTracer)` using the OLD `build` overload; its fix is entirely
+   dictated by Task 9's new `build(TerrainSnapshot, List<Region>, Set<ChunkPos>, BlockPos,
+   PathStepEvaluator)` signature, so update its one call site as part of this task, not as a separate
+   "consumer" task.
+9. **Task 11** (`SiegeProjectManager` rewrite) — needs Task 3 (done) + Task 6 + Task 12 (now real, no
+   stub needed, same payoff as Task 9).
+   - **→ Task 28, Step 1 (see Task 28's own section): delete `SiegeLineTracer.java` now.** Confirmed via
+     a dedicated grep that its only real production consumers are `RegionGraph`/`RegionConnector`
+     (Task 9, just done), `SiegeProjectManager` (this task, just done), `SiegeProject` (Task 12,
+     already done), and `DebugPathingCommands` (folded into Task 9). `TerrainEvaluator.java`'s own
+     mention of it is a comment only. `StrandedGoal.java`'s mention died with Task 16. Nothing else in
+     `src/main` references it — safe to delete here, well before Task 28's other two files.
+10. **Task 10** (`RegionRouteTree` unchanged-port + `RegionFlowField` port) — needs Task 5 + Task 6 +
+    Task 9 + Task 11 + Task 12, ALL real (confirmed via direct read: `RegionFlowField`'s constructor
+    holds concrete `SiegeProjectManager`/`FlowFieldCalculator` fields, and its own field
+    `TerrainEvaluator terrainEvaluator` needs replacing with `PathStepEvaluator` here too).
+    - **→ Task 28, Step 2: delete `TerrainEvaluator.java` now.** Its last two real consumers
+      (`RegionConnector.isCompleted`'s `TerrainEvaluator` parameter, done at Task 9; `RegionFlowField`'s
+      own field, just done) are both gone. `DebugPathingCommands` was folded into Task 9 already.
+11. **Task 13** (`SiegeInteractionHandler` rewrite) — **moved after Task 10, not before.** An earlier
+    pass through this reordering suspected this task was independent of the breaking chain (it only
+    holds a `RegionFlowField` reference and calls `regionIdOf`/`executeBreach` on it), but that was
+    verified only for `regionIdOf` (`getRegionId()`, stable), not for the body of `executeBreach`.
+    Rather than assert an independence that wasn't fully checked, sequence it here where it's
+    unconditionally safe — moving it earlier would buy nothing anyway, since nothing between here and
+    Task 10 needs `SiegeInteractionHandler` done first.
+12. **Task 14** (`TerritoryRegionMap` targeted port + `onBlockChanged` fix) — needs everything above
+    (Tasks 4-13) real. This is the last task before `compileJava` is green again.
+13. **Task 25** (NEW — see its own section below: debug/network consumer port, mechanical group).
+14. **Task 26** (NEW — `PathingDebugFileWriter` glyph redesign).
+15. **Task 27** (NEW — `ClientRenderHandler` color redesign).
+    - Tasks 25-27 all depend on Task 14 (they read `RegionFlowField`'s finalized new return types) and
+      on nothing else — they can run in any relative order among themselves. They're debug/observability
+      code with zero gameplay consequence, but they are NOT deferrable past this point: `compileJava`
+      builds the whole module, so these 11 files (see Task 25/26/27) must be fixed before ANY later
+      task's `./gradlew test`/`./gradlew runGameTestServer` run can succeed at all.
+16. **Task 15** (`SiegeProjectStore` persistence) — needs Task 12 (shape) + Task 11/14 (wiring points).
+17. **Task 17** (`FollowFlowFieldGoal` climb removal) — needs Task 10's `RegionFlowField.getNextStep`.
+18. **Task 18** (`SiegeNodeLookahead`/`AbstractSiegeProjectGoal`/`BuildFlowFieldGoal` port) — needs
+    Task 10 + Task 12.
+19. **Task 19** (`AwaitFormationGoal` formation grid) — needs Task 10 + Task 14 (`getRegionIndex`'s
+    Task-9 rename).
+    - **→ Task 28, Step 3: delete `SiegeNode.java` now**, plus sweep the three now-stale-by-name
+      javadoc comments in `PathingRegionGameTests.java`, `PathingGoalRecalculationGameTests.java`, and
+      `StackedStairColumnReTraversalGameTests.java` (all three mention `SiegeLineTracer`/`SiegeNode` in
+      `{@code ...}` javadoc tags describing old behavior, confirmed via grep to be comments only, not
+      code — but they'll reference deleted class names by the time this step runs, so update the prose
+      to describe the same behavior in terms of `PathStepEvaluator`/`FlowStep` while touching these
+      files for Task 20's other edits anyway). `SiegeNode.java`'s last real consumers were the
+      goal-layer files just ported in Tasks 17-19.
+20. **Task 20** (grief-recovery test + legacy GameTest/test cleanup) — needs Task 14 (the fix it tests)
+    and Tasks 17-19 (goal layer, referenced by the GameTest fixtures it touches).
+21. **Task 21** (go/no-go gate) — needs everything above. Do not proceed past this point until all 4
+    existing air-stair GameTests pass.
+22. **Task 22** (carved-stair GameTest matrix).
+23. **Task 23** (tunnel GameTest matrix).
+24. **Task 24** (bridge GameTest matrix).
+25. Final line-count check (see "After Task 24" section at the end of this document).
+
+**Two off-by-one cross-reference fixes, noted here so a fresh reader isn't confused by them lower in
+this document:** Tasks 6, 9, and 11's own "Consumes" lines refer to `SiegeProject`/`SiegeProjectManager`
+as "Task 13"/"Task 12" in a few places — these are stale from an earlier draft renumbering and should
+read Task 12 (`SiegeProject`) and Task 11 (`SiegeProjectManager`) respectively, matching this document's
+actual section numbers. The content of what's consumed is correct; only the parenthetical task-number
+pointer is wrong.
 
 ---
 
@@ -2400,6 +2524,252 @@ git commit -m "test(pathing): add bridge GameTest matrix (single/small-group/lar
 
 ---
 
+## Task 25: Debug/network consumer port (mechanical group)
+
+**Discovered scope, not in the original 7-file/14-file consumer survey:** a grep across all of
+`src/main` for `SiegeNode`/`TerrainEvaluator`/`SiegeLineTracer` turned up 11 files entirely outside
+`ai.pathing`/`ai.pathing.region`/`ai.goal.clanrat` — debug tooling, a network sync payload, a client
+render handler, a debug item, and a command. All 11 live in this same Gradle module, so all 11 must
+compile once `RegionFlowField`'s return types change at Task 10 — "debug-only" does not mean
+"deferrable." This task covers the 8 of those 11 files that are pure mechanical retypes plus one small,
+already-decided filler-value question. The other 3 (`PathingDebugFileWriter.java`,
+`ClientRenderHandler.java`, `DebugPathingCommands.java`) are handled by Task 26, Task 27, and Task 9
+respectively, because each involves a real decision (glyph/color redesign) or a real sequencing
+dependency (`DebugPathingCommands`) that shouldn't be hidden inside a "mechanical" task.
+
+**Files:**
+- Modify: `src/main/java/org/ratden/skavenblight/client/ClientDebugData.java`
+- Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/DetailedServerMode.java`
+- Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/IServerDebugMode.java`
+- Modify: `src/main/java/org/ratden/skavenblight/item/custom/DebugFlowFieldReaderItem.java`
+- Modify: `src/main/java/org/ratden/skavenblight/debug/SiegeActivityLog.java`
+- Modify: `src/main/java/org/ratden/skavenblight/network/payload/SyncFlowFieldDebugPayload.java`
+- Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/WildernessServerMode.java`
+- Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/MacroServerMode.java`
+
+**Interfaces:**
+- Consumes: `FlowStep`/`PathAction` (Task 1), `RegionFlowField.getInstructionMap`/`getLiveDebugMap`/
+  `getRawInstruction`/`getNextStep` (Task 10's finalized return types).
+- Produces: identical public API on every file above, `FlowStep` in place of `SiegeNode` and
+  `PathAction` in place of `SiegeNode.SiegeAction`.
+
+**Group A — pure mechanical retype, no decision needed** (`ClientDebugData`, `DetailedServerMode`,
+`IServerDebugMode`, `DebugFlowFieldReaderItem`, `SiegeActivityLog`): every `Map<BlockPos, SiegeNode>`
+becomes `Map<BlockPos, FlowStep>`, every `SiegeNode.SiegeAction` parameter/field becomes `PathAction`.
+None of these five files branch on a specific action value — confirmed by direct read — so there is
+nothing to redesign, only to rename.
+
+**Group B — mechanical retype + one filler-value decision** (`SyncFlowFieldDebugPayload`,
+`WildernessServerMode`, `MacroServerMode`): all three construct a SYNTHETIC single node with no real
+predecessor (`WildernessServerMode`'s `new SiegeNode(heading, SiegeNode.SiegeAction.WALK)`,
+`MacroServerMode`'s `new SiegeNode(boundaryCell, SiegeNode.SiegeAction.WALK)`, and
+`SyncFlowFieldDebugPayload`'s wire codec, which serializes exactly 2 values per node and has no third
+field to read/write for `FlowStep`'s `predecessorPos`). **Decision (settled here, not left open):** use
+the node's own `pos` as `predecessorPos` in all three cases — `new FlowStep(heading, PathAction.WALK,
+heading)`, `new FlowStep(boundaryCell, PathAction.WALK, boundaryCell)`, and one added `BlockPos`
+read/write in `SyncFlowFieldDebugPayload`'s stream codec (self-referencing, sent as the node's own
+position). This matches existing precedent already in this codebase's own test suite —
+`FlowStepTest`'s `pathActionHasExactlyTheFiveNewValues`-adjacent test and `FlowFieldCalculatorTest`'s
+`detectMutualCyclePositionsIgnoresATargetSelfReference` both already treat "a position pointing at
+itself" as the established idiom for "this position has no real predecessor," not a special case to
+invent fresh here.
+
+- [ ] **Step 1: Implement the Group A retypes** — mechanical, no behavior change.
+- [ ] **Step 2: Implement the Group B retypes** with the self-referencing `predecessorPos` filler
+  described above, including the added field in `SyncFlowFieldDebugPayload`'s stream codec.
+- [ ] **Step 3: Run `./gradlew compileJava`** to confirm the whole module builds — this is the actual
+  verification for this task; see the class javadoc note below for why there's no dedicated test.
+
+**Why no dedicated test:** every file here is a debug-only render/log/network-sync path with zero
+gameplay consequence; correctness is "does it compile and does the debug overlay/log/wand item still
+show sensible data," which has no meaningful fake to assert against beyond the compiler itself. If the
+implementer wants extra confidence, manually trigger the debug wand item and the `/skavendebug` F3
+overlay in a dev client — not required to consider this task done.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/main/java/org/ratden/skavenblight/client/ClientDebugData.java \
+        src/main/java/org/ratden/skavenblight/debug/mode/server/DetailedServerMode.java \
+        src/main/java/org/ratden/skavenblight/debug/mode/server/IServerDebugMode.java \
+        src/main/java/org/ratden/skavenblight/item/custom/DebugFlowFieldReaderItem.java \
+        src/main/java/org/ratden/skavenblight/debug/SiegeActivityLog.java \
+        src/main/java/org/ratden/skavenblight/network/payload/SyncFlowFieldDebugPayload.java \
+        src/main/java/org/ratden/skavenblight/debug/mode/server/WildernessServerMode.java \
+        src/main/java/org/ratden/skavenblight/debug/mode/server/MacroServerMode.java
+git commit -m "refactor(debug): port debug/network consumers from SiegeNode to FlowStep/PathAction
+
+Self-referencing predecessorPos for synthetic single-node debug data (WildernessServerMode/
+MacroServerMode/SyncFlowFieldDebugPayload) - matches the existing self-reference-means-no-predecessor
+idiom already used in FlowFieldCalculatorTest/FlowStepTest, not a new special case."
+```
+
+---
+
+## Task 26: `PathingDebugFileWriter` glyph redesign
+
+**Files:**
+- Modify: `src/main/java/org/ratden/skavenblight/debug/PathingDebugFileWriter.java`
+
+**Interfaces:**
+- Consumes: `FlowStep`/`PathAction` (Task 1), `RegionFlowField`'s finalized return types (Task 10).
+- Produces: identical public API — this file's whole job is writing a text dump, not exposing new
+  methods.
+
+**Why this needs a real decision, not a rename:** confirmed via direct read (lines ~446-456) that
+`writeGrid`'s per-cell render switches exhaustively over all 9 old actions with a distinct glyph each
+(`WALK→'W'`, `BUILD_STAIR→'S'`, `BUILD_BRIDGE→'B'`, `MINE→'M'`, `BUILD_PILLAR→'P'`, `BUILD_LANDING→'L'`,
+`LEAP→'J'`, `BUILD_LADDER→'H'`, `BUILD_SPIRAL→'R'`), with a matching hardcoded legend (lines ~390-393)
+and an `EnumMap<SiegeNode.SiegeAction, Integer>` action-count section (lines ~162-187) that also
+iterates every old value. 5 of the 9 have no successor in the new 5-value `PathAction` — this needs an
+actual mapping decision, decided here so the implementer doesn't have to invent one with less context:
+
+- `WALK` → `'W'` (unchanged)
+- `TUNNEL` → `'M'` (reuses `MINE`'s glyph — tunneling IS mining through solid material)
+- `BRIDGE` → `'B'` (reuses `BUILD_BRIDGE`'s glyph)
+- `AIR_STAIR` → `'S'` (reuses `BUILD_STAIR`'s glyph — this was the old system's only "build a stair"
+  action; `AIR_STAIR` is its direct successor)
+- `CARVED_STAIR` → `'C'` (new glyph — the one genuinely new classification `BUILD_STAIR` used to cover
+  implicitly; `'C'` isn't used by any other node glyph today)
+
+New legend line (replaces the two old "Nodes" legend lines at ~391-392):
+```
+writer.write("  Nodes  : [W] Walk    [S] Air-Stair [C] Carved-Stair [B] Bridge  [M] Tunnel   [x] Out of Bounds\n");
+```
+
+`writeMetrics`'s `EnumMap<SiegeNode.SiegeAction, Integer>` becomes `EnumMap<PathAction, Integer>` —
+mechanical once the switch above is settled, since it just counts whatever `PathAction` values
+actually appear.
+
+- [ ] **Step 1: Implement the switch/legend/EnumMap changes** per the mapping above.
+- [ ] **Step 2: Run `./gradlew compileJava`** to confirm the module builds.
+- [ ] **Step 3: Manually generate one debug dump** (via whatever command/keybind currently triggers
+  `PathingDebugFileWriter`, per its existing callers) against a live test world with at least one of
+  each of the 5 actions present, and eyeball the output — this is a text-formatting file with no
+  gameplay consequence, so a manual look is proportionate; don't write a GameTest for cosmetic file
+  output.
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/main/java/org/ratden/skavenblight/debug/PathingDebugFileWriter.java
+git commit -m "refactor(debug): remap PathingDebugFileWriter's node glyphs to the 5-action vocabulary"
+```
+
+---
+
+## Task 27: `ClientRenderHandler` color redesign
+
+**Files:**
+- Modify: `src/main/java/org/ratden/skavenblight/client/ClientRenderHandler.java`
+
+**Interfaces:**
+- Consumes: `FlowStep`/`PathAction` (Task 1), `RegionFlowField`'s finalized return types (Task 10).
+- Produces: identical public API — client-side debug rendering only.
+
+**Why this needs a real decision, not a rename:** confirmed via direct read that this file has TWO
+exhaustive 7-to-8-value switches picking debug-line RGB colors — `drawFloorArrow` (lines ~161-172) and
+`drawWildernessArrow` (lines ~302-309) — both keyed on the old `SiegeNode.SiegeAction`, both missing 5
+successors in the new `PathAction`. Both switches also currently merge `BUILD_BRIDGE`/`BUILD_STAIR`
+into ONE shared color, which no longer works: `BRIDGE` and `AIR_STAIR` are genuinely distinct actions
+now and need genuinely distinct colors. Mapping decided here:
+
+`drawFloorArrow`'s switch (replaces lines ~161-168; the `WALK` traffic-heatmap branch is unchanged):
+- `TUNNEL` → `r=255,g=0,b=255` (reused from the old `MINE` case)
+- `BRIDGE` → `r=0,g=255,b=255` (reused from the old combined `BUILD_BRIDGE`/`BUILD_STAIR` case in THIS
+  switch)
+- `AIR_STAIR` → `r=0,g=191,b=255` (reused from `drawWildernessArrow`'s combined case below, repurposed
+  here specifically to be visually close-but-distinct from `BRIDGE`, since both used to render
+  identically)
+- `CARVED_STAIR` → `r=255,g=140,b=0` (reused from the now-free old `BUILD_PILLAR` case)
+
+Also update the one action-equality check just below the switch: `node.action() !=
+SiegeNode.SiegeAction.WALK` → `node.action() != PathAction.WALK`.
+
+`drawWildernessArrow`'s switch (replaces lines ~302-308; this switch has no `WALK` case today and none
+is added — confirmed, `WALK` is never passed to this method by its existing callers):
+- `TUNNEL` → `r=255,g=0,b=128` (reused from the old `MINE` case)
+- `BRIDGE` → `r=0,g=191,b=255` (reused from the old combined `BUILD_BRIDGE`/`BUILD_STAIR` case in THIS
+  switch)
+- `AIR_STAIR` → `r=0,g=255,b=255` (reused from `drawFloorArrow`'s combined case above, repurposed here
+  for the same close-but-distinct-from-`BRIDGE` reasoning)
+- `CARVED_STAIR` → `r=255,g=69,b=0` (reused from the now-free old `BUILD_PILLAR` case)
+
+- [ ] **Step 1: Implement both switches** per the mapping above, and the one `WALK` equality-check
+  retype.
+- [ ] **Step 2: Run `./gradlew compileJava`** to confirm the module builds.
+- [ ] **Step 3: Manually trigger the debug overlay** (via whatever keybind/item currently activates
+  `ClientRenderHandler`'s debug lines) against a live test world with at least one of each of the 5
+  actions present, and eyeball the colors — same proportionate manual check as Task 26, no GameTest for
+  a cosmetic client-render color scheme.
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/main/java/org/ratden/skavenblight/client/ClientRenderHandler.java
+git commit -m "refactor(debug): remap ClientRenderHandler's debug-line colors to the 5-action vocabulary"
+```
+
+---
+
+## Task 28: Delete old `SiegeNode.java`/`TerrainEvaluator.java`/`SiegeLineTracer.java` source files
+
+**A genuine gap in this plan's first draft:** the File Disposition table above always said these three
+files are "Deleted, replaced by new files," but no task in the original 24-task draft ever actually ran
+`git rm` on them — only their TEST files (`SiegeNode` has none; `SiegeLineTracerTest`/`TerrainEvaluatorTest`
+are deleted in Task 20) and the unrelated `RegionIndex.java` (Task 9) were ever removed. Left in place,
+these three files are 519 lines of dead code (`SiegeNode.java` 34, `TerrainEvaluator.java` 295,
+`SiegeLineTracer.java` 190 — confirmed via `wc -l`) sitting directly against the design doc's ≤2500-line
+success metric for `ai.pathing`. This task has no files of its own beyond the three deletions — it's
+three separate `git rm` calls, each gated on its own last-real-consumer, so it's written as three
+explicitly-timed steps rather than one atomic task. **Do not run all three at once — each has a
+different readiness point in the Execution Order list above.**
+
+- [ ] **Step 1 (run at Execution Order position 9, immediately after Task 11): delete
+  `src/main/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracer.java`.** Confirmed via a dedicated
+  `grep -r SiegeLineTracer src/main` that its only real production consumers were `RegionGraph`/
+  `RegionConnector` (Task 9), `SiegeProjectManager` (Task 11), `SiegeProject` (Task 12, via `tryWiden`),
+  and `DebugPathingCommands` (folded into Task 9) — all done by this point. `TerrainEvaluator.java`'s
+  own mention of `SiegeLineTracer` is a comment, not code. `StrandedGoal.java`'s mention died with
+  Task 16.
+
+  ```bash
+  git rm src/main/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracer.java
+  git commit -m "chore(pathing): delete SiegeLineTracer.java, folded into PathStepEvaluator/RegionGraph/SiegeProjectManager"
+  ```
+
+- [ ] **Step 2 (run at Execution Order position 10, immediately after Task 10): delete
+  `src/main/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluator.java`.** Its remaining production
+  consumers are gone by this point — confirmed directly for `RegionConnector.isCompleted`'s
+  `TerrainEvaluator` parameter (retyped in Task 9) and `RegionFlowField`'s own `private final
+  TerrainEvaluator terrainEvaluator` field (retyped in Task 10); `DebugPathingCommands` was folded into
+  Task 9. If `./gradlew compileJava` finds another reference at this point, that's a sign a task
+  between here and Task 9 left one behind, not a sign to keep the file around.
+
+  ```bash
+  git rm src/main/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluator.java
+  git commit -m "chore(pathing): delete TerrainEvaluator.java, replaced by PathStepEvaluator"
+  ```
+
+- [ ] **Step 3 (run at Execution Order position 19, immediately after Task 19): delete
+  `src/main/java/org/ratden/skavenblight/ai/pathing/SiegeNode.java`, and sweep three stale
+  javadoc-only mentions.** `SiegeNode.java`'s last real consumers were the goal-layer files just ported
+  in Tasks 17-19. Additionally, confirmed via grep that `PathingRegionGameTests.java`,
+  `PathingGoalRecalculationGameTests.java`, and `StackedStairColumnReTraversalGameTests.java` each
+  mention `SiegeLineTracer`/`SiegeNode` inside `{@code ...}` javadoc tags describing old behavior —
+  comments only, never compiled code, so they were never a compile blocker, but they'll now name
+  deleted classes. Update their prose to describe the same documented behavior in terms of
+  `PathStepEvaluator`/`FlowStep`/`RegionGraph` while touching these files anyway for Task 20's other
+  edits (don't make this a separate pass over the same files).
+
+  ```bash
+  git rm src/main/java/org/ratden/skavenblight/ai/pathing/SiegeNode.java
+  git add src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java \
+          src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java \
+          src/main/java/org/ratden/skavenblight/gametest/StackedStairColumnReTraversalGameTests.java
+  git commit -m "chore(pathing): delete SiegeNode.java, update stale javadoc references to it"
+  ```
+
+---
+
 ## After Task 24
 
 At this point every item in the task's original checklist is covered except the final line-count/
@@ -2409,6 +2779,7 @@ comment-density check. Add one closing task before calling the rewrite done:
   and confirm the total line count across `ai.pathing` (including the region sub-package) is ≤2500,
   per the design doc's success metric. If over, this is a real finding to report, not silently
   ignore — the design doc's own file-count/line-count guidance ("13-15 files... this both cuts total
-  lines hard") is a prediction, not a guarantee, and this rewrite's actual footprint (Tasks 1-16)
-  turned out larger than the design doc's own survey anticipated once the goal-layer scope was
-  corrected — report the real number either way.
+  lines hard") is a prediction, not a guarantee, and this rewrite's actual footprint (Tasks 1-16, plus
+  Tasks 25-28 discovered during the Execution Order correction) turned out larger than the design
+  doc's own survey anticipated once the goal-layer AND debug/network/client scope was corrected —
+  report the real number either way.
