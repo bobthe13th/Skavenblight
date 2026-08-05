@@ -434,18 +434,28 @@ each neighbor:
    corner-blocking check, ported verbatim from today's `getValidOrthogonalSteps`).
 3. Otherwise — this cell is a candidate obstacle. Classify it the same way `determineMacroAction`
    does today (port that classification logic verbatim, replacing its five old outputs with exactly
-   one of the four new ones):
-   - `dy != 0` and diagonal (`dx != 0 && dz != 0`, i.e. a genuine diagonal rise/drop): `CARVED_STAIR`
+   one of the four new ones). **Read the condition below literally — "diagonal" in this codebase's
+   existing terminology (see `determineMacroAction`'s own branch order) means "has a Y-component and
+   isn't a pure vertical shaft," NOT "both horizontal axes are nonzero."** Confirmed against
+   `StaircaseSiegeGroupGameTests`'s real geometry (`relativeGroundSpawn (26,2,26)` →
+   `relativeNexusPos (40,16,26)`/`(70,46,26)`, Z held constant at 26 in every one of the 4 existing
+   tests): the crossing this go/no-go gate depends on has `dx != 0, dy != 0, dz == 0` — a straight
+   rise along one horizontal axis, not a corner-diagonal. A condition requiring BOTH `dx != 0` and
+   `dz != 0` would never fire for this geometry at all, producing no candidate step and making Task
+   21's gate unpassable — this was caught and must not be reintroduced.
+   - `dy != 0 && !(dx == 0 && dz == 0)` (has a Y-component, not a pure vertical shaft — covers both a
+     straight one-axis rise like the existing tests AND a true corner-diagonal rise): `CARVED_STAIR`
      if the neighbor cell itself blocks motion (mining through solid material to carve a stair) or
      `AIR_STAIR` if it's open air (building a stair through open air) — this is the one genuinely new
      classification decision the old code didn't need to make explicitly, since `BUILD_STAIR` used to
      cover both; use `terrain.getBlockState(neighbor).blocksMotion()` as the discriminator.
-   - `dy == 0`, horizontal: `TUNNEL` if the neighbor blocks motion, `BRIDGE` if it's open air with no
-     support below (mirrors today's "Horizontal Bridge" branch).
-   - `dy != 0`, `dx == 0 && dz == 0` (pure vertical): **do not offer a step here at all** — pure
-     vertical climbing (today's PILLAR/LADDER/SPIRAL branch) is permanently removed per the design
-     doc; a pure-vertical obstacle must be crossed some other way (a diagonal CARVED_STAIR/AIR_STAIR
-     around it, or a TUNNEL/BRIDGE detour) or is simply unreachable from this cell.
+   - `dy == 0`, horizontal (`dx != 0 || dz != 0`): `TUNNEL` if the neighbor blocks motion, `BRIDGE` if
+     it's open air with no support below (mirrors today's "Horizontal Bridge" branch).
+   - `dy != 0 && dx == 0 && dz == 0` (pure vertical, no horizontal component at all): **do not offer a
+     step here at all** — pure vertical climbing (today's PILLAR/LADDER/SPIRAL branch) is permanently
+     removed per the design doc; a pure-vertical obstacle must be crossed some other way (a diagonal
+     CARVED_STAIR/AIR_STAIR around it, or a TUNNEL/BRIDGE detour) or is simply unreachable from this
+     cell.
    - Cost: `baseCostFor(action)` for BRIDGE/CARVED_STAIR/AIR_STAIR; `baseCostFor(TUNNEL) +
      miningCost(terrain, neighbor)` for TUNNEL and the mining component of CARVED_STAIR (a carved
      stair also mines, so its cost is `baseCostFor(CARVED_STAIR) + miningCost(terrain, neighbor)`).
@@ -505,6 +515,55 @@ class PathStepEvaluatorStepGenerationTest {
         PathStepEvaluator.EvaluatedStep found = steps.stream()
                 .filter(s -> s.pos().equals(diagonalUp)).findFirst().orElseThrow();
         assertEquals(PathAction.AIR_STAIR, found.action());
+    }
+
+    @Test
+    void straightOneAxisRiseWithTheOtherHorizontalAxisUnchangedStillProducesAirStair() {
+        // Regression pin for the real StaircaseSiegeGroupGameTests geometry: Z is held CONSTANT
+        // across every existing air-stair test (relativeGroundSpawn (26,2,26) -> relativeNexusPos
+        // (40,16,26)/(70,46,26)) - the actual crossing is dx!=0, dy!=0, dz==0, NOT a corner-diagonal
+        // with both dx and dz nonzero. A classification requiring both horizontal axes nonzero would
+        // silently produce no candidate at all for this exact shape and make Task 21's go/no-go gate
+        // unpassable - this test exists specifically to catch that regression.
+        FakeTerrain terrain = new FakeTerrain();
+        BlockPos current = new BlockPos(0, 10, 0);
+        BlockPos straightAxisRise = new BlockPos(1, 11, 0); // dx=1, dy=1, dz=0
+        // straightAxisRise itself stays open air (default); nothing marked solid there.
+
+        PathStepEvaluator evaluator = new PathStepEvaluator();
+        List<PathStepEvaluator.EvaluatedStep> steps = evaluator.candidateSteps(
+                terrain, current, Collections.emptySet(), pos -> false, null);
+
+        PathStepEvaluator.EvaluatedStep found = steps.stream()
+                .filter(s -> s.pos().equals(straightAxisRise)).findFirst().orElseThrow(
+                        () -> new AssertionError("dx!=0,dy!=0,dz==0 must produce a candidate step - "
+                                + "this exact shape is what every existing air-stair GameTest crosses"));
+        assertEquals(PathAction.AIR_STAIR, found.action());
+    }
+
+    @Test
+    void aLongTunnelLosesToAShortAirStairOnTotalPathCostNotJustBaseCost() {
+        // Verification for dropping MAX_CONSECUTIVE_MINE_DEPTH (see Task 6/Task 8's notes): if cost
+        // alone already makes an arbitrarily long tunnel lose to a short alternative, no separate
+        // depth cap is needed - Dijkstra's own cheapest-first behavior handles it. A 10-block tunnel
+        // through ordinary stone (hardness ~1.5) costs roughly baseCostFor(TUNNEL) + 10 *
+        // miningCost(stone) per block; a 3-step air-stair costs 3 * baseCostFor(AIR_STAIR). Assert
+        // the accumulated tunnel cost exceeds the accumulated air-stair cost for this shape, proving
+        // the "long cheap tunnel legitimately losing to a short expensive stair is correct, not a
+        // bug" invariant already holds without any extra depth-limiting state.
+        PathStepEvaluator evaluator = new PathStepEvaluator();
+        FakeTerrain stoneTerrain = new FakeTerrain();
+        BlockPos stonePos = new BlockPos(0, 0, 0);
+        stonePos = stonePos; // hardness lookup below uses FakeTerrain's fixed solid-block hardness
+
+        int tunnelStepCost = evaluator.baseCostFor(PathAction.TUNNEL) + evaluator.miningCost(stoneTerrain, stonePos);
+        int accumulatedTenBlockTunnelCost = 10 * tunnelStepCost;
+        int accumulatedThreeStepAirStairCost = 3 * evaluator.baseCostFor(PathAction.AIR_STAIR);
+
+        assertTrue(accumulatedTenBlockTunnelCost > accumulatedThreeStepAirStairCost,
+                "a 10-block tunnel must cost more in total than a 3-step air-stair, proving cost "
+                        + "alone (no separate mine-chain-depth cap) already prevents an arbitrarily "
+                        + "long tunnel from ever winning against a short real alternative");
     }
 
     @Test
@@ -595,49 +654,71 @@ git commit -m "feat(pathing): unify WALK and construction step generation into o
   function gets built and passed in, and why this must NOT be wired at TerrainSnapshot's own level
   (this class has no idea what a SiegeProject is, by design — it stays a pure terrain-capture type).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test** — asserts against `captureColumn`'s real derived values
+  (`destroySpeed`/`isSolidRender`), not just the override function's own contract in isolation, since
+  those two derived values are what `PathStepEvaluator` actually reads and the easiest thing to get
+  wrong (compute them from the real block, forget to recompute from the override).
 
 ```java
 package org.ratden.skavenblight.ai.pathing;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class TerrainSnapshotPlannedOverrideTest {
 
     @Test
-    void plannedOverrideReplacesCapturedStateAtExactlyTheOverriddenPosition() {
-        // Uses a real ServerLevel via the GameTest harness in practice; this unit test exercises
-        // captureColumn's override branch directly against a minimal fake to stay a fast unit test -
-        // see Task 4 Step 3 for the actual signature captureColumn needs (package-private, taking
-        // the override function so this test can call it without a full ServerLevel).
-        Function<BlockPos, net.minecraft.world.level.block.state.BlockState> override =
-                pos -> pos.equals(new BlockPos(1, 1, 1)) ? Blocks.COBBLESTONE.defaultBlockState() : null;
+    void overriddenPositionReportsTheOverrideBlocksDestroySpeedNotTheRealBlocksDestroySpeed() {
+        BlockPos overriddenPos = new BlockPos(1, 64, 1);
+        BlockPos ordinaryPos = new BlockPos(2, 64, 1);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockState realBedrock = Blocks.BEDROCK.defaultBlockState();
+        BlockState overrideAir = Blocks.AIR.defaultBlockState();
+        when(level.getBlockState(any(BlockPos.class))).thenReturn(realBedrock);
+        when(level.getMinBuildHeight()).thenReturn(0);
+        when(level.getMaxBuildHeight()).thenReturn(128);
+        // real bedrock reports destroySpeed < 0; overridden position must NOT reflect that.
+        when(realBedrock.getDestroySpeed(level, overriddenPos)).thenReturn(-1.0F);
+        when(realBedrock.getDestroySpeed(level, ordinaryPos)).thenReturn(-1.0F);
+        when(overrideAir.getDestroySpeed(any(), any())).thenReturn(0.0F);
 
-        assertEquals(Blocks.COBBLESTONE.defaultBlockState(),
-                override.apply(new BlockPos(1, 1, 1)));
-        assertNull(override.apply(new BlockPos(2, 2, 2)));
+        Function<BlockPos, BlockState> override = pos -> pos.equals(overriddenPos) ? overrideAir : null;
+
+        TerrainSnapshot.SnapshotChunkColumn column = TerrainSnapshot.captureColumn(
+                level, new ChunkPos(overriddenPos), 0, 128, override);
+
+        assertEquals(0.0F, column.getDestroySpeed(overriddenPos.getX() & 15, overriddenPos.getY(), overriddenPos.getZ() & 15),
+                "the overridden position must report the OVERRIDE block's destroySpeed, not the real bedrock's");
+        assertEquals(-1.0F, column.getDestroySpeed(ordinaryPos.getX() & 15, ordinaryPos.getY(), ordinaryPos.getZ() & 15),
+                "a position with no override must still report the real block's destroySpeed unchanged");
     }
 }
 ```
 
-(This task's real verification is the GameTest in Task 17's grief-recovery test, which exercises the
-override end-to-end against a live `ServerLevel`. This unit test only pins the override function's
-own contract before that GameTest depends on it.)
+(`SnapshotChunkColumn`'s package-private `getDestroySpeed` and the new package-private
+`captureColumn(level, chunk, minY, maxYExclusive, override)` overload — see Step 2 — are what make
+this test possible without a full `ServerLevel`/GameTest fixture. This unit test is this task's real
+verification; Task 20's grief-recovery GameTest additionally proves the override's end-to-end effect
+on flow-field behavior, but this task doesn't need to wait for that to be verified.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.TerrainSnapshotPlannedOverrideTest"`
-Expected: PASS trivially (this test doesn't touch TerrainSnapshot yet) — this is a placeholder
-pin; the real regression protection is Task 17's GameTest. Proceed to Step 3 regardless.
+Expected: FAIL (compile error — `captureColumn`/`SnapshotChunkColumn` aren't package-private/don't
+take an override parameter yet).
 
-- [ ] **Step 3: Add the override parameter to `TerrainSnapshot.refresh`/`captureColumn`**
+- [ ] **Step 3: Add the override parameter to `TerrainSnapshot.refresh`/`captureColumn`, and make
+  `captureColumn` and `SnapshotChunkColumn` package-private (not `private`) for this test**
 
 Add the 8th parameter to `refresh`'s signature and thread it through to `captureColumn`. Inside
 `captureColumn`'s per-cell loop, after computing `BlockState bs = level.getBlockState(cursor);`,
@@ -646,7 +727,8 @@ null) bs = overridden;` before computing `destroySpeeds[idx]`/`solidRender.set(i
 values must reflect the override, not the real block, since they're what `PathStepEvaluator` actually
 reads. Add a 7-arg overload that forwards `pos -> null` to the new 8-arg method, so every existing
 call site (Task 11's `TerritoryRegionMap` edits aside) keeps compiling unchanged until Task 11
-explicitly upgrades them.
+explicitly upgrades them. Widen `captureColumn` and `SnapshotChunkColumn` from `private` to
+package-private so this test can call them directly.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -797,16 +879,17 @@ incident each one traces back to — do not re-derive these from first principle
 
 Drop entirely (superseded by the frontier-gating invariant now living inside `candidateSteps` itself,
 per Task 3's spec — see that task's step 4 for why this doesn't need separate state anymore):
-`MAX_CONSECUTIVE_MINE_DEPTH`/`mineChainDepth` tracking. **Verify this drop is safe before deleting it,
-don't assume:** the old cap existed specifically to stop a MINE chain tunneling arbitrarily deep into
-undisturbed rock chasing marginal savings (documented incident: 61% of a 114k-node pass was MINE).
-`candidateSteps`'s frontier gate stops offering WALK the moment terrain is genuinely blocked, but a
-TUNNEL chain through solid rock IS exactly a legitimate multi-segment construction chain per the
-mandatory invariant — so confirm empirically (via this task's own test below, extended if needed)
-that cost alone (`baseCostFor(TUNNEL) + miningCost per block`, accumulating every hop) already makes
-an arbitrarily long tunnel lose to any real alternative long before it matters, rather than assuming
-it. If it doesn't, this cap needs a home in the new evaluator after all — say so and stop rather than
-silently dropping a fix for a confirmed 14-minute-hang bug.
+`MAX_CONSECUTIVE_MINE_DEPTH`/`mineChainDepth` tracking. This drop is already verified, not merely
+assumed: Task 3's `aLongTunnelLosesToAShortAirStairOnTotalPathCostNotJustBaseCost` test proves cost
+alone (accumulating `baseCostFor(TUNNEL) + miningCost` per hop) already makes an arbitrarily long
+tunnel lose to any short real alternative — Dijkstra's own cheapest-first expansion means a branch
+that's already lost on cost is never explored further once a cheaper path to the same destination is
+known, which is the actual mechanism that replaces the old cap (not a new, separate limit). The old
+cap existed specifically to stop a MINE chain tunneling arbitrarily deep into undisturbed rock chasing
+marginal savings (documented incident: 61% of a 114k-node pass was MINE) — that incident was about
+`getValidOrthogonalSteps` offering a MINE step at every ordinary WALK-capable cell with no relative
+cost comparison stopping it (the old core-step/macro-project split's actual bug), not about tunnels
+being long per se; the unified `candidateSteps` doesn't have that split to begin with.
 
 - [ ] **Step 1: Write the failing tests** (port the two existing pure-function tests from the current
   `FlowFieldCalculatorTest` verbatim, `SiegeNode`→`FlowStep`, plus one new test for the frontier
@@ -1047,7 +1130,7 @@ git commit -m "feat(pathing): add PlatformInserter post-processing pass for PLAT
 
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionScanner.java`
-- Test: `src/test/java/org/ratden/skavenblight/ai/pathing/region/RegionScannerTest.java`
+- No dedicated test file for this task — see Step 3 below for why.
 
 **Interfaces:**
 - Consumes: `PathStepEvaluator.candidateSteps`/`isWalkableTerrain` (Task 3) in place of
@@ -1063,79 +1146,44 @@ with `pathStepEvaluator.candidateSteps(...)`, and the boundary-cell threshold
 (`BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD = 6`) now counts `PathAction.WALK` candidates from
 `candidateSteps`'s unified return instead of a separately-typed step list — same counting logic,
 same threshold value, ported verbatim. **Drop the `MAX_CONSECUTIVE_MINE_DEPTH`/`mineChainDepth`
-tracking here too, for the identical reason Task 6 drops it from `FlowFieldCalculator`** (a TUNNEL
-chain through solid rock is a legitimate construction chain now, not an unbounded MINE tunnel that
-would wrongly fuse two regions together) — verify this doesn't cause regions to wrongly merge across
-a genuine TUNNEL-length obstacle by running this task's test below against a deliberately long
-(20+ block) solid wall between two open areas and confirming they still scan as two separate regions
-(a TUNNEL candidate is a construction edge, and `RegionScanner`'s flood must never follow construction
-edges at all — only `WALK` — or every obstacle a `SiegeProject` could ever bridge would silently
-merge the regions on either side of it, destroying the very partition this class exists to produce).
-**This is the one part of this task that is NOT a mechanical port** — confirm explicitly in this
-task's test that `floodFill` only ever enqueues `WALK`-action candidates from `candidateSteps`
-(construction candidates are for `RegionGraph`'s connector discovery in Task 9, never for region
-membership).
+tracking here too, but for a DIFFERENT reason than Task 6's drop** (don't conflate the two — Task 6's
+justification is cost-dominance under Dijkstra; this one is architectural): **`floodFill` must only
+ever enqueue `WALK`-action candidates from `candidateSteps`, full stop — never TUNNEL/BRIDGE/
+CARVED_STAIR/AIR_STAIR.** Region membership has to reflect only genuine walkable connectivity; a
+TUNNEL candidate is a construction edge (`RegionGraph`'s job to discover in Task 9), and if
+`RegionScanner`'s own flood ever followed one, every obstacle a `SiegeProject` could bridge would
+silently fuse the regions on either side of it, destroying the partition this class exists to
+produce. Once `floodFill` filters to `WALK` only, there is no mine chain left for the old cap to
+bound — the cap isn't "unnecessary because cost dominates" here, it's unreachable code, because the
+path that used to feed it (enqueueing MINE candidates at all) no longer exists.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Implement the port directly** (this task's change is small and mechanical enough
+  that a fixture-heavy failing-test-first cycle would mostly test plumbing, not behavior): replace
+  the step source and add the one-line `if (step.action() != PathAction.WALK) continue;` filter
+  before `floodFill`'s existing enqueue logic.
 
-```java
-package org.ratden.skavenblight.ai.pathing.region;
+- [ ] **Step 2: Confirm the filter is real, not accidentally always-true**, by temporarily commenting
+  it out and confirming `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.
+  PathStepEvaluatorStepGenerationTest"` still passes (that test suite doesn't exercise
+  `RegionScanner` at all, so this only proves the filter line compiles against a real non-WALK
+  action existing — not a substitute for the real regression protection below). Restore the filter.
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.ChunkPos;
-import org.junit.jupiter.api.Test;
+- [ ] **Step 3: Note real regression protection is deferred to the GameTest matrix (Tasks 21-24)**,
+  specifically the "chained across a giant gap" shape in each — `RegionScanner` wrongly fusing two
+  regions across a long TUNNEL-length wall would surface there as a route-tree/connector-discovery
+  failure (the two sides would scan as one region with no connector between them at all, since
+  there'd be nothing left to connect), not as a silent pass. `RegionScanner` has no independent
+  `TerrainSnapshot`-free unit-testable surface — its only constructor input is a concrete
+  `TerrainSnapshot`, which requires a real `ServerLevel` to build (see `TerrainSnapshot.refresh`) —
+  so a dedicated fixture-heavy unit test here would just re-implement what the GameTest matrix
+  already proves end-to-end. Don't add one; record this reasoning in the commit message instead so
+  a future reader doesn't wonder why this task skipped its own test.
 
-import java.util.List;
-import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
-
-class RegionScannerTest {
-
-    @Test
-    void aTwentyBlockSolidWallProducesTwoSeparateRegionsNotOne() {
-        // Build a fake TerrainSnapshot-equivalent via the real capture path against a small
-        // in-memory level fixture (see existing PathingRegionGameTests for the established
-        // pattern this project already uses to build a real TerrainSnapshot in tests) with a
-        // 20-block-thick solid wall separating two 5x5 open floors.
-        //
-        // Full fixture setup deferred to implementation time using that existing GameTest-adjacent
-        // pattern (this test lives in src/test, exercised via a captured snapshot fixture built the
-        // same way PathingRegionGameTests already does it for real ServerLevel-backed scans) -
-        // the assertion below is the actual contract this task must satisfy regardless of fixture
-        // mechanics:
-        List<Region> regions = /* RegionScanner.scan(...) against the two-floor-plus-wall fixture */
-                List.of(); // placeholder wiring only - implementer fills in the real scan() call
-        assertEquals(2, regions.size(),
-                "a 20-block solid wall must never be treated as a WALK-traversable region boundary, "
-                        + "even though it's a valid TUNNEL construction candidate for RegionGraph");
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.region.RegionScannerTest"`
-Expected: FAIL (fixture not wired up yet / assertion fails against `List.of()`).
-
-- [ ] **Step 3: Wire up the real fixture and implement the port**
-
-Build the two-floor-plus-wall `TerrainSnapshot` fixture using the same construction pattern
-`PathingRegionGameTests` already uses elsewhere in this codebase for a real captured snapshot (read
-that file's existing fixture-building helpers before writing a new one — don't duplicate a second
-way to build a test snapshot if one already exists). Port `RegionScanner` per the spec above.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.region.RegionScannerTest"`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionScanner.java \
-        src/test/java/org/ratden/skavenblight/ai/pathing/region/RegionScannerTest.java
-git commit -m "refactor(pathing): port RegionScanner to PathStepEvaluator, confirm TUNNEL never merges regions"
+git add src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionScanner.java
+git commit -m "refactor(pathing): port RegionScanner to PathStepEvaluator, filter floodFill to WALK-only"
 ```
 
 ---
@@ -1174,34 +1222,40 @@ unified step-generator feeds one Dijkstra flood for BOTH ordinary walking and co
 actually gets exercised at the region-connector-discovery layer, not just inside `FlowFieldCalculator`.
 The one genuinely new behavior is the confirmed-unreachable mechanism below.
 
-**Confirmed-unreachable-region mechanism (per user confirmation above — implement exactly this, the
-approved proposal):**
+**Confirmed-unreachable-region mechanism — corrected from the version originally confirmed with the
+user.** The originally-approved proposal gated bedrock-tier mining behind a two-pass
+`allowBedrockTierMining` flag (never offer it on the first pass; only offer it in a second, targeted
+retry for regions that came back with zero connectors). On review, that flag IS an absolute cost gate
+wearing a boolean's clothes — exactly the "worse than some absolute threshold → discard" rule the
+design doc explicitly forbids, just expressed as "never offered" instead of "offered but capped."
+Removing it changes nothing about correctness, because the numbers already do the work:
+`PathStepEvaluator.bedrockFailsafeWorkUnits()` (Task 2) is `25 * 1200 * workPerRatPerTick` ≈
+3,000,000 at defaults, against an ordinary tunnel step's low-hundreds cost — Dijkstra pops candidates
+in cost order, so a multi-million-cost edge structurally cannot beat any cheaper alternative that
+exists; it is only ever chosen when it is, genuinely, the only route. **Corrected mechanism:**
 
-1. `RegionGraph.build` runs its ordinary connector discovery (step 1) with `PathStepEvaluator`'s
-   normal costs — meaning ordinary breakable-block `TUNNEL`/`CARVED_STAIR` mining is offered normally,
-   but bedrock-tier mining (`PathStepEvaluator.isBedrockLike` true) is **never offered as a candidate
-   during this first pass** — add a `boolean allowBedrockTierMining` parameter to whatever internal
-   step-generation call `tryTrace` makes, defaulted `false` for this first pass.
-2. After `build` finishes and `RegionRouteTree.compute(graph, rootRegionId)` runs (in
-   `TerritoryRegionMap`, Task 11), compute `confirmedUnreachableRegionIds`: every region id present in
-   this graph's own region list that is NOT `rootRegionId` and for which `routeTree.isReachable(id)`
-   is `false`. This is computed at the exact same cadence as the route tree itself (only after a FULL
-   rebuild, never from the steady-state dirty-region fast path — see Task 11's port for where this is
-   called, alongside the existing `RegionRouteTree.compute` call site, never anywhere else) so it can
-   never go stale independently of the tree, and the fast path never sets or trusts it.
-3. For exactly the regions in that set — and only those — `TerritoryRegionMap` (Task 11) calls back
-   into `RegionGraph` with a second, targeted connector-discovery attempt scoped to that one region's
-   own boundary cells, with `allowBedrockTierMining = true`. This is a small, targeted retry bounded
-   by the number of actually-isolated regions (0 or 1 in the overwhelmingly common case), never a
-   second full-territory pass — the exact mechanism confirmed with the user, and the doc's explicitly
-   rejected alternative (a second relaxed-ceiling pass over the WHOLE territory) is not what this is.
-4. Everywhere else, costs stay purely relative: `bestPerPair`'s "cheaper connector wins" comparison
-   already IS the "worse than an already-connected alternative → discard" rule the design doc
-   requires — there is no separate absolute ceiling anywhere in this method to remove, since none
-   ported forward from `SiegeLineTracer`'s old `costCeiling` parameter (that parameter doesn't exist
-   in the new `PathStepEvaluator`-based tracing at all — confirm this explicitly in code review before
-   considering this task done: if a ceiling comparison of any kind survived the port, find it and
-   convert it to a relative comparison instead of an absolute one).
+1. `RegionGraph.build`'s connector discovery always offers every `PathStepEvaluator.candidateSteps`
+   candidate at its real cost, bedrock-tier mining included, with no gating flag at all — the exact
+   same call for every region, every pass, no two-pass retry, no `allowBedrockTierMining` parameter.
+   `bestPerPair`'s existing "cheaper connector wins" comparison IS the design doc's required relative
+   rule; there is nothing else to add for correctness.
+2. `confirmedUnreachableRegionIds(rootRegionId, routeTree)` (still implemented, per Task 9's original
+   interface) becomes a **diagnostic accessor only** — every region id absent from `routeTree` after
+   a normal `build` + `RegionRouteTree.compute` — used for logging/observability ("this territory has
+   N genuinely isolated regions"), never for gating whether an edge is offered or a retry is
+   triggered. There is no second pass to trigger, because the first pass already considers every cost
+   tier.
+3. This means Task 14 has one less new control-flow path than originally planned: no targeted retry
+   call site. Task 14's only new behavior is the planned-state-authority fix (see that task).
+
+**Node-budget implication, worth stating explicitly rather than discovering later:** always offering
+bedrock-tier candidates means `RegionGraph.build`'s per-boundary-cell fan-out can, in the fully-sealed
+case, chain up to `MAX_CHAIN_HOPS` (12) hops of bedrock-cost mining before giving up on a direction —
+bounded, cheap relative to a per-cell flood (region counts are small), and no different in kind from
+any other candidate `tryTrace` already considers. If a future GameTest shows this measurably slows
+territory rebuild on a large base, the fix is a targeted one (e.g. skip fan-out directions whose
+first hop is already bedrock-tier once at least one ordinary connector already exists for that region
+pair), not a re-introduction of the two-pass gate this correction just removed.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1218,12 +1272,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class RegionGraphTest {
 
     @Test
-    void regionWithNoOrdinaryConnectorIsInTheConfirmedUnreachableSet() {
-        // Fixture: two regions, zero connectors between them (a fully solid wall on every side
-        // thick enough that PathStepEvaluator's ordinary candidateSteps never bridges it within
-        // MAX_CHAIN_HOPS). Full fixture setup follows the same TerrainSnapshot-capture pattern as
-        // Task 8's RegionScannerTest.
-        RegionGraph graph = /* RegionGraph.build(...) against the two-sealed-regions fixture */ null;
+    void regionWithNoConnectorWithinTheChainHopLimitIsInTheConfirmedUnreachableSet() {
+        // Fixture: two regions with NO traceable connector in any of the 14 fan-out directions from
+        // any boundary cell within MAX_CHAIN_HOPS (12) - e.g. separated by more open space in every
+        // direction than the hop limit reaches, so even a full-cost trace (bedrock-tier mining
+        // included, per this task's corrected mechanism - there is no gating flag left to disable)
+        // never lands in the other region. This is now a genuinely rare diagnostic case, not the
+        // common "bedrock wall" case it would have been under the originally-planned two-pass gate.
+        RegionGraph graph = /* RegionGraph.build(...) against the two-unreachable-regions fixture */ null;
         RegionRouteTree tree = RegionRouteTree.compute(graph, /* rootRegionId */ 0);
 
         Set<Integer> unreachable = graph.confirmedUnreachableRegionIds(0, tree);
@@ -1232,9 +1288,12 @@ class RegionGraphTest {
     }
 
     @Test
-    void regionWithAnOrdinaryConnectorIsNeverInTheConfirmedUnreachableSet() {
-        // Fixture: two regions joined by an ordinary (non-bedrock) TUNNEL-crossable gap.
-        RegionGraph graph = /* RegionGraph.build(...) against the two-connected-regions fixture */ null;
+    void regionWithAnyConnectorIncludingABedrockTierOneIsNeverInTheConfirmedUnreachableSet() {
+        // Fixture: two regions joined ONLY by a bedrock-tier gap (every direct route is
+        // isBedrockLike). Since build() no longer gates bedrock mining behind a flag, this still
+        // produces a real (very expensive) connector, and the region must NOT appear unreachable -
+        // proving the corrected mechanism doesn't accidentally make bedrock-only routes invisible.
+        RegionGraph graph = /* RegionGraph.build(...) against the bedrock-only-connector fixture */ null;
         RegionRouteTree tree = RegionRouteTree.compute(graph, 0);
 
         Set<Integer> unreachable = graph.confirmedUnreachableRegionIds(0, tree);
@@ -1274,7 +1333,8 @@ git commit -m "feat(pathing): rewrite RegionGraph absorbing RegionIndex, add con
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionRouteTree.java`
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionFlowField.java`
-- Test: `src/test/java/org/ratden/skavenblight/ai/pathing/region/RegionFlowFieldTest.java`
+- No dedicated unit test for this task — see the note after the spec below for why, and don't
+  substitute a test that asserts nothing just to have one in the checklist.
 
 **Interfaces:**
 - `RegionRouteTree`: **no algorithm change at all** — it already operates purely on `RegionGraph`/
@@ -1291,55 +1351,34 @@ git commit -m "feat(pathing): rewrite RegionGraph absorbing RegionIndex, add con
   (`tryClaimTarget`/`releaseTarget`/`isTargetClaimed`/`tryClaimFormationSlot`/`tryOccupyLane`/
   `forceRecalculation`/`findProjectFor`/etc.) is a mechanical type port, no logic change.
 
-- [ ] **Step 1: Write the failing test**
+**Why no dedicated unit test:** `getNextStep`'s live-completion check requires a real `ServerLevel`
+(via `LiveTerrainAccess`) to determine whether an action is "already done," and `RegionFlowField`'s
+own constructor requires a real `TerritoryRegionMap`/`FlowFieldState`/`SiegeProjectManager`/
+`FlowFieldCalculator` — there is no meaningful fake for "is this block already the placed stair" that
+wouldn't just be testing the fake instead of the real completion logic. A test asserting something
+true regardless of whether `CLIMB_TO_ABOVE_ONCE_BUILT`-shaped logic was actually deleted (e.g.
+`assertTrue(true)`) is worse than no test — it looks like coverage without providing any. Real
+coverage: Tasks 21-24's GameTest matrix exercises `getNextStep` continuously for every rat crossing
+every one of the five action types; if `.above()` treatment leaked back in for any action, a rat
+would be pointed one block above where it should stand and the corresponding GameTest would fail to
+converge within its timeout. Record this reasoning in the commit message.
 
-```java
-package org.ratden.skavenblight.ai.pathing.region;
+- [ ] **Step 1: Implement the ports** per the spec above — delete `CLIMB_TO_ABOVE_ONCE_BUILT` and its
+  use in `getNextSiegeNode`/`getNextStep` entirely, rename the method, retype every other method's
+  `SiegeNode`→`FlowStep` references.
 
-import net.minecraft.core.BlockPos;
-import org.junit.jupiter.api.Test;
-import org.ratden.skavenblight.ai.pathing.FlowStep;
-import org.ratden.skavenblight.ai.pathing.PathAction;
+- [ ] **Step 2: Run `./gradlew compileJava`** to confirm the port compiles against the new types.
 
-import static org.junit.jupiter.api.Assertions.*;
-
-class RegionFlowFieldTest {
-
-    @Test
-    void getNextStepNeverLooksAboveTheNodeForAnyOfTheFiveActions() {
-        // CLIMB_TO_ABOVE_ONCE_BUILT is gone entirely - every one of the five new PathAction values
-        // must resolve a completed step to WALK at node.pos() itself, never node.pos().above().
-        // Full assertion requires a constructed RegionFlowField against a live-terrain fixture
-        // reporting the action as already completed - build this the same way the existing
-        // PathingGoalRecalculationGameTests already fixtures a RegionFlowField for goal-level tests
-        // (reuse that helper rather than inventing a second one).
-        assertTrue(true, "placeholder - implementer wires the real fixture per the note above");
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.region.RegionFlowFieldTest"`
-Expected: PASS trivially until the real fixture is wired (same placeholder-then-fixture pattern as
-Task 8); wire the real fixture before calling this task done, and confirm the test would actually
-fail against a version of `getNextStep` that still special-cases CLIMB_TO_ABOVE_ONCE_BUILT-shaped
-logic before deleting that logic, so this test is a real regression guard rather than a tautology.
-
-- [ ] **Step 3: Implement the ports** per the spec above.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.region.RegionFlowFieldTest"`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionRouteTree.java \
-        src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionFlowField.java \
-        src/test/java/org/ratden/skavenblight/ai/pathing/region/RegionFlowFieldTest.java
-git commit -m "refactor(pathing): port RegionRouteTree (unchanged) and RegionFlowField (drop climb-to-above)"
+        src/main/java/org/ratden/skavenblight/ai/pathing/region/RegionFlowField.java
+git commit -m "refactor(pathing): port RegionRouteTree (unchanged) and RegionFlowField (drop climb-to-above)
+
+No dedicated unit test - getNextStep's live-completion check needs a real ServerLevel with no
+meaningful fake; real coverage is the Task 21-24 GameTest matrix, which exercises every action
+type's completion resolution continuously."
 ```
 
 ---
@@ -1559,7 +1598,7 @@ git commit -m "feat(pathing): rewrite SiegeProject with PlannedStep, platform po
 **Files:**
 - Create: `src/main/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandler.java` (replaces
   the old file)
-- Test: `src/test/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandlerTest.java`
+- No dedicated unit test for this task — see the note before Step 1 for why.
 
 **Interfaces:**
 - Consumes: `PathAction` (Task 1), `PathStepEvaluator` (for `isActionCompleted`, moved here from
@@ -1588,45 +1627,28 @@ git commit -m "feat(pathing): rewrite SiegeProject with PlannedStep, platform po
 - `AIR_STAIR`: today's `BUILD_STAIR` case exactly (no mining component — open air by construction).
 - Platform (the new trailing boolean, not a `PathAction` value): today's `BUILD_LANDING` case exactly.
 
-- [ ] **Step 1: Write the failing tests** (port the existing headroom-clear GameTest-adjacent
-  assertions as plain unit tests against a mocked `ServerLevel`/`BlockState` where feasible; the full
-  world-mutation behavior is exercised end-to-end by Task 20's GameTest matrix, so this task's unit
-  tests focus on the dispatch logic only):
+**Why no dedicated unit test:** every branch of `constructSiegeBlock` mutates a real `ServerLevel`
+(`level.setBlockAndUpdate`, `level.destroyBlock`, headroom clearing) and its correctness is entirely
+about real block placement/mining order and geometry — a mock-heavy unit test asserting "method X was
+called before method Y" would just restate the implementation, not verify it produces correct world
+state. Real coverage is Task 22's dedicated `CARVED_STAIR` GameTest matrix (mine-then-place ordering
+is directly observable there: if placement happened before mining, the stair would be placed into
+still-solid rock and the GameTest's block-type assertions would fail) and Tasks 20/23/24 for the other
+actions/platform behavior. Implement directly per the spec above; don't add a test that would assert
+nothing just to satisfy this plan's own step-numbering habit.
 
-```java
-package org.ratden.skavenblight.ai.pathing;
+- [ ] **Step 1: Implement `SiegeInteractionHandler`** per the placement spec above.
 
-import org.junit.jupiter.api.Test;
+- [ ] **Step 2: Run `./gradlew compileJava`** to confirm no regressions elsewhere in the codebase.
 
-import static org.junit.jupiter.api.Assertions.*;
-
-class SiegeInteractionHandlerTest {
-
-    @Test
-    void carvedStairMinesBeforePlacingNotAfter() {
-        // Ordering assertion only feasible with a real ServerLevel fixture (see Task 20's GameTest
-        // matrix for CARVED_STAIR's own dedicated tests, which are this behavior's real coverage).
-        // This unit test's role is narrower: pin that constructSiegeBlock's CARVED_STAIR branch
-        // calls executeBreach-equivalent logic before placing COBBLESTONE_STAIRS, verified via the
-        // GameTest matrix rather than duplicated here in a mock-heavy unit test that would mostly
-        // just re-describe the implementation. No assertion beyond this comment for this specific
-        // test - real coverage lives in Task 20.
-        assertTrue(true);
-    }
-}
-```
-
-- [ ] **Step 2-4:** Given this task's real behavioral coverage is Task 20's GameTest matrix (mining +
-  placing world geometry can't be meaningfully unit-tested without a real `ServerLevel`), implement
-  `SiegeInteractionHandler` directly per the spec above, then defer full verification to Task 20.
-  Still run `./gradlew test` after implementing to confirm no compile regressions elsewhere.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/main/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandler.java \
-        src/test/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandlerTest.java
-git commit -m "feat(pathing): rewrite SiegeInteractionHandler for the five-action vocabulary + platform execution"
+git add src/main/java/org/ratden/skavenblight/ai/pathing/SiegeInteractionHandler.java
+git commit -m "feat(pathing): rewrite SiegeInteractionHandler for the five-action vocabulary + platform execution
+
+No dedicated unit test - every branch mutates real ServerLevel state; real coverage is the
+Task 20-24 GameTest matrix (CARVED_STAIR's mine-then-place ordering is directly observable there)."
 ```
 
 ---
@@ -1642,14 +1664,14 @@ git commit -m "feat(pathing): rewrite SiegeInteractionHandler for the five-actio
   `SiegeProjectManager`, `FlowFieldCalculator`, `RegionGraph`, `RegionRouteTree`, `PathStepEvaluator`
   in place of `TerrainEvaluator`, drop the `SiegeLineTracer lineTracer` field entirely — nothing in
   the new `RegionGraph.build` signature takes one).
-- Produces: identical public API. Two new call sites, both additive:
-  `rebuildRegionsAndGraph`'s existing `RegionRouteTree.compute(newGraph, rootRegion.getId())` call
-  gains one immediately-following line computing `newGraph.confirmedUnreachableRegionIds(rootRegion
-  .getId(), newRouteTree)`, stored as a new `volatile Set<Integer> confirmedUnreachableRegionIds`
-  field (mirroring how `routeTree` itself is already published) — and, for each id in that set, one
-  targeted `RegionGraph` retry call per Task 9's spec, folding any newly-discovered bedrock-tier
-  connector into `newGraph` before it's published. This is the ONLY new control flow this task adds
-  beyond mechanical type substitution.
+- Produces: identical public API. One new call site, additive and diagnostic-only per Task 9's
+  correction: `rebuildRegionsAndGraph`'s existing `RegionRouteTree.compute(newGraph, rootRegion
+  .getId())` call gains one immediately-following line computing `newGraph.
+  confirmedUnreachableRegionIds(rootRegion.getId(), newRouteTree)`, stored as a new `volatile
+  Set<Integer> confirmedUnreachableRegionIds` field (mirroring how `routeTree` itself is already
+  published) and logged if non-empty. No retry call — Task 9's `build` already considers every cost
+  tier in its one and only pass, so there is nothing left to retry. This task's only REAL new control
+  flow is the planned-state-authority fix below.
 
 **The onBlockChanged authority fix (the design doc's own explicit instruction — a deletion, not a new
 filter):**
