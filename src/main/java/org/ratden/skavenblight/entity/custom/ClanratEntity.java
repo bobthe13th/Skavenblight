@@ -10,15 +10,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import org.ratden.skavenblight.ai.goal.*;
-import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeConstructionGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.AbstractSiegeProjectGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.goal.clanrat.FollowFlowFieldGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.SmartBreachGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.SpiralSapperGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.StrandedGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.WarpSapperGoal;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -30,7 +24,6 @@ import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
-import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
@@ -72,17 +65,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new MeleeAttackGoal(this, 1.2D, false));
-        // WarpSapperGoal must outrank SmartBreachGoal: it only fires for blocks too hard to
-        // hand-mine in a reasonable time (see its canUse() threshold), and needs first refusal
-        // so those blocks get demolished with TNT instead of a rat standing there mining for
-        // a very long time.
-        this.goalSelector.addGoal(2, new WarpSapperGoal(this));
-        this.goalSelector.addGoal(3, new SmartBreachGoal(this));
-        // SpiralSapperGoal/DeployClimbableGoal own BUILD_SPIRAL/BUILD_LADDER respectively and
-        // must outrank BuildFlowFieldGoal, which only handles those actions as a generic
-        // fallback if the specialized goal's own canUse() declines.
-        this.goalSelector.addGoal(4, new SpiralSapperGoal(this));
-        this.goalSelector.addGoal(5, new DeployClimbableGoal(this));
         this.goalSelector.addGoal(6, new BuildFlowFieldGoal(this));
         // Sits below the construction goals (only runs once they've already declined - a rat
         // with real, unclaimed work of its own never reaches this) and above
@@ -90,11 +72,6 @@ public class ClanratEntity extends Monster implements GeoEntity {
         // case where the nearest work is claimed by someone else).
         this.goalSelector.addGoal(8, new AwaitFormationGoal(this));
         this.goalSelector.addGoal(9, new FollowFlowFieldGoal(this, 1.2D));
-        // Only engages when isStranded() is true (region found but unreachable per the route
-        // tree) - yields to the ordinary siege goals above, which naturally decline while
-        // currentFlowField == null in the stranded case, and to WaterAvoidingRandomStrollGoal
-        // below when not stranded.
-        this.goalSelector.addGoal(10, new StrandedGoal(this));
         this.goalSelector.addGoal(11, new WaterAvoidingRandomStrollGoal(this, 1.0D));
         this.goalSelector.addGoal(12, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(12, new RandomLookAroundGoal(this));
@@ -267,37 +244,10 @@ public class ClanratEntity extends Monster implements GeoEntity {
         return names != null ? names : "<idle>";
     }
 
-    /**
-     * Diagnostic-only: for every registered siege-construction goal on this rat, reports whether
-     * it's currently RUNNING (per the vanilla goal selector) alongside a fresh {@code canUse()}
-     * call, even for goals that aren't running right now. {@code canUse()} on these goals is a
-     * pure read (findTarget()/isTargetClaimed() mutate nothing), so calling it here on top of
-     * the goal selector's own calls is side-effect-free.
-     *
-     * <p>Exists to answer a question {@code getActiveGoalNames()} alone can't: a rat standing
-     * exactly on a BUILD_STAIR instruction that's still running FollowFlowFieldGoal could mean
-     * either "BuildFlowFieldGoal correctly declines" (canUse()=false - the real reason lives
-     * elsewhere, e.g. a stale claim - see PathingDebugFileWriter's claimant lookup) or
-     * "BuildFlowFieldGoal thinks it CAN run but the goal selector never gave it the chance"
-     * (canUse()=true while not running - a goal-selector-level bug, not a canUse() logic bug).
-     */
+    /** No goal extends AbstractSiegeConstructionGoal anymore (removed with the last concrete
+     * implementation, SmartBreachGoal) - always the "none registered" fallback. */
     public String describeSiegeGoalCanUseState() {
-        String result = this.goalSelector.getAvailableGoals().stream()
-                .filter(wrapped -> wrapped.getGoal() instanceof AbstractSiegeConstructionGoal)
-                .map(wrapped -> {
-                    Goal goal = wrapped.getGoal();
-                    boolean canUseNow;
-                    try {
-                        canUseNow = goal.canUse();
-                    } catch (Exception e) {
-                        canUseNow = false;
-                    }
-                    return goal.getClass().getSimpleName() + "[running=" + wrapped.isRunning()
-                            + ", canUseNow=" + canUseNow + "]";
-                })
-                .reduce((a, b) -> a + " " + b)
-                .orElse(null);
-        return result != null ? result : "<no siege construction goals registered>";
+        return "<no siege construction goals registered>";
     }
 
     /**
@@ -320,22 +270,10 @@ public class ClanratEntity extends Monster implements GeoEntity {
         return Optional.empty();
     }
 
-    /**
-     * Diagnostic-only: the currently-RUNNING siege-construction goal's own progress on its
-     * claimed target (actionTicks/stalledTicks/cooldown state - see
-     * AbstractSiegeConstructionGoal#describeState()), or a fixed string if none is running.
-     * Meant to be called on whichever mob {@link RegionFlowField#getClaimant} returns for a
-     * stuck target: canUse()/running alone say THAT a goal holds a claim, this says whether it's
-     * actually making progress (ticking up normally) or stuck (actionTicks not advancing,
-     * repeatedly stalled, or sitting in a cooldown that never seems to expire).
-     */
+    /** No goal extends AbstractSiegeConstructionGoal anymore (removed with the last concrete
+     * implementation, SmartBreachGoal) - always the "none running" fallback. */
     public String describeActiveSiegeGoalState() {
-        return this.goalSelector.getAvailableGoals().stream()
-                .filter(wrapped -> wrapped.isRunning() && wrapped.getGoal() instanceof AbstractSiegeConstructionGoal)
-                .map(wrapped -> ((AbstractSiegeConstructionGoal) wrapped.getGoal()).getClass().getSimpleName()
-                        + " " + ((AbstractSiegeConstructionGoal) wrapped.getGoal()).describeState())
-                .findFirst()
-                .orElse("<no siege construction goal currently running>");
+        return "<no siege construction goal currently running>";
     }
 
     /**

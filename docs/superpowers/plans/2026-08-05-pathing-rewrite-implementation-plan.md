@@ -2122,6 +2122,38 @@ in Tasks 17-19, and the remaining old GameTest files Task 19 handles) — if a c
 in a file NOT already accounted for by this plan, stop and investigate before continuing; it means
 this plan's file-disposition survey missed a caller.
 
+**Executed reality (2026-08-05): four additional compile breaks surfaced here, not anticipated by
+the paragraph above — none from a caller the file-disposition survey missed outright, all from
+already-decided-elsewhere fates this task's own scope didn't mention pulling forward. Resolved
+in-place rather than deferred, since each is a zero-new-judgment mechanical fix:**
+1. `ClanratEntity.describeSiegeGoalCanUseState()`/`describeActiveSiegeGoalState()` reference
+   `AbstractSiegeConstructionGoal` directly (not just via a deleted-goal instance) — beyond the
+   `registerGoals()` edit this task's Step 2 already described. Confirmed via grep that
+   `SmartBreachGoal` was the class's ONLY subclass, so both methods can only ever produce their own
+   "none registered"/"none running" fallback string once it's gone — bodies replaced with that literal
+   fallback, signatures/callers (`PathingDebugFileWriter`, `AwaitFormationGoalGameTests`) untouched.
+   Left `PathingDebugFileWriter`'s own `SiegeNode`-typed body alone; it's genuinely Task 25's scope.
+2. `AwaitFormationGoal.java:191` references `AbstractSiegeConstructionGoal.MAX_TARGET_CLAIM_DISTANCE`
+   (a bare `2.5D` constant, same-package access, no other coupling) in already-existing `tick()` logic
+   unrelated to this task. Inlined the same literal as a local `private static final double
+   MAX_TARGET_CLAIM_DISTANCE = 2.5D` in `AwaitFormationGoal` itself — Task 19 (this file's own
+   assigned task) still owns any further real changes to this goal.
+3. `PathingGoalRecalculationGameTests.testDeployClimbableGoalMarksRegionDirty` — the ONLY method in
+   that file using `DeployClimbableGoal`, and already hand-fed the OLD `SiegeNode`/`FlowFieldState`
+   API directly. Task 20 (exec position 20) already lists deleting exactly this method as decided,
+   final scope — pulled forward untouched (deleted the method + its now-unused import), not
+   reinterpreted, because leaving it broken until Task 20 would mean `compileJava` stays red from
+   exec position 1 instead of exec position 6 as the "why section order isn't execution order" note
+   above claims.
+4. `SiegeConstructionActionsGameTests.java` (whole file) — already listed in the File Disposition
+   table's "Existing tests — deleted" list with no surviving logic to port, and its one other
+   reference (`StaircaseSiegeGroupGameTests`'s javadoc `{@code ...}` mention) is comment-only. Deleted
+   now rather than at Task 20, same reasoning as point 3.
+
+None of these four needed new design judgment — each fate was already fully decided elsewhere in this
+document. If a FUTURE task's own compile check surfaces one of these files again expecting to still
+edit it, that expectation is now stale; check here first.
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -2331,13 +2363,17 @@ git commit -m "feat(goal): implement real dynamic row/column formation grid for 
 
 ## Task 20: Grief-recovery test + legacy GameTest cleanup
 
+**Already done at Task 16 (2026-08-05), not here:** `SiegeConstructionActionsGameTests.java`'s
+deletion and `PathingGoalRecalculationGameTests.testDeployClimbableGoalMarksRegionDirty`'s removal
+both got pulled forward to Task 16 (see that task's "Executed reality" note) — they broke
+`compileJava` immediately on the goal-file deletions, not at this task's original position. Don't
+re-do them here; if either file/method still existed by the time this task runs, that would itself
+be a sign something regressed.
+
 **Files:**
 - Create: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecoveryGameTests.java`
-- Delete: `src/main/java/org/ratden/skavenblight/gametest/SiegeConstructionActionsGameTests.java`
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java`
   (rewrite `BUILD_PILLAR` fixture to `AIR_STAIR`/`BRIDGE`)
-- Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java`
-  (delete `testDeployClimbableGoalMarksRegionDirty` and any sibling climb-specific test methods)
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java` (delete the
   stale LEAP-javadoc comment reference)
 - Delete: `src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java`
@@ -2396,10 +2432,8 @@ Expected: PASS
 ```bash
 git add src/main/java/org/ratden/skavenblight/gametest/SiegeProjectGriefRecoveryGameTests.java \
         src/main/java/org/ratden/skavenblight/gametest/SiegeProjectAutoWidenGameTests.java \
-        src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java \
         src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java
-git rm src/main/java/org/ratden/skavenblight/gametest/SiegeConstructionActionsGameTests.java \
-       src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java \
+git rm src/test/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracerTest.java \
        src/test/java/org/ratden/skavenblight/ai/pathing/TerrainEvaluatorTest.java
 git commit -m "test(pathing): add grief-recovery GameTest, retire legacy climb/line-tracer test files"
 ```

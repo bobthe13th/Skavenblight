@@ -32,6 +32,8 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
     private static final int FORMATION_MIN_RADIUS = 4;
     private static final int FORMATION_MAX_RADIUS = 12;
     private static final long RECHECK_INTERVAL_TICKS = 40;
+    /** Same arrival-distance value AbstractSiegeConstructionGoal used before its removal. */
+    private static final double MAX_TARGET_CLAIM_DISTANCE = 2.5D;
 
     private final PathfinderMob mob;
     private RegionFlowField flowField;
@@ -188,7 +190,7 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
 
         if (this.redirectTarget != null) {
             // Arrived close enough - stop here (see stop()'s release-and-reclaim comment).
-            if (this.mob.blockPosition().closerThan(this.redirectTarget, AbstractSiegeConstructionGoal.MAX_TARGET_CLAIM_DISTANCE)) {
+            if (this.mob.blockPosition().closerThan(this.redirectTarget, MAX_TARGET_CLAIM_DISTANCE)) {
                 this.redirectTarget = null;
             }
             return;

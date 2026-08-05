@@ -11,7 +11,6 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Skavenblight;
 import org.ratden.skavenblight.ai.goal.clanrat.BuildFlowFieldGoal;
-import org.ratden.skavenblight.ai.goal.clanrat.DeployClimbableGoal;
 import org.ratden.skavenblight.ai.pathing.*;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
@@ -71,57 +70,6 @@ public class PathingGoalRecalculationGameTests {
             this.changes.add(pos.immutable());
             super.onBlockChanged(pos);
         }
-    }
-
-    @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
-    public static void testDeployClimbableGoalMarksRegionDirty(GameTestHelper helper) {
-        // helper-Y=1 is the template's solid floor, helper-Y=2 is the first open/walkable layer
-        // above it (see PathingRegionGameTests' class javadoc) - the mob must stand at Y=2, not
-        // Y=1, or its feet land inside the solid floor block instead of on top of it.
-        BlockPos relativeMobPos = new BlockPos(4, 2, 4);
-        BlockPos relativeWallPos = relativeMobPos.relative(Direction.NORTH);
-        helper.setBlock(relativeWallPos, Blocks.STONE.defaultBlockState());
-        // 2 blocks of open headroom above the mob so checkOverhang() skips straight to
-        // PLACING_LADDER instead of MINING_OVERHANG.
-        helper.setBlock(relativeMobPos.above(), Blocks.AIR.defaultBlockState());
-        helper.setBlock(relativeMobPos.above(2), Blocks.AIR.defaultBlockState());
-
-        BlockPos mobPos = helper.absolutePos(relativeMobPos);
-        BlockPos wallPos = helper.absolutePos(relativeWallPos);
-        // DeployClimbableGoal places the ladder at targetWallPos.relative(wallFacing), and
-        // wallFacing is the direction FROM the mob TO the wall, reversed - i.e. back at the mob's
-        // own standing position. isSpaceClear() deliberately excludes the builder (see this mod's
-        // CLAUDE.md), so placing into the mob's own cell is expected to succeed.
-        BlockPos placePos = mobPos;
-
-        RecordingRegionMap owner = new RecordingRegionMap();
-        FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
-        state.updateInstructions(Map.of(mobPos, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_LADDER)));
-        TerrainEvaluator evaluator = new TerrainEvaluator();
-        SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
-        CalculationThrottler throttler = new CalculationThrottler();
-        FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
-        RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
-
-        ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
-        mob.setPos(mobPos.getX() + 0.5, mobPos.getY(), mobPos.getZ() + 0.5);
-        helper.getLevel().addFreshEntity(mob);
-
-        DeployClimbableGoal goal = new DeployClimbableGoal(mob);
-        goal.setFlowField(flowField);
-
-        check(goal.canUse(), "goal should trigger: BUILD_LADDER node + solid wall to the north");
-        goal.start();
-        for (int i = 0; i < 12; i++) goal.tick();
-
-        helper.assertBlockState(relativeWallPos.relative(Direction.SOUTH),
-                s -> s.is(Blocks.LADDER), () -> "ladder should have been placed");
-
-        check(owner.changes.contains(placePos),
-                "region map was never told about the ladder placement at " + placePos
-                        + " - forceRecalculation was never called (recorded changes: " + owner.changes + ")");
-
-        helper.succeed();
     }
 
     /**
