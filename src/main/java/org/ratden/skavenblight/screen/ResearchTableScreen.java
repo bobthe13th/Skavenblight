@@ -130,6 +130,65 @@ public class ResearchTableScreen extends AbstractContainerScreen<ResearchTableMe
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderDetailPane(guiGraphics);
         renderTooltip(guiGraphics, mouseX, mouseY);
+        renderCustomTooltips(guiGraphics, mouseX, mouseY);
+    }
+
+    private boolean isMouseAboveArea(int mouseX, int mouseY, int x, int y, int offsetX, int offsetY, int width, int height) {
+        return mouseX >= (x + offsetX) && mouseX <= (x + offsetX) + width &&
+                mouseY >= (y + offsetY) && mouseY <= (y + offsetY) + height;
+    }
+
+    private void renderCustomTooltips(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        int x = (width - imageWidth) / 2;
+        int y = (height - imageHeight) / 2;
+
+        PreviewState preview = computePreviewState();
+
+        // 1. Wind Meter Tooltip
+        if (preview.spell != null && !preview.known) {
+            if (isMouseAboveArea(mouseX, mouseY, x, y, METER_X, METER_Y, METER_W, METER_H)) {
+                List<Component> tooltipLines = new ArrayList<>();
+                Wind wind = preview.spell.wind();
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_title", wind.getLoreName()).withStyle(net.minecraft.ChatFormatting.AQUA));
+
+                int current = Math.max(0, preview.windLevel);
+                int required = Math.max(1, Math.round(ResearchFormulas.requiredWindLevel(preview.spell.tier(), Config.researchWindThreshold)));
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_presence", current, required).withStyle(net.minecraft.ChatFormatting.GRAY));
+
+                if (current < required) {
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_paused").withStyle(net.minecraft.ChatFormatting.RED));
+                } else {
+                    float multiplier = ResearchFormulas.speedMultiplier((float) current, (float) required,
+                            Config.researchWindBonusReference, Config.researchWindMaxBonusMultiplier);
+                    tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.wind_speed", String.format("%.1f", multiplier)).withStyle(net.minecraft.ChatFormatting.GOLD));
+                }
+                guiGraphics.renderComponentTooltip(this.font, tooltipLines, mouseX, mouseY);
+                return; // Only show one tooltip at a time
+            }
+        }
+
+        // 2. Progress Bar Tooltip
+        if (isMouseAboveArea(mouseX, mouseY, x, y, PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H)) {
+            List<Component> tooltipLines = new ArrayList<>();
+            Optional<ResourceLocation> activeId = this.menu.getActiveSpellId();
+            if (activeId.isPresent()) {
+                ResourceLocation spellId = activeId.get();
+                String base = "spell.skavenblight." + spellId.getPath().substring(spellId.getPath().lastIndexOf('/') + 1);
+                String nameKey = base + ".name";
+                Component spellName = Component.translatable(nameKey);
+
+                int maxProgress = Config.researchTicksBase * ResearchFormulas.PROGRESS_SCALE;
+                int progress = this.menu.getProgress();
+                int percent = maxProgress != 0 ? (progress * 100 / maxProgress) : 0;
+
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_title", percent).withStyle(net.minecraft.ChatFormatting.GOLD));
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_studying", spellName).withStyle(net.minecraft.ChatFormatting.GRAY));
+            } else {
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_idle_title").withStyle(net.minecraft.ChatFormatting.GRAY));
+                tooltipLines.add(Component.translatable("gui.skavenblight.research_table.tooltip.progress_idle_desc").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+            }
+            guiGraphics.renderComponentTooltip(this.font, tooltipLines, mouseX, mouseY);
+        }
     }
 
     @Override

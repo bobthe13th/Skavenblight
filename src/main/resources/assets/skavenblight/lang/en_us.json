@@ -59,6 +59,15 @@
   "gui.skavenblight.research_table.reason.wind": "The Wind here is too faint to study this.",
   "gui.skavenblight.research_table.reason.catalyst": "Needs the right catalyst in the slot.",
 
+  "gui.skavenblight.research_table.tooltip.wind_title": "Wind: %s",
+  "gui.skavenblight.research_table.tooltip.wind_presence": "Presence: %d / %d (Required)",
+  "gui.skavenblight.research_table.tooltip.wind_paused": "Wind is too faint - progress paused.",
+  "gui.skavenblight.research_table.tooltip.wind_speed": "Research Speed: %sx",
+  "gui.skavenblight.research_table.tooltip.progress_title": "Research Progress: %d%%",
+  "gui.skavenblight.research_table.tooltip.progress_studying": "Studying: %s",
+  "gui.skavenblight.research_table.tooltip.progress_idle_title": "Research Progress: Idle",
+  "gui.skavenblight.research_table.tooltip.progress_idle_desc": "No spell selected to study, yes-yes!",
+
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
 
