@@ -31,13 +31,25 @@ public class SiegeLineTracer {
     }
 
     /**
-     * @param instructions  the traced line as an ANCHOR-WARD instruction map, matching
-     *                      FlowFieldCalculator's own convention: the entry keyed at each position
-     *                      points one step back toward {@code anchorPos}, carrying the action that
-     *                      was computed for the KEY's position (i.e. one position further out than
-     *                      the node's own pos - the same off-by-one the core flood has). Consumed
-     *                      as-is by SiegeProjectManager's reactive projects and executed by key by
-     *                      StrandedGoal; left exactly as it was.
+     * @param instructions  the traced line as an instruction map in exactly FlowFieldCalculator's
+     *                      own convention (see its {@code nextInstructionMap}, e.g.
+     *                      {@code put(step.pos(), new SiegeNode(current, action))}): keyed by the
+     *                      real position the action applies to, with the stored SiegeNode's own
+     *                      {@code pos()} carrying the NEXT HOP TOWARD THE TARGET (one step closer
+     *                      to {@code anchorPos}, which is itself closer to the target than
+     *                      {@code endPos}) - a standard Dijkstra predecessor-tree pointer, correct
+     *                      and intentional for mob traversal ("predecessor in the search" is
+     *                      "successor for the mob"). This is NOT an off-by-one and nothing here
+     *                      needs correcting for that reason. The actual footgun: {@code pos()}
+     *                      means two different things depending on how a SiegeNode is used - as a
+     *                      map VALUE it's "next hop", but as a standalone {@code SiegeNode(pos,
+     *                      action)} pair (e.g. what {@link TerrainEvaluator#isActionCompleted}
+     *                      expects) it means "the real position this action applies to". Any
+     *                      completion/terrain check against an entry from this map MUST build
+     *                      {@code new SiegeNode(entry.getKey(), entry.getValue().action())} first -
+     *                      never pass the raw stored value. See the pathing invariants doc for the
+     *                      full writeup; SiegeProject.isCompleted/getRemainingInstructions are the
+     *                      reference-correct examples.
      * @param orderedSteps  the same walk in direction-neutral form: one entry per hop, in trace
      *                      order, each naming the position stepped INTO and the action
      *                      determineMacroAction computed FOR that position. {@code orderedSteps[0]}
