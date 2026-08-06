@@ -2870,7 +2870,7 @@ belongs in its own session, verified against this exact single-rat gate test as 
   /`getRemainingInstructions` (key + `.action()` only) that no production path reads `.pos()` off
   those maps.
 
-**Files:**
+**Files (original scoping, first session):**
 - No production code changes expected beyond bug fixes this task's own failures reveal.
 - Reference: `src/main/java/org/ratden/skavenblight/gametest/StaircaseSiegeGroupGameTests.java`
   (unchanged — same 4 tests, now exercised against entirely new production code).
