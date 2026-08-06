@@ -149,7 +149,10 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             }
 
             // --- strict flow field execution below ---
-            BlockPos nextInChain = targetNode.pos();
+            // Corrected (2026-08-06, Task 21): targetNode.pos() always equals currentPos under the
+            // disambiguated FlowStep convention (a map value's pos() equals its own query key) - the
+            // real next hop is predecessorPos(). See RegionFlowField.getNextStep's own doc.
+            BlockPos nextInChain = targetNode.predecessorPos();
             int maxLookAhead = 3;
 
             for (int i = 0; i < maxLookAhead; i++) {
@@ -159,12 +162,14 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
                 // Navigation.moveTo (moveOrHop, below) now handles any real Y change itself via
                 // ordinary A* pathfinding, so this cap is a small optimization, not a correctness
                 // requirement the way it was back when moveOrHop had its own fixed-height climb
-                // impulse.
-                if (next == null || next.pos().equals(nextInChain) || next.action() != PathAction.WALK
-                        || next.pos().getY() != nextInChain.getY()) {
+                // impulse. next.action() describes the action AT nextInChain itself (the cell we're
+                // about to walk to); next.predecessorPos() is the hop beyond it - both corrected from
+                // next.pos() for the same reason as above.
+                if (next == null || next.predecessorPos().equals(nextInChain) || next.action() != PathAction.WALK
+                        || next.predecessorPos().getY() != nextInChain.getY()) {
                     break;
                 }
-                nextInChain = next.pos();
+                nextInChain = next.predecessorPos();
             }
 
             // Lane-occupancy tracking (see RegionFlowField.tryOccupyLane/isLaneCrowded): the
@@ -255,9 +260,11 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
     private BlockPos findEscapePos(BlockPos startPos) {
         BlockPos current = startPos;
         for (int i = 0; i < 6; i++) {
+            // Corrected (2026-08-06, Task 21): see tick()'s identical fix above - the real next hop
+            // is predecessorPos(), not pos() (which always equals the query position itself).
             FlowStep next = this.flowField.getNextStep((ServerLevel) this.mob.level(), current);
-            if (next == null || next.pos().equals(current)) break;
-            current = next.pos();
+            if (next == null || next.predecessorPos().equals(current)) break;
+            current = next.predecessorPos();
         }
         return current.equals(startPos) ? null : current;
     }

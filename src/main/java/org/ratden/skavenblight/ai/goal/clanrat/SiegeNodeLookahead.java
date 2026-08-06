@@ -55,7 +55,10 @@ final class SiegeNodeLookahead {
         }
 
         if (node != null && node.action() == PathAction.WALK) {
-            FlowStep nextNode = flowField.getNextStep(serverLevel, node.pos());
+            // Corrected (2026-08-06, Task 21): node.pos() always equals the query key under the
+            // disambiguated FlowStep convention (see RegionFlowField.getNextStep's own doc) - the
+            // real one-hop-ahead peek this lookahead needs is node.predecessorPos().
+            FlowStep nextNode = flowField.getNextStep(serverLevel, node.predecessorPos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
                     && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {

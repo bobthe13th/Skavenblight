@@ -2795,7 +2795,80 @@ touched by this rewrite so far (`PathingGoalRecalculationGameTests`,
 `SiegeProjectAutoWidenGameTests`) will need updating to the disambiguated convention in the same pass,
 or they'll silently start asserting the wrong thing once the consumer-side swap lands.
 
+**Correction (2026-08-06, second session): the candidate fix above was implemented and is confirmed
+necessary but NOT sufficient — Task 21 stays NO-GO, for a different, newly-isolated reason.** The
+`.pos()` → `.predecessorPos()` consumer swap (`FollowFlowFieldGoal.tick`/`findEscapePos`,
+`SiegeNodeLookahead.findEffectiveNode`) and `RegionFlowField.getNextStep`'s WALK-collapse fix (preserve
+`predecessorPos`, don't self-reference) landed exactly as scoped above. Confirmed working via
+instrumented single-rat gate-test evidence (temporarily added, reverted before this commit): the ground
+rat now traverses ~15 real cells from spawn to the gap edge — previously bit-for-bit zero motion, per
+this section's own log evidence above — and `SiegeNodeLookahead.findEffectiveNode` correctly resolves
+the diagonal `AIR_STAIR` construction node one hop out (`matches=true`,
+`flowField.findProjectFor(node.pos())` present). The two runtime-unverified risks this section flagged
+are both resolved as SAFE, with the current code confirmed to already implement the fix they were
+worried about: `SiegeProject.isCompleted`/`getRemainingInstructions` (`SiegeProject.java:99-100,123-124`)
+read `entry.getKey()`/`entry.getValue().action()` only, never `.pos()` — shape-agnostic by
+construction, so connector-sourced and reactive projects are equally safe. `RegionGraph`'s
+`outboundInstructions`/`inboundInstructions` (`RegionGraph.java:321,338`) both write
+`map.put(from, new FlowStep(from, action, target))` — genuine Shape A, matching the flood's own
+convention; the mixed-shape premise those two risks were written against no longer holds now that
+Tasks 6/9 landed. One additional old-convention call site the audit surfaced beyond the ones scoped
+above: `PathingDebugFileWriter.writeMobPathTraces` was walking a raw instruction chain via `.pos()`,
+which — now that producers are genuinely Shape A — made every trace terminate after exactly one cell,
+always; fixed to `.predecessorPos()` in the same pass. Also noted, deliberately NOT fixed (out of
+scope, does not affect any test): `SiegeProjectManager.injectActiveProjects`
+(`SiegeProjectManager.java:136,158-160`) copies a `SiegeProject`'s `getRemainingInstructions()` output
+straight into `nextInstructionMap` with no reconstruction — a project built from a `Map.of(target, new
+FlowStep(anchor, action, anchor))`-shaped `instructions` map (the shape every `SiegeProject`-constructor
+-only test fixture still uses, since nothing on that path ever reads a map value's `.pos()`) would
+inject a Shape-A-violating entry once that path is actually exercised by a live recompute. Nothing in
+this rewrite currently exercises that path with such a project, so it's flagged, not fixed.
 
+**The real remaining blocker, isolated via the same instrumentation:** a pre-existing, unrelated defect
+in `SiegeProject.nextUnbuiltInstruction` interacting with `canAcceptWorker`'s work-radius check.
+Evidence (single-rat gate test, mob at a fixed position the whole time): on the very first tick,
+`nextUnbuiltInstruction()` returns the correct, nearest unbuilt `AIR_STAIR` step (~1.73 blocks away,
+well inside `Config.projectWorkRadius` = 3.5) and `canWorkOn`/`canAcceptWorker` reports true. On every
+tick after that — with nothing built (0 stairs, confirmed) and the mob never having moved — the SAME
+call returns a DIFFERENT step two hops further along the build order (~4.36 blocks away, now outside
+the radius), and `canWorkOn` reports false forever after. The intervening step is being silently
+skipped as "already complete" by `nextUnbuiltInstruction`'s own `isActionCompleted` check
+(`case BRIDGE, AIR_STAIR -> state.blocksMotion() || isWalkableScaffold(state)`, checked at that exact
+cell) — meaning that build-order cell is already-solid natural terrain the connector's own trace
+walked through, not something this project ever needs to (or can) build. Once registration is refused
+on radius grounds, `FollowFlowFieldGoal` (priority 9, uncontested once `BuildFlowFieldGoal` at priority
+6 declines) takes the MOVE flag and walks the rat directly onto the unbuilt `AIR_STAIR` cell itself
+(nothing in `FollowFlowFieldGoal` checks whether a WALK-resolved next hop is actually real, buildable
+ground before moving toward it) — and once the rat is standing exactly there,
+`SiegeNodeLookahead.findEffectiveNode`'s own self-reference guard (`node.action() != WALK &&
+node.pos().equals(currentPos)`, working exactly as designed) latches `effectiveNode` to empty
+permanently. This is a real, structural deadlock, not a transient race — confirmed stable across three
+separate full-suite reruns with identical evidence each time.
+
+This is a `SiegeProject` build-order / work-radius defect, independent of the `FlowStep` convention
+this task was scoped to fix, and was invisible before this session because the rat never moved far
+enough to reach it. **Not fixed this session** — per the same "don't land a cross-cutting change at the
+end of a long session" judgment call this section's own candidate-fix paragraph already applied once.
+Next session's first question: should `RegionGraph`'s connector trace exclude already-solid cells from
+the build order at discovery time, or should `canAcceptWorker`/`nextUnbuiltInstruction` measure radius
+against the nearest *reachable* unbuilt step rather than the first one in build order? Either fix
+belongs in its own session, verified against this exact single-rat gate test as the reproduction case.
+
+**Files (this session, second pass):**
+- `RegionFlowField.java` (`getNextStep`), `FollowFlowFieldGoal.java`, `SiegeNodeLookahead.java` — the
+  scoped consumer-side fix above, implemented.
+- `PathingDebugFileWriter.java` — audit finding, fixed (see above).
+- `AwaitFormationGoal.java` — one stale, now-misleading comment corrected; no logic change (its own
+  `.pos()` read was already correct under Shape A).
+- `PathingGoalRecalculationGameTests.java`, `AwaitFormationGoalGameTests.java` — every hand-fed
+  `state.updateInstructions(...)` fixture encoding the old convention rewritten to genuine Shape A
+  (several needed a WALK-then-construction two-entry restructuring, not a field swap, to avoid
+  tripping `SiegeNodeLookahead`'s self-reference guard — see each fixture's own inline comment).
+  `SiegeProjectAutoWidenGameTests.java`/`SiegeProjectTickGameTests.java` and every `SiegeProject`
+  -constructor-only fixture deliberately left unchanged: confirmed via reading
+  `SiegeProjectManager.findProjectContaining` (`containsKey` only) and `SiegeProject.isCompleted`
+  /`getRemainingInstructions` (key + `.action()` only) that no production path reads `.pos()` off
+  those maps.
 
 **Files:**
 - No production code changes expected beyond bug fixes this task's own failures reveal.

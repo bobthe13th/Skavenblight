@@ -98,12 +98,22 @@ public class PathingGoalRecalculationGameTests {
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        // BRIDGE, not AIR_STAIR: this target is purely horizontal from anchor (dy=0), matching
-        // candidateSteps' own dy==0/open-air classification - see PathStepEvaluator's step-
-        // generation spec. The hand-fed action here never goes through real classification (this
-        // fixture bypasses it entirely), but keeping it consistent with what the real flood would
-        // compute for this exact geometry avoids a misleading fixture.
-        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
+        // Two entries, not one: under the disambiguated FlowStep convention (see
+        // RegionFlowField.getNextStep's own doc), a map value's pos() always equals its own key, so
+        // a single self-referential BRIDGE entry at the mob's own real, walkable anchor would trip
+        // SiegeNodeLookahead's self-reference guard (a construction target can't be the mob's own
+        // position) and resolve to nothing. The real shape this mirrors: anchor is genuine WALK
+        // ground whose predecessorPos points at the real next hop; target is the actual BRIDGE
+        // construction site, one lookahead hop away. BRIDGE, not AIR_STAIR: this target is purely
+        // horizontal from anchor (dy=0), matching candidateSteps' own dy==0/open-air classification
+        // - see PathStepEvaluator's step-generation spec. The hand-fed action here never goes
+        // through real classification (this fixture bypasses it entirely), but keeping it
+        // consistent with what the real flood would compute for this exact geometry avoids a
+        // misleading fixture.
+        state.updateInstructions(Map.of(
+                anchor, new FlowStep(anchor, PathAction.WALK, target),
+                target, new FlowStep(target, PathAction.BRIDGE, target)
+        ));
 
         PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
@@ -114,7 +124,12 @@ public class PathingGoalRecalculationGameTests {
         // Single-step, default-solid-floor BRIDGE project (same shape as
         // SiegeProjectAutoWidenGameTests/PathingGoalRecalculationGameTests' own widen tests) -
         // this test is about region-dirty-marking, not the no-prior-support scenario, so real
-        // ground support keeps the setup minimal.
+        // ground support keeps the setup minimal. This SiegeProject's OWN `instructions` map is
+        // never read back through getNextStep/getInstructionMap (SiegeProjectManager.
+        // findProjectContaining only checks containsKey; SiegeProject.isCompleted/
+        // getRemainingInstructions only read entry.getKey()/entry.getValue().action()) - so it
+        // stays in the pre-existing (pos=anchor) shape deliberately; only the state's own
+        // instruction map above needed correcting.
         List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
         Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
         SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, UUID.randomUUID());
@@ -196,14 +211,22 @@ public class PathingGoalRecalculationGameTests {
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(startPos, Set.of(new ChunkPos(startPos)));
 
-        // Two DIFFERENT keyings are needed here, not one reused map: FlowFieldState's own
-        // instruction map (consumed by goal-facing code via RegionFlowField#getNextStep) is keyed
-        // by STANDING position with a forward-pointing FlowStep ("from here, go build at pos()")
-        // - see AwaitFormationGoal's own inline comment on this exact convention. SiegeProject's
-        // own `instructions` field (consumed by SiegeProjectManager.findProjectContaining via
-        // getInstructions().containsKey(pos)) is keyed the OPPOSITE way in real production usage
-        // (see SiegeProjectManager.evaluateSingleLine, whose output populates this field for every
-        // real project): keyed by the BUILD/target position itself, with a backward-pointing
+        // Two DIFFERENT keyings are needed here, not one reused map. FlowFieldState's own
+        // instruction map (consumed by goal-facing code via RegionFlowField#getNextStep) needs
+        // genuine Shape-A entries - see RegionFlowField.getNextStep's own doc: a map value's pos()
+        // always equals its own key, and predecessorPos() carries the real next hop. chain[0] (the
+        // mob's real, untouched starting ground) gets an explicit WALK entry; chain[1..3] each get
+        // their OWN unbuilt AIR_STAIR entry, which RegionFlowField#getNextStep dynamically collapses
+        // to WALK (preserving predecessorPos) once that exact cell is actually built by an earlier
+        // step - AIR_STAIR's own isActionCompleted check tests the block AT that position, and a
+        // placed COBBLESTONE_STAIRS occupies exactly the chain cell it rises into (unlike BRIDGE,
+        // where the placed block sits at the gap position and the mob stands one cell above it -
+        // see testBuildFlowFieldGoalMarksRegionDirty's own two-entry fixture for that shape
+        // instead). SiegeProject's own `instructions` field (consumed by
+        // SiegeProjectManager.findProjectContaining via getInstructions().containsKey(pos), and by
+        // SiegeProject.isCompleted/getRemainingInstructions via entry.getKey()/entry.getValue()
+        // .action() only - never .pos()) is unaffected by this convention and keeps its
+        // pre-existing shape: keyed by the BUILD/target position itself, with a backward-pointing
         // (predecessor) FlowStep - see SiegeProject#isCompleted's own doc on this convention.
         // Reusing the standing-position-keyed map for both would leave the project's own
         // instructions missing a key for chain[4] (only chain[0..3] are ever "from" positions), so
@@ -218,10 +241,19 @@ public class PathingGoalRecalculationGameTests {
             // dx=1,dy=1,dz=0 per hop - a straight one-axis rise into open air (no support), matching
             // candidateSteps' AIR_STAIR classification (see PathStepEvaluatorStepGenerationTest's
             // identical regression pin for this exact shape).
-            stateInstructions.put(from, new FlowStep(to, PathAction.AIR_STAIR, from));
+            PathAction ownAction = (i == 0) ? PathAction.WALK : PathAction.AIR_STAIR;
+            stateInstructions.put(from, new FlowStep(from, ownAction, to));
             projectInstructions.put(to, new FlowStep(from, PathAction.AIR_STAIR, from));
             orderedSteps.add(new FlowStep(to, PathAction.AIR_STAIR, from));
         }
+        // chain[4] (the final target) is never a loop `from` above - without its own entry here,
+        // step 3's lookahead from chain[3] (predecessorPos=chain[4]) finds no instruction at all and
+        // falls back to chain[3]'s own now-WALK node, which doesn't match a construction action.
+        // Self-referencing predecessorPos is the established terminal convention (see
+        // FlowFieldCalculator.startCalculation's target seed) - nothing chains beyond chain[4] in
+        // this test.
+        BlockPos chainEndPos = helper.absolutePos(relativeChain[4]);
+        stateInstructions.put(chainEndPos, new FlowStep(chainEndPos, PathAction.AIR_STAIR, chainEndPos));
         state.updateInstructions(stateInstructions);
 
         PathStepEvaluator evaluator = new PathStepEvaluator();
@@ -230,7 +262,6 @@ public class PathingGoalRecalculationGameTests {
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        BlockPos chainEndPos = helper.absolutePos(relativeChain[4]);
         SiegeProject project = new SiegeProject(projectInstructions, orderedSteps, startPos, chainEndPos, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
@@ -555,7 +586,12 @@ public class PathingGoalRecalculationGameTests {
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
+        // Two entries, not one - see testBuildFlowFieldGoalMarksRegionDirty's identical comment:
+        // anchor is real WALK ground pointing at target; target is the actual BRIDGE site.
+        state.updateInstructions(Map.of(
+                anchor, new FlowStep(anchor, PathAction.WALK, target),
+                target, new FlowStep(target, PathAction.BRIDGE, target)
+        ));
 
         PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
@@ -652,7 +688,12 @@ public class PathingGoalRecalculationGameTests {
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
+        // Two entries, not one - see testBuildFlowFieldGoalMarksRegionDirty's identical comment:
+        // anchor is real WALK ground pointing at target; target is the actual BRIDGE site.
+        state.updateInstructions(Map.of(
+                anchor, new FlowStep(anchor, PathAction.WALK, target),
+                target, new FlowStep(target, PathAction.BRIDGE, target)
+        ));
 
         PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);

@@ -79,14 +79,18 @@ public class RegionFlowField {
      * ever needed the ".above()" adjustment) is permanently removed per the design doc, so there is
      * no remaining action this table could apply to.
      *
-     * <p>The synthetic "already done" FlowStep is self-referential (predecessorPos == pos) - no
-     * caller in ai.goal.clanrat reads predecessorPos off this method's return value (confirmed via
-     * grep), and self-reference matches the self-terminating convention used elsewhere
-     * (FlowFieldCalculator.startCalculation's target seed, SiegeProjectManager's exitPos fallback).
-     * Deliberately preserved, not incidental: FollowFlowFieldGoal's own lookahead loop terminates on
-     * {@code next.pos().equals(current)} - for a completed action at the mob's own cell, this
-     * synthetic step's pos() equals the position just queried, which correctly breaks that loop the
-     * same way the old {@code new SiegeNode(node.pos(), WALK)} already did.
+     * <p><b>Corrected (2026-08-06, Task 21 go/no-go gate fix):</b> the collapse now preserves
+     * {@code node.predecessorPos()} instead of discarding it. Self-referencing BOTH fields (the
+     * previous behavior) meant every consumer that reads the resolved step's next hop off
+     * {@code .predecessorPos()} - {@code FollowFlowFieldGoal}, {@code SiegeNodeLookahead} - got back
+     * the rat's own position and instructed it to walk to exactly where it already was: the
+     * confirmed root cause of all 4 {@code StaircaseSiegeGroupGameTests} failures (see
+     * docs/superpowers/plans/2026-08-05-pathing-rewrite-implementation-plan.md's Task 21 section for
+     * the full writeup with log evidence). Preserving predecessorPos here is a no-op for a genuinely
+     * self-referential entry (the field's own local Dijkstra objective, per
+     * FlowFieldCalculator.startCalculation's target seed) - predecessorPos already equals pos there,
+     * so collapsing to WALK changes nothing. For every other entry, this now correctly hands the
+     * real next hop through once the construction action at {@code node.pos()} is done.
      */
     public FlowStep getNextStep(ServerLevel level, BlockPos ratPos) {
         FlowStep node = state.getInstruction(ratPos);
@@ -94,7 +98,7 @@ public class RegionFlowField {
 
         LiveTerrainAccess live = new LiveTerrainAccess(level);
         return pathStepEvaluator.isActionCompleted(live, node.pos(), node.action())
-                ? new FlowStep(node.pos(), PathAction.WALK, node.pos())
+                ? new FlowStep(node.pos(), PathAction.WALK, node.predecessorPos())
                 : node;
     }
 

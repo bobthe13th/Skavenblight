@@ -100,9 +100,17 @@ public class AwaitFormationGoalGameTests {
         BlockPos freeTarget = helper.absolutePos(relativeFreeTarget);
 
         FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
+        // Genuine Shape-A entries (see RegionFlowField.getNextStep's own doc: a map value's pos()
+        // always equals its own key). mobPos is real WALK ground pointing at contestedTarget;
+        // contestedTarget and freeTarget are each their OWN unbuilt AIR_STAIR construction site
+        // (self-referencing predecessorPos - the established terminal convention, see
+        // FlowFieldCalculator.startCalculation's target seed) - findUnclaimedAlternative's raw
+        // getInstructionMap() scan needs freeTarget to be its own key, not merely another entry's
+        // pos(), or the redirect target it's supposed to find is unrepresentable.
         state.updateInstructions(Map.of(
-                mobPos, new FlowStep(contestedTarget, PathAction.AIR_STAIR, mobPos),
-                contestedTarget, new FlowStep(freeTarget, PathAction.AIR_STAIR, contestedTarget)
+                mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget),
+                freeTarget, new FlowStep(freeTarget, PathAction.AIR_STAIR, freeTarget)
         ));
         PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
@@ -194,7 +202,13 @@ public class AwaitFormationGoalGameTests {
             Region region = regions.get(0);
 
             FlowFieldState state = new FlowFieldState(mobPos, territory);
-            state.updateInstructions(Map.of(mobPos, new FlowStep(contestedTarget, PathAction.AIR_STAIR, mobPos)));
+            // Genuine Shape-A entries - see testAwaitFormationGoalRedirectsToUnclaimedAlternative's
+            // identical comment. No freeTarget here: this test is specifically about the
+            // no-alternative-exists fallback to a formation slot.
+            state.updateInstructions(Map.of(
+                    mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                    contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)
+            ));
             PathStepEvaluator evaluator = new PathStepEvaluator();
             SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
             CalculationThrottler throttler = new CalculationThrottler();
@@ -291,7 +305,13 @@ public class AwaitFormationGoalGameTests {
                             + "matching production's registerConnector behavior");
 
             FlowFieldState state = new FlowFieldState(mobPos, territory);
-            state.updateInstructions(Map.of(mobPos, new FlowStep(contestedTarget, PathAction.AIR_STAIR, mobPos)));
+            // Genuine Shape-A entries - see testAwaitFormationGoalRedirectsToUnclaimedAlternative's
+            // identical comment. No freeTarget here: this test is specifically about the
+            // no-alternative-exists fallback to a formation slot.
+            state.updateInstructions(Map.of(
+                    mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                    contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)
+            ));
             PathStepEvaluator evaluator = new PathStepEvaluator();
             SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
             CalculationThrottler throttler = new CalculationThrottler();

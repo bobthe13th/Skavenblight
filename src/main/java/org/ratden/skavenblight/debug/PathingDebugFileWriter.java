@@ -315,7 +315,12 @@ public class PathingDebugFileWriter {
                     outcome = "no instruction at " + current.toShortString();
                     break;
                 }
-                if (node.pos().equals(current)) {
+                // Corrected (2026-08-06, Task 21 audit): a raw map value's pos() always equals its
+                // own key under the disambiguated FlowStep convention (see
+                // RegionFlowField.getNextStep's own doc) - walking via .pos() made every trace
+                // terminate after exactly one cell, always. The real forward pointer is
+                // predecessorPos().
+                if (node.predecessorPos().equals(current)) {
                     // Every region's own local Dijkstra target self-references (see
                     // FlowFieldCalculator.startCalculation) - reaching one is the correct, expected
                     // end of this region's portion of the chain, not a bug. Actually crossing a
@@ -324,7 +329,7 @@ public class PathingDebugFileWriter {
                     outcome = "reached region " + field.getRegionId() + "'s local objective at " + current.toShortString();
                     break;
                 }
-                current = node.pos();
+                current = node.predecessorPos();
             }
 
             StringBuilder pathStr = new StringBuilder();

@@ -106,13 +106,11 @@ public class AwaitFormationGoal extends Goal implements SiegeGoal {
         RegionFlowField field = this.flowField;
         if (field == null) return Optional.empty();
         BlockPos mobPos = this.mob.blockPosition();
-        // getInstructionMap() is keyed by STANDING position ("from here, do this"), not by the
-        // target the action would build - the actual build position is each FlowStep's own
-        // pos(). Searching keys instead of values' pos() looks plausible but silently returns
-        // whichever standing position happens to satisfy the filters (often the mob's own
-        // current position), never a genuine alternative target - caught by
-        // testAwaitFormationGoalRedirectsToUnclaimedAlternative failing to find a target one hop
-        // further away than the contested one.
+        // Under the disambiguated FlowStep convention (see RegionFlowField.getNextStep's own doc),
+        // a map value's pos() always equals its own key - so filtering by node.action() and mapping
+        // to node.pos() is equivalent to filtering/mapping the map's own keys directly. Kept as a
+        // values() stream (rather than entrySet().keySet()) because isPositionAvailable and the
+        // action filter both need the FlowStep itself, not just its position.
         return field.getInstructionMap().values().stream()
                 .filter(node -> node.action() != PathAction.WALK)
                 .distinct()
