@@ -102,14 +102,14 @@ public class DebugPathingCommands {
                                 return 0;
                             }
 
-                            org.ratden.skavenblight.ai.pathing.TerrainEvaluator evaluator = new org.ratden.skavenblight.ai.pathing.TerrainEvaluator();
+                            org.ratden.skavenblight.ai.pathing.PathStepEvaluator evaluator = new org.ratden.skavenblight.ai.pathing.PathStepEvaluator();
                             org.ratden.skavenblight.ai.pathing.TerrainSnapshot.RefreshResult result =
                                     org.ratden.skavenblight.ai.pathing.TerrainSnapshot.refresh(
                                             level, null, network.getTerritoryChunks(), new java.util.HashSet<>(network.getTerritoryChunks()),
                                             level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE);
 
                             org.ratden.skavenblight.ai.pathing.region.RegionScanner scanner =
-                                    new org.ratden.skavenblight.ai.pathing.region.RegionScanner(new org.ratden.skavenblight.ai.pathing.PathStepEvaluator());
+                                    new org.ratden.skavenblight.ai.pathing.region.RegionScanner(evaluator);
                             java.util.List<org.ratden.skavenblight.ai.pathing.region.Region> regions =
                                     scanner.scan(result.snapshot(), network.getTerritoryChunks(), pos, level.getMinBuildHeight(), level.getMaxBuildHeight());
 
@@ -121,10 +121,8 @@ public class DebugPathingCommands {
                                         region.getMax() != null ? region.getMax().toShortString() : "?"));
                             }
 
-                            org.ratden.skavenblight.ai.pathing.SiegeLineTracer lineTracer = new org.ratden.skavenblight.ai.pathing.SiegeLineTracer(evaluator);
-                            org.ratden.skavenblight.ai.pathing.region.RegionIndex regionIndex = new org.ratden.skavenblight.ai.pathing.region.RegionIndex(regions);
                             org.ratden.skavenblight.ai.pathing.region.RegionGraph graph = org.ratden.skavenblight.ai.pathing.region.RegionGraph.build(
-                                    result.snapshot(), regionIndex, network.getTerritoryChunks(), pos, evaluator, lineTracer);
+                                    result.snapshot(), regions, network.getTerritoryChunks(), pos, evaluator);
 
                             sb.append("Connectors (").append(graph.getAllConnectors().size()).append("):\n");
                             for (org.ratden.skavenblight.ai.pathing.region.RegionConnector connector : graph.getAllConnectors()) {
@@ -133,7 +131,7 @@ public class DebugPathingCommands {
                                         connector.entryInA().toShortString(), connector.entryInB().toShortString()));
                             }
 
-                            org.ratden.skavenblight.ai.pathing.region.Region rootRegion = regionIndex.regionAt(pos);
+                            org.ratden.skavenblight.ai.pathing.region.Region rootRegion = graph.regionAt(pos);
                             if (rootRegion != null) {
                                 org.ratden.skavenblight.ai.pathing.region.RegionRouteTree routeTree =
                                         org.ratden.skavenblight.ai.pathing.region.RegionRouteTree.compute(graph, rootRegion.getId());
@@ -190,25 +188,26 @@ public class DebugPathingCommands {
                             }
 
                             org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap regionMap = network.getRegionMap();
-                            org.ratden.skavenblight.ai.pathing.region.RegionIndex index = regionMap.getRegionIndex();
                             org.ratden.skavenblight.ai.pathing.region.RegionGraph graph = regionMap.getRegionGraph();
                             org.ratden.skavenblight.ai.pathing.region.RegionRouteTree routeTree = regionMap.getRouteTree();
+                            java.util.List<org.ratden.skavenblight.ai.pathing.region.Region> liveRegions =
+                                    graph != null ? graph.getRegions() : java.util.List.of();
 
                             StringBuilder sb = new StringBuilder();
                             sb.append(String.format("LIVE region map for network %s%n", network.getId()));
                             sb.append(String.format("  territory chunks: %d | calculating: %s | rebuild generation: %d%n",
                                     network.getTerritoryChunks().size(), regionMap.isCalculating(), regionMap.getGeneration()));
                             sb.append(String.format("  regions: %d | connectors: %d | route tree: %s%n",
-                                    index.getRegions().size(),
+                                    liveRegions.size(),
                                     graph != null ? graph.getAllConnectors().size() : 0,
                                     routeTree != null ? ("rooted at region " + routeTree.getRootRegionId()) : "none"));
 
-                            if (index.getRegions().isEmpty()) {
+                            if (liveRegions.isEmpty()) {
                                 sb.append("  no regions scanned yet; the region map may not have initialized")
                                         .append(regionMap.isCalculating() ? " (a rebuild IS currently running - re-run in a moment)" : "")
                                         .append(".\n  Compare with /skavendebug pathing regions, which scans from scratch: if THAT finds regions and this doesn't, the runtime pipeline never rebuilt.\n");
                             } else {
-                                for (org.ratden.skavenblight.ai.pathing.region.Region region : index.getRegions()) {
+                                for (org.ratden.skavenblight.ai.pathing.region.Region region : liveRegions) {
                                     boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
                                     sb.append(String.format("  region %d: %d cells, %d boundary cells, reachable=%s, hopCost=%s, bounds %s -> %s%n",
                                             region.getId(), region.cellCount(), region.getBoundaryCells().size(), reachable,
@@ -225,7 +224,7 @@ public class DebugPathingCommands {
                                     }
                                 }
 
-                                org.ratden.skavenblight.ai.pathing.region.Region here = index.regionAt(pos);
+                                org.ratden.skavenblight.ai.pathing.region.Region here = graph != null ? graph.regionAt(pos) : null;
                                 sb.append(String.format("  your position is in: %s%n",
                                         here != null ? ("region " + here.getId()) : "no region (wilderness/unmapped)"));
                             }

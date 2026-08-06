@@ -14,7 +14,6 @@ import org.ratden.skavenblight.ai.pathing.SiegeNode;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.RegionGraph;
-import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
@@ -140,17 +139,17 @@ public class PathingDebugFileWriter {
      */
     private static void writeRegionGraph(FileWriter writer, TerritoryRegionMap regionMap) throws IOException {
         writer.write("--- REGION GRAPH ---\n");
-        RegionIndex index = regionMap.getRegionIndex();
         RegionGraph graph = regionMap.getRegionGraph();
         RegionRouteTree routeTree = regionMap.getRouteTree();
+        List<Region> regions = graph != null ? graph.getRegions() : List.of();
 
         writer.write(String.format("Regions: %d | Connectors: %d | Rebuild generation: %d\n",
-                index.getRegions().size(), graph != null ? graph.getAllConnectors().size() : 0, regionMap.getGeneration()));
-        if (index.getRegions().isEmpty()) {
+                regions.size(), graph != null ? graph.getAllConnectors().size() : 0, regionMap.getGeneration()));
+        if (regions.isEmpty()) {
             writer.write("  (no regions scanned yet - the region map never initialized, or its first rebuild is still running)\n");
         }
 
-        for (Region region : index.getRegions()) {
+        for (Region region : regions) {
             boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
             writer.write(String.format("  region %d: %d cells, reachable=%s, hopCost=%s\n",
                     region.getId(), region.cellCount(), reachable,

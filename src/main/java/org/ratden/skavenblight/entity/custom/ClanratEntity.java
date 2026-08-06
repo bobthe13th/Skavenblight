@@ -21,7 +21,7 @@ import software.bernie.geckolib.animation.RawAnimation;
 import software.bernie.geckolib.util.GeckoLibUtil;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
-import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
+import org.ratden.skavenblight.ai.pathing.region.RegionGraph;
 import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
@@ -163,8 +163,8 @@ public class ClanratEntity extends Monster implements GeoEntity {
 
         if (closestNetwork == null) return;
 
-        RegionIndex regionIndex = closestNetwork.getRegionMap().getRegionIndex();
-        Region region = regionIndex.regionAt(this.blockPosition());
+        RegionGraph regionGraph = closestNetwork.getRegionMap().getRegionGraph();
+        Region region = regionGraph != null ? regionGraph.regionAt(this.blockPosition()) : null;
 
         if (region == null) {
             // True wilderness (e.g. debug-spawned before any region was scanned nearby, or

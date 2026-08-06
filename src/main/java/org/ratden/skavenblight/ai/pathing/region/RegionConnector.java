@@ -1,9 +1,9 @@
 package org.ratden.skavenblight.ai.pathing.region;
 
 import net.minecraft.core.BlockPos;
+import org.ratden.skavenblight.ai.pathing.PathStepEvaluator;
 import org.ratden.skavenblight.ai.pathing.SiegeProject;
 import org.ratden.skavenblight.ai.pathing.TerrainAccess;
-import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
 
 /**
  * One edge in the region graph: a candidate or active SiegeProject connecting two regions.
@@ -52,7 +52,7 @@ public record RegionConnector(int regionA, int regionB, BlockPos entryInA, Block
      * apart), so either one answers "is this connector built yet"; this uses the anchor-ward map so
      * the answer is unchanged from before the second orientation existed.
      */
-    public boolean isCompleted(TerrainAccess terrain, TerrainEvaluator evaluator) {
+    public boolean isCompleted(TerrainAccess terrain, PathStepEvaluator evaluator) {
         return projectTowardA.isCompleted(terrain, evaluator);
     }
 }

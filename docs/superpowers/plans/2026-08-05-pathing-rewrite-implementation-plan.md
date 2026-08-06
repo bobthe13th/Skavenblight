@@ -1908,8 +1908,31 @@ Task 20-24 GameTest matrix (CARVED_STAIR's mine-then-place ordering is directly 
 
 ## Task 14: `TerritoryRegionMap` targeted port (NOT a rewrite)
 
+**Gap found during exec-8/Task 9 (2026-08-05), not previously in this document's file-disposition
+survey or Task 14's own file list — add to this task's own scope, don't silently re-derive its fate
+when you get here:** `src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java` has
+roughly 35 call sites against `TerritoryRegionMap.getRegionIndex()`, confirmed via grep while deleting
+`RegionIndex.java` at Task 9. This is NOT a mechanical rename to `getRegionGraph()` the way the other
+three external consumers (`ClanratEntity`, `DebugPathingCommands`, `PathingDebugFileWriter` — all fixed
+at Task 9 itself, trivial one-line redirects) were: several of this file's tests
+(`testRepeatedConnectorCompletionsDontExplodeRebuildCount` and its sibling around line 1008) do an
+OBJECT-IDENTITY check — `regionMap.getRegionIndex() != indexBeforeChange[0]` — to prove a dirty-region
+rescan actually republished a fresh lookup. Confirmed via grep of `TerritoryRegionMap.java`:
+`this.regionIndex = ...` has TWO assignment sites (the full rebuild AND the steady-state dirty-rescan
+path), while `this.regionGraph = ...` has only ONE (the full rebuild only — nothing reassigns it on a
+dirty rescan today). Swapping these tests' `getRegionIndex()` calls for `getRegionGraph()` verbatim
+would silently change what they're testing: the identity check would stop detecting a dirty rescan at
+all, since `regionGraph` never changes on that path, and the test would pass or fail for the wrong
+reason. This needs a real decision (does the merged model need its OWN per-dirty-rescan identity signal,
+e.g. a generation counter already exposed via `getGeneration()`, or does the test's premise change) —
+not a rename — before this file's ~35 call sites can be ported. Left broken (already-known,
+already-explained compile-red window) rather than guessed at during Task 9.
+
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/region/TerritoryRegionMap.java`
+- Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java` (full port of
+  its ~35 `getRegionIndex()` call sites — see gap note above for the identity-check subtlety that
+  makes this more than a rename)
 - Test: `src/test/java/org/ratden/skavenblight/ai/pathing/region/TerritoryRegionMapOnBlockChangedTest.java`
 
 **Interfaces:**
