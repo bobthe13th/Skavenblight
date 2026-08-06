@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import org.slf4j.Logger;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 public class SiegeProjectManager {
 
@@ -61,12 +62,10 @@ public class SiegeProjectManager {
     private int lastPassCandidatesGenerated = 0;
     private int lastPassCandidatesSurvived = 0;
 
-    private final TerrainEvaluator terrainEvaluator;
-    private final SiegeLineTracer lineTracer;
+    private final PathStepEvaluator pathStepEvaluator;
 
-    public SiegeProjectManager(TerrainEvaluator terrainEvaluator) {
-        this.terrainEvaluator = terrainEvaluator;
-        this.lineTracer = new SiegeLineTracer(terrainEvaluator);
+    public SiegeProjectManager(PathStepEvaluator pathStepEvaluator) {
+        this.pathStepEvaluator = pathStepEvaluator;
     }
 
     /**
@@ -118,7 +117,7 @@ public class SiegeProjectManager {
     public void injectActiveProjects(TerrainAccess terrain,
                                      PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                      Map<BlockPos, Integer> nextCostMap,
-                                     Map<BlockPos, SiegeNode> nextInstructionMap) {
+                                     Map<BlockPos, FlowStep> nextInstructionMap) {
         plannedProjectBuckets.clear();
         lockedPositions.clear();
         candidateProjects.clear();
@@ -127,10 +126,10 @@ public class SiegeProjectManager {
         lastPassCandidatesGenerated = 0;
         lastPassCandidatesSurvived = 0;
 
-        activeProjects.removeIf(project -> project.isCompleted(terrain, terrainEvaluator));
+        activeProjects.removeIf(project -> project.isCompleted(terrain, pathStepEvaluator));
 
         for (SiegeProject project : activeProjects) {
-            for (Map.Entry<BlockPos, SiegeNode> entry : project.getRemainingInstructions(terrain, terrainEvaluator).entrySet()) {
+            for (Map.Entry<BlockPos, FlowStep> entry : project.getRemainingInstructions(terrain, pathStepEvaluator).entrySet()) {
                 BlockPos pos = entry.getKey();
                 lockedPositions.add(pos);
                 nextInstructionMap.put(pos, entry.getValue());
@@ -141,21 +140,22 @@ public class SiegeProjectManager {
 
             // entryPos is, by construction, the far side of a gap the ordinary Dijkstra flood
             // cannot independently cross while this project's own interior cells are still
-            // unbuilt/locked - so once TerrainEvaluator.isActionCompleted correctly reports its own
+            // unbuilt/locked - so once PathStepEvaluator.isActionCompleted correctly reports its own
             // WALK action as already done (see that class's own doc), the getRemainingInstructions
             // loop above stops re-seeding it, since nothing needs BUILDING there. But nothing needs
             // building there is not the same as nothing needs to ROUTE there: without this,
             // entryPos gets no instruction at all on the very next pass, stranding a mob standing on
             // it with no way to be told to walk onward into the project's still-unbuilt interior.
             // putIfAbsent so a genuinely cheaper real route the ordinary flood found elsewhere in
-            // this SAME pass (or the project's own BUILD_LANDING case, already put above) is never
+            // this SAME pass (or the project's own entry case, already put above) is never
             // overwritten - this is a fallback for "nothing else provides an instruction here", not
             // a preference over one that already exists. Guarded on presence: a route-tree
-            // connector project (RegionGraph.registerConnector's 6-arg constructor) deliberately
-            // does NOT key its own entryPos in `instructions` - "the far region's own pass already
-            // covers it" (see that method's own doc) - so there's nothing to fall back to there,
-            // and inserting a literal null would NPE the first caller that reads it back out.
-            SiegeNode ownEntryInstruction = project.getInstructions().get(entry);
+            // connector project (RegionGraph.registerConnector's outbound/inbound instruction maps)
+            // deliberately does NOT key its own entryPos in `instructions` - "the far region's own
+            // pass already covers it" (see that method's own doc) - so there's nothing to fall back
+            // to there, and inserting a literal null would NPE the first caller that reads it back
+            // out.
+            FlowStep ownEntryInstruction = project.getInstructions().get(entry);
             if (ownEntryInstruction != null) {
                 nextInstructionMap.putIfAbsent(entry, ownEntryInstruction);
             }
@@ -172,15 +172,17 @@ public class SiegeProjectManager {
             // FlowFieldCalculator#processOrthogonalNeighbors will still overwrite this with the
             // real computed instruction later in the same pass. This only survives to publish when
             // nothing else ever reaches exitPos at all - exactly the stuck-forever case this
-            // exists to prevent.
+            // exists to prevent. Self-referential (matching FlowFieldCalculator.startCalculation's
+            // own target-seeding convention), not a placeholder: detectMutualCyclePositions treats
+            // predecessorPos().equals(pos()) as an expected chain terminus, never a cycle.
             BlockPos exit = project.getExitPos();
             if (exit != null) {
-                nextInstructionMap.putIfAbsent(exit, new SiegeNode(exit, SiegeNode.SiegeAction.WALK));
+                nextInstructionMap.putIfAbsent(exit, new FlowStep(exit, PathAction.WALK, exit));
             }
         }
     }
 
-    public void finalizeCandidateProjects(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, SiegeNode> finalInstructionMap) {
+    public void finalizeCandidateProjects(Map<BlockPos, Integer> finalCostMap, Map<BlockPos, FlowStep> finalInstructionMap) {
         for (SiegeProject project : candidateProjects) {
             if (project.survivedMapOverwrite(finalCostMap, finalInstructionMap)) {
                 this.activeProjects.add(project);
@@ -230,7 +232,7 @@ public class SiegeProjectManager {
     public void evaluateMacroProjects(TerrainAccess terrain, BlockPos anchorPos, FlowFieldState state, int anchorCost,
                                       PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                       Map<BlockPos, Integer> nextCostMap,
-                                      Map<BlockPos, SiegeNode> nextInstructionMap) {
+                                      Map<BlockPos, FlowStep> nextInstructionMap) {
 
         // A region with a route-tree-assigned parent connector (see setMaxCandidateProjectLength's
         // own doc) gets a short local-gap budget specifically so its OWN reactive search never
@@ -238,13 +240,12 @@ public class SiegeProjectManager {
         // for a single macro-project line, but not for a CHAIN of them: evaluateSingleLine writes
         // a successful line's own endPos directly back onto this SAME pass's calcQueue (see its own
         // body), so FlowFieldCalculator's Dijkstra loop pops it as an ordinary frontier node and
-        // fires evaluateMacroProjects again from there - a synthetic BUILD_LANDING always "hits an
-        // obstacle" (see FlowFieldCalculator's isPlannedLanding check), so this repeats. Each such
-        // chained call previously got a completely fresh maxCandidateProjectLength budget, letting
-        // a region capped to (say) 6 blocks discover a path far longer than 6 blocks by chaining
-        // several 6-block-capped lines end to end - confirmed via GameTest reaching 14 blocks
-        // across 3 chained hops, all the way into a DIFFERENT region's own territory, producing a
-        // flow-field cycle against that region's own route-tree-assigned connector project (see
+        // fires evaluateMacroProjects again from there. Each such chained call previously got a
+        // completely fresh maxCandidateProjectLength budget, letting a region capped to (say) 6
+        // blocks discover a path far longer than 6 blocks by chaining several 6-block-capped lines
+        // end to end - confirmed via GameTest reaching 14 blocks across 3 chained hops, all the way
+        // into a DIFFERENT region's own territory, producing a flow-field cycle against that
+        // region's own route-tree-assigned connector project (see
         // docs/superpowers/plans/2026-08-01-flow-field-planning-gap-fix.md for the full trace).
         // Refusing to continue a chain - rather than tracking a cumulative step budget across the
         // 14-direction fan-out below, which would also restrict how far a single legitimate
@@ -253,10 +254,20 @@ public class SiegeProjectManager {
         // was always meant to provide. Regions with no parent connector yet (the default, uncapped
         // budget) are unaffected - they still need to chain freely to establish their own
         // connectivity in the first place.
-        SiegeNode existingInstruction = nextInstructionMap.get(anchorPos);
-        boolean isChainedLanding = existingInstruction != null
-                && existingInstruction.action() == SiegeNode.SiegeAction.BUILD_LANDING;
-        if (isChainedLanding && this.maxCandidateProjectLength < DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH) {
+        //
+        // Renamed from the old isChainedLanding (it checked for the old synthetic BUILD_LANDING
+        // action specifically) and GENERALIZED, not dropped: PLATFORM is a post-process Set<BlockPos>
+        // annotation on a finished SiegeProject (see PlatformInserter), never a PathAction visible in
+        // nextInstructionMap, so no platform-shaped node can ever appear here mid-flood - there is
+        // nothing left for an "isChainedPlatform" check to match. But the underlying need (a chain's
+        // own construction terminus re-firing evaluateMacroProjects on itself) is still real and still
+        // needs guarding - FlowFieldCalculator's own isPlannedConstructionTarget (its
+        // processCalculationQueue) already generalized its half of this same check from
+        // "action == BUILD_LANDING" to "action != WALK" and explicitly deferred refining it further to
+        // this task. Mirrored here with the identical condition.
+        FlowStep existingInstruction = nextInstructionMap.get(anchorPos);
+        boolean isChainedConstruction = existingInstruction != null && existingInstruction.action() != PathAction.WALK;
+        if (isChainedConstruction && this.maxCandidateProjectLength < DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH) {
             return;
         }
 
@@ -270,8 +281,7 @@ public class SiegeProjectManager {
         // redundant: an anchor stops being walkable only when terrain changed after it was
         // first queued (typically a SiegeProject's entry point getting physically broken - see
         // injectActiveProjects), and the ordinary adjacent-neighbor repair path
-        // (getValidOrthogonalSteps' MINE/1-block-drop steps, or another nearby anchor's own
-        // fanned line landing on this same position) already discovers and repairs it safely
+        // (candidateSteps' own construction candidates) already discovers and repairs it safely
         // from an adjacent tile, the same way any other obstruction gets fixed. Confirmed via
         // SiegeActivityLog in testing: every "mob@X -> action at X" self-overlap traced back to
         // this exact line.
@@ -290,11 +300,38 @@ public class SiegeProjectManager {
         plannedProjectBuckets.computeIfAbsent(bucketKeyFor(immutableAnchor), k -> new ArrayList<>()).add(immutableAnchor);
     }
 
+    /**
+     * Replaces one {@code SiegeLineTracer.trace()} call: walks a fixed {@code (dx,dy,dz)} direction
+     * one hop at a time via {@code PathStepEvaluator.candidateSteps} filtered to the exact offset
+     * each time - the same technique {@code RegionGraph.traceLine}/{@code SiegeProject
+     * .traceChainedHops} use, mirrored here rather than shared directly since this method also
+     * needs the self-collision guard and the relative cost ceiling neither of those two callers
+     * needs (they have no {@code nextCostMap} of their own to compare against).
+     *
+     * <p>Terminates naturally the moment a WALK step is offered, aborts the moment NO candidate
+     * exists in the exact fixed direction (out of bounds, the self-collision/proximity guard below,
+     * or genuinely no valid step there), or, if {@code maxCandidateProjectLength} is exhausted while
+     * still legitimately building, stops collecting and treats what's been gathered so far as a
+     * SUCCESS - the same cap-exhaustion-is-success contract {@code SiegeLineTracer.trace} used to
+     * honor by appending a synthetic BUILD_LANDING; that action type is gone, so this simply stops
+     * one cell short of where the old landing would have sat, with nothing synthesized in its place.
+     *
+     * <p>Cost is the sum of each hop's own {@code PathStepEvaluator.EvaluatedStep.cost()} - the same
+     * real per-step cost model the ordinary flood and RegionGraph's own connector discovery already
+     * use, replacing {@code SiegeLineTracer}'s old bespoke {@code buildingBasePenalty *
+     * COST_MULTIPLIER} + dy-biased-multiplier formula. That old formula was a second, divergent cost
+     * model that existed only for macro-project line evaluation; dropping it (rather than porting it
+     * forward) means connector costs (RegionGraph) and macro-project costs (here) are FINALLY
+     * comparable on one scale - the design's whole point. The relative ceiling itself (below) is
+     * kept, unlike RegionGraph/SiegeProject's traces: {@code nextCostMap} is real here, so a fresh
+     * line that can't beat what the ordinary flood already knows about a position must still abort
+     * rather than overwrite it with something no better.
+     */
     private void evaluateSingleLine(TerrainAccess terrain, BlockPos anchorPos, FlowFieldState state, int anchorCost,
                                     int dx, int dy, int dz,
                                     PriorityQueue<FlowFieldCalculator.QueueNode> calcQueue,
                                     Map<BlockPos, Integer> nextCostMap,
-                                    Map<BlockPos, SiegeNode> nextInstructionMap) {
+                                    Map<BlockPos, FlowStep> nextInstructionMap) {
 
         // An active project's own entryPos is unconditionally re-added to nextInstructionMap AND
         // calcQueue every pass (see injectActiveProjects), so ordinary Dijkstra can pop it again
@@ -313,43 +350,68 @@ public class SiegeProjectManager {
         // collision that does form a cycle still falls back to FlowFieldCalculator's existing
         // breakMutualCycles/pickCyclePositionToDrop.
         Optional<SiegeProject> reenteredProject = activeProjectWithEntryPos(anchorPos);
-        SiegeLineTracer.TraceResult result = lineTracer.trace(terrain, anchorPos, dx, dy, dz, state.getTargetPos(), anchorCost,
-                pos -> terrainEvaluator.isOutOfBounds(terrain, pos, state) || isNearExistingProject(pos, anchorPos)
-                        || (reenteredProject.isPresent() && lockedPositions.contains(pos)
-                                && reenteredProject.get().getInstructions().containsKey(pos)),
-                pos -> nextCostMap.getOrDefault(pos, Integer.MAX_VALUE),
-                this.maxCandidateProjectLength);
+        Predicate<BlockPos> abortAt = pos -> pathStepEvaluator.isOutOfBounds(terrain, pos, state)
+                || isNearExistingProject(pos, anchorPos)
+                || (reenteredProject.isPresent() && lockedPositions.contains(pos)
+                        && reenteredProject.get().getInstructions().containsKey(pos));
 
-        if (!result.completed() || result.instructions().isEmpty()) return;
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        // Accumulated in the same loop, no extra terrain work: each hop paired with the action
+        // candidateSteps computed for that very position - see this class's own doc.
+        List<FlowStep> orderedSteps = new ArrayList<>();
+        BlockPos current = anchorPos;
+        int totalCost = anchorCost;
+        BlockPos endPos = null;
 
-        BlockPos endPos = result.endPos();
-        int totalCost = result.totalCost();
+        for (int hop = 1; hop <= maxCandidateProjectLength; hop++) {
+            BlockPos next = current.offset(dx, dy, dz);
+            // Tested explicitly here, mirroring SiegeLineTracer.trace's own first-line check and
+            // RegionGraph.traceLine's identical pattern - not merely relying on candidateSteps'
+            // internal outOfBounds filtering (passed below too), so the abort reason is unambiguous.
+            if (abortAt.test(next)) return;
+
+            List<PathStepEvaluator.EvaluatedStep> steps = pathStepEvaluator.candidateSteps(terrain, current, Collections.emptySet(), abortAt);
+            PathStepEvaluator.EvaluatedStep matching = steps.stream()
+                    .filter(s -> s.pos().equals(next)).findFirst().orElse(null);
+            if (matching == null) return; // out of bounds, self-collision, or no valid step in this exact direction
+
+            int candidateCost = totalCost + matching.cost();
+            if (candidateCost >= nextCostMap.getOrDefault(next, Integer.MAX_VALUE)) return; // never improves on what's already known there
+
+            instructions.put(next, new FlowStep(next, matching.action(), current));
+            orderedSteps.add(new FlowStep(next, matching.action(), current));
+            totalCost = candidateCost;
+            endPos = next;
+            current = next;
+
+            if (matching.action() == PathAction.WALK) break;
+        }
+
+        if (orderedSteps.isEmpty()) return;
 
         LOGGER.debug("[Pathfinder] Successful Macro Line built from {} to {} (Cost: {})",
                 anchorPos.toShortString(), endPos.toShortString(), totalCost);
 
-        // result.orderedSteps() is recorded walking FROM anchorPos (the target side, already
-        // reached by Dijkstra flooding backward from the goal) OUT to endPos (the mob's side,
-        // discovered last) - see SiegeLineTracer.trace's own doc. Passing that order unreversed
-        // with buildOrderAnchor=anchorPos would make nextUnbuiltInstruction() (which just returns
-        // build order's first unbuilt entry) always prefer whichever step is nearest the TARGET,
-        // never the one nearest the mob. But endPos IS this project's entryPos - "the block where
-        // rats enter this project" (see SiegeProject's own field doc) - so for a mob to physically
-        // climb/cross from there, the step nearest entryPos must be built FIRST. Reversing here and
-        // re-anchoring on endPos mirrors RegionGraph.registerConnector's own "towardA" direction
-        // (a connector entered from its far side), which already needs and gets this exact
-        // treatment for the identical reason.
-        List<SiegeNode> buildOrderSteps = new ArrayList<>(result.orderedSteps());
+        // orderedSteps is recorded walking FROM anchorPos (the target side, already reached by
+        // Dijkstra flooding backward from the goal) OUT to endPos (the mob's side, discovered
+        // last). Passing that order unreversed with buildOrderAnchor=anchorPos would make
+        // nextUnbuiltInstruction() (which just returns build order's first unbuilt entry) always
+        // prefer whichever step is nearest the TARGET, never the one nearest the mob. But endPos IS
+        // this project's entryPos - "the block where rats enter this project" - so for a mob to
+        // physically climb/cross from there, the step nearest entryPos must be built FIRST.
+        // Reversing here mirrors RegionGraph.registerConnector's own "towardA" direction (a
+        // connector entered from its far side), which already needs and gets this exact treatment
+        // for the identical reason.
+        List<FlowStep> buildOrderSteps = new ArrayList<>(orderedSteps);
         Collections.reverse(buildOrderSteps);
-        // The reversed list's first entry is SiegeLineTracer.trace's own terminal step AT endPos -
-        // needed only to seed planSteps' walking-facing computation for the step after it, not real
-        // work (its own action is WALK: nothing to build once a trace terminates naturally). Left
-        // in place, its position would equal buildOrderAnchor (both endPos), making
-        // tryWiden's dirFrom/dirTo (widenAnchor vs buildOrder.get(0)) the SAME point - a zero
-        // direction vector that breaks auto-widening for every BUILD_STAIR/BUILD_BRIDGE reactive
-        // project. Drop it; planSteps still starts walking from buildOrderAnchor=endPos, so the
-        // first REAL step's facing is unaffected.
-        if (!buildOrderSteps.isEmpty() && buildOrderSteps.get(0).action() == SiegeNode.SiegeAction.WALK) {
+        // The reversed list's first entry is this trace's own terminal step AT endPos - needed only
+        // to seed planSteps' walking-facing computation for the step after it, not real work (its
+        // own action is WALK: nothing to build once a trace terminates naturally). Left in place,
+        // its position would equal buildOrderAnchor (both endPos), making tryWiden's dirFrom/dirTo
+        // the SAME point - a zero direction vector that breaks auto-widening. Drop it; planSteps
+        // still starts walking from buildOrderAnchor=endPos, so the first REAL step's facing is
+        // unaffected.
+        if (buildOrderSteps.get(0).action() == PathAction.WALK) {
             buildOrderSteps.remove(0);
         }
 
@@ -358,25 +420,22 @@ public class SiegeProjectManager {
         // interior cell, including a region's own nexus/target position, which
         // FlowFieldCalculator.startCalculation seeds onto calcQueue unconditionally regardless of
         // lock state. If a genuinely-walkable cell sits one step away, the trace above terminates
-        // in a single WALK hop - SiegeLineTracer.trace's own termination condition fires
-        // immediately - and after the leading-WALK-drop just above, buildOrderSteps ends up EMPTY:
-        // a "project" with nothing to build. Committing it anyway still writes its one
-        // instructions() entry into nextInstructionMap with no cost comparison (see this class's
-        // own comment on FlowFieldCalculator's cycle-risk), silently overwriting whatever that far
-        // cell already had with a brand-new instruction pointing straight back at this anchor -
-        // which, paired with the anchor's own pre-existing instruction pointing forward at that
-        // same far cell, forms a direct mutual 2-cycle. Confirmed live via
-        // testParentRegionGetsRealInstructionsForSharedConnectorCells: the cycle-breaker resolved
-        // exactly this cycle by dropping the far cell's (unlocked) entry entirely, leaving it with
-        // no instruction at all. A candidate with an empty build order does no useful work and
-        // exists only to overwrite something real - discard it before it can.
+        // in a single WALK hop immediately - and after the leading-WALK-drop just above,
+        // buildOrderSteps ends up EMPTY: a "project" with nothing to build. Committing it anyway
+        // still writes its one instructions() entry into nextInstructionMap with no cost comparison
+        // (see this class's own comment on FlowFieldCalculator's cycle-risk), silently overwriting
+        // whatever that far cell already had with a brand-new instruction pointing straight back at
+        // this anchor - which, paired with the anchor's own pre-existing instruction pointing
+        // forward at that same far cell, forms a direct mutual 2-cycle. A candidate with an empty
+        // build order does no useful work and exists only to overwrite something real - discard it
+        // before it can.
         if (buildOrderSteps.isEmpty()) return;
 
-        candidateProjects.add(new SiegeProject(result.instructions(), buildOrderSteps, endPos, endPos, totalCost));
+        candidateProjects.add(new SiegeProject(instructions, buildOrderSteps, endPos, endPos, totalCost, UUID.randomUUID()));
         lastPassCandidatesGenerated++;
 
         nextCostMap.put(endPos, totalCost);
-        nextInstructionMap.putAll(result.instructions());
+        nextInstructionMap.putAll(instructions);
         calcQueue.add(new FlowFieldCalculator.QueueNode(endPos, totalCost));
     }
 
