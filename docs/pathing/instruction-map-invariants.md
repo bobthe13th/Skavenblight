@@ -228,6 +228,27 @@ only because of which shape currently reaches it in practice. See
 file-by-file impact list, and migration order. Still **not started** — this correction only fixes
 the scoping, not the code.
 
+## Resolved (2026-08-06): root cause of the `StaircaseSiegeGroupGameTests` failures found
+
+**This is the answer to the breadcrumb below.** Found while executing the pathing-rewrite plan's
+Task 21 go/no-go gate (`docs/superpowers/plans/2026-08-05-pathing-rewrite-implementation-plan.md`,
+which has the full writeup with log evidence — this note is a pointer, not a duplicate). Short
+version: the "canonicalize `RegionGraph` to Shape A" fix this doc's "Open design debt" section and
+its sibling `2026-08-05-siegenode-dual-meaning-split-plan.md` recommended DID get implemented, in the
+current rewrite's Tasks 6 and 9 (confirmed by reading `FlowFieldCalculator.processNeighbors` and
+`RegionGraph.outboundInstructions`/`inboundInstructions` directly — both now produce genuine Shape A:
+`.pos()` always equals the map key, `.predecessorPos()` carries the next hop). **But the consumers
+this fix was supposed to make unambiguous for — `FollowFlowFieldGoal`, `SiegeNodeLookahead` — were
+only mechanically retyped when they were later ported (Tasks 10/17), never updated to read
+`.predecessorPos()` instead of `.pos()` for "where do I go next."** They still read `.pos()`, which
+was the OLD `SiegeNode`'s only field and secretly meant "next hop" on a map value — under the NEW,
+disambiguated `FlowStep` convention this producer-side fix established, `.pos()` on a map value now
+always equals the query key, never the next hop. Every hand-fed GameTest/unit-test fixture happens to
+encode the OLD, consumer-compatible shape, which is exactly why nothing caught this until the first
+real end-to-end GameTestServer run (Task 20/21 of the current rewrite, the first time `compileJava`
+had been green since Task 5). Not fixed yet — see the plan doc's Task 21 section for the scoped
+candidate fix and why it wasn't landed the same session.
+
 ## Next-session breadcrumb: the 4 remaining `StaircaseSiegeGroupGameTests` failures
 
 As of this session's last full run, `testSingleRatBuildsStaircaseAcrossSmallGap`,

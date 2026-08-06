@@ -2699,6 +2699,104 @@ git commit -m "test(pathing): add grief-recovery GameTest, retire legacy climb/l
 
 ## Task 21: Go/no-go gate — the 4 existing air-stair GameTests
 
+**Result (2026-08-06, executing Task 20/21): NO-GO. Root cause identified and fully evidenced —
+not just suspected. Tasks 22-24 remain blocked.** All 4 gate tests fail identically with "0 stair
+block(s) built"; the ground-side rat never takes a single step (its absolute position is bit-for-bit
+identical from spawn to timeout in every run). This is NOT the two "specific suspects" flagged below
+(`FRONTIER_WALK_THRESHOLD`, vertical cost-bias) — those govern chained-connector discovery, and
+discovery is fine: `RegionGraph.build` genuinely finds the diagonal connector every run (confirmed via
+log: `RegionGraph built: 3 regions, 2 connectors (0 chained, max 1 hops)` for the small-gap tests —
+`0 chained` is *correct* there, since 14 hops fits inside one 32-hop `TRACE_HOPS_PER_CHAIN` segment;
+don't waste time on the chaining machinery for these 4 tests). The defect is downstream, in how a
+mob reads its OWN flow-field instruction to decide where to move.
+
+**Root cause: `RegionFlowField.getNextStep`'s "already completed, collapse to WALK" branch discards
+the real next-hop pointer, and every consumer that was supposed to read that pointer was never
+migrated to read the field it actually lives in.** Confirmed via direct instrumentation
+(`AbstractSiegeProjectGoal.canUse()`, temporarily logging `getRawInstruction`/`getNextStep` at the
+rat's own position, since reverted — not left in the tree):
+
+```
+raw=FlowStep[pos=BlockPos{x=10421624,y=-58,z=-6542039}, action=WALK, predecessorPos=BlockPos{x=10421625,y=-58,z=-6542040}]
+resolved=FlowStep[pos=BlockPos{x=10421624,y=-58,z=-6542039}, action=WALK, predecessorPos=BlockPos{x=10421624,y=-58,z=-6542039}]
+```
+
+The RAW instruction at the rat's own position correctly carries a real next hop
+(`predecessorPos={x+1,z-1}`, one cell over — genuinely a different cell). But `getNextStep`
+(`RegionFlowField.java`) runs an `isActionCompleted` check and, since the raw action is already
+`WALK` (trivially "complete" — the rat is standing on real ground by definition), replaces it with
+`new FlowStep(node.pos(), PathAction.WALK, node.pos())` — **self-referencing BOTH fields**,
+discarding the real `predecessorPos` and replacing it with the rat's own position. Every consumer
+that reads the resolved value's next-hop off `.pos()` — `FollowFlowFieldGoal.tick()`'s
+`nextInChain = targetNode.pos()`, its own lookahead loop's `next.pos().equals(nextInChain)` /
+`nextInChain = next.pos()`, `FollowFlowFieldGoal.findEscapePos`'s identical pattern, and
+`SiegeNodeLookahead.findEffectiveNode`'s lookahead snap — gets back the rat's own position and
+instructs it to move to exactly where it already is. `moveOrHop`/`Navigation.moveTo` to the mob's own
+current position produces a path that's immediately "done" with zero motion: the mob genuinely never
+moves, matching the exact observed symptom for every failing test.
+
+**This is not a fresh regression — it's a known, half-fixed design-debt item from before this
+rewrite even started.** `docs/pathing/instruction-map-invariants.md` (2026-08-04, pre-dates this
+plan) already documented the old `SiegeNode(pos, action)` type's central footgun: as a map VALUE,
+`.pos()` meant "the next hop toward the target" (the only field available to carry that information);
+as a STANDALONE value, `.pos()` meant "the real position this action applies to" — the same accessor,
+two incompatible meanings depending on context. Its sibling scoping doc,
+`docs/superpowers/plans/2026-08-05-siegenode-dual-meaning-split-plan.md`, proposed the fix this
+rewrite's Task 6 apparently drew from: introduce a THREE-field `FlowStep(pos, action,
+predecessorPos)` so `.pos()` can be unambiguously "the real position" everywhere, with a NEW,
+dedicated `predecessorPos` field carrying what `.pos()` used to secretly mean on a map value. Tasks 6
+and 9 correctly migrated the PRODUCERS to this disambiguated convention — confirmed by reading
+`FlowFieldCalculator.processNeighbors` (`nextInstructionMap.put(step.pos(), new
+FlowStep(step.pos(), step.action(), current))` — `.pos()` always equals the map key now) and
+`RegionGraph.outboundInstructions`/`inboundInstructions` (same pattern) directly. **But the
+CONSUMERS — `FollowFlowFieldGoal`, `SiegeNodeLookahead`, ported in Tasks 10/17 — were only
+mechanically retyped (`SiegeNode`→`FlowStep`), never semantically updated: they still read `.pos()`
+expecting "next hop," the OLD map-value-only meaning, which is now always wrong** (under the new,
+disambiguated convention, a map value's `.pos()` always equals its own key — the mob's own current
+position when queried by that position — never the next hop; `.predecessorPos()` is the field that
+now carries it). Task 10's own commit message (`a271f0f`) is explicit that this was a deliberate,
+informed choice at the time: "confirmed via grep that no caller in ai.goal.clanrat reads
+predecessorPos off this method's return value" — true then (the old 2-field `SiegeNode` had no such
+field to read), but the mechanical port never revisited whether `FollowFlowFieldGoal`'s own `.pos()`
+reads should have become `.predecessorPos()` reads once the producer side's meaning changed under it.
+
+**Why 30+ other tests never caught this:** every hand-fed GameTest/unit-test fixture that directly
+constructs a `FlowFieldState` (the pattern throughout `PathingGoalRecalculationGameTests`,
+`SiegeProjectAutoWidenGameTests`: `state.updateInstructions(Map.of(anchor, new FlowStep(target,
+action, anchor)))`) encodes data in the OLD, consumer-compatible shape — `.pos()` = target/next hop,
+`predecessorPos` = the standing position — because whoever wrote those fixtures modeled them on the
+pre-migration mental model, not on what `FlowFieldCalculator`/`RegionGraph` actually produce. Every
+one of those tests is internally consistent (bug-compatible producer + bug-compatible consumer
+"pass"), which is exactly why they never surfaced this. `StaircaseSiegeGroupGameTests` is the FIRST
+test suite to exercise the REAL end-to-end pipeline (real nexus, real conduit, real
+`TerritoryRegionMap.rebuild`, real `RegionGraph.build`) — and it's the first thing that could ever
+have caught this, because `compileJava` was red from Task 5 through Task 20.
+
+**Candidate fix (NOT implemented this session — deliberately, per explicit advisor guidance not to
+land a cross-cutting movement-layer change at the end of a long session):** swap every consumer read
+of a map-sourced `FlowStep`'s "where do I go next" from `.pos()` to `.predecessorPos()`:
+`FollowFlowFieldGoal.tick()` (the `nextInChain` assignment and its own lookahead loop's break
+condition/reassignment), `FollowFlowFieldGoal.findEscapePos`, `SiegeNodeLookahead.findEffectiveNode`'s
+lookahead-snap check. Do NOT touch `AbstractSiegeProjectGoal.findCandidateProject`'s
+`flowField.findProjectFor(node.pos())` — that read wants "the real position the action applies to,"
+which IS `.pos()` under the disambiguated convention; it does not need to change.
+`RegionFlowField.getNextStep`'s own collapse branch should also preserve the real predecessor when
+converting a completed construction action to WALK
+(`new FlowStep(node.pos(), PathAction.WALK, node.predecessorPos())`, not `node.pos()` twice) — for
+Shape-A-sourced entries (the ordinary flood and reactive macro-tracer) this is correct and safe
+either way (WALK's own `isActionCompleted` check is tautologically true for a cell the mob is already
+standing on, so the collapse is a no-op once predecessorPos is preserved instead of discarded).
+**Do not land this without first resolving the sibling plan's own flagged "two runtime-unverified
+risks"** (`docs/superpowers/plans/2026-08-05-siegenode-dual-meaning-split-plan.md`'s "Two
+runtime-unverified risks" section) — specifically whether every hand-fed test fixture that encodes
+the OLD convention needs updating too, and whether any remaining call site genuinely depends on the
+old, `.pos()`-as-next-hop reading in a way a blanket swap would break. Every hand-fed GameTest fixture
+touched by this rewrite so far (`PathingGoalRecalculationGameTests`,
+`SiegeProjectAutoWidenGameTests`) will need updating to the disambiguated convention in the same pass,
+or they'll silently start asserting the wrong thing once the consumer-side swap lands.
+
+
+
 **Files:**
 - No production code changes expected beyond bug fixes this task's own failures reveal.
 - Reference: `src/main/java/org/ratden/skavenblight/gametest/StaircaseSiegeGroupGameTests.java`
@@ -2707,6 +2805,25 @@ git commit -m "test(pathing): add grief-recovery GameTest, retire legacy climb/l
 **This is the task's explicit go/no-go gate.** Per the task instructions: "Get all 4 [air-stair
 GameTests] passing before writing any of the [12 new part-type GameTests]." Do not proceed to Task 22
 until all 4 pass.
+
+**Separate finding, NOT part of this gate (2026-08-06): 5 other test failures in the same run are a
+stale-fixture issue from Task 17, not a production defect.** `testFloatingNexusGetsBridgedToGround`,
+`testLongConnectorCellsAreNeverOrphanedFromLookup`, `testParentRegionGetsRealInstructionsForSharedConnectorCells`,
+`testDirtyRegionBatchProducesOneCoherentFinalIndex`, and `testConnectorCellsSurviveADirtyRegionRescan`
+(all in `PathingRegionGameTests.java`) all use a PURE VERTICAL shaft geometry (no horizontal
+offset at all) requiring a chained connector straight up/down. `PathStepEvaluator.candidateSteps`
+line ~95 explicitly refuses to offer ANY candidate for a pure-vertical `(dx=0, dy≠0, dz=0)` direction
+("climbing is permanently removed... never offer a step here") — but `RegionGraph.build` still fires
+exactly that direction (`for (int dy : new int[]{-1, 1}) tryTrace(...0, dy, 0...)`) from every
+boundary cell. Every pure-vertical trace call therefore aborts on its very first hop,
+unconditionally, for every territory, always — these 5 tests are asserting on geometry Task 17's
+climbing removal made permanently unreachable under the new action vocabulary, not exercising a live
+code path. This is stale-fixture staleness, not a Task 21 blocker (none of these 4 gate tests use
+pure-vertical geometry — they're all diagonal, which fires the working `(dx≠0 or dz≠0, dy≠0)`
+combinations). Left unfixed and untriaged further this session; whoever picks this up next needs to
+decide whether these fixtures should be reshaped to a diagonal shaft (matching
+`StaircaseSiegeGroupGameTests`' own approach) or whether pure-vertical crossings deserve their own,
+new construction mechanism.
 
 - [ ] **Step 1: Check for orphaned `gameTestServer` java.exe processes**
 
