@@ -387,6 +387,24 @@ public class SiegeProject {
         return buildOrder.stream().map(PlannedStep::pos).toList();
     }
 
+    /** Persistence accessor (SiegeProjectStore): the full ordered build list, unlike
+     * {@link #getBuildOrderPositions}'s positions-only view. */
+    public List<PlannedStep> getBuildOrder() {
+        return List.copyOf(buildOrder);
+    }
+
+    /** Persistence accessor (SiegeProjectStore): the original trace anchor tryWiden reconstructs
+     * its direction from - see that field's own doc. */
+    public BlockPos getWidenAnchor() {
+        return this.widenAnchor;
+    }
+
+    /** Persistence accessor (SiegeProjectStore): the game-time stamp tick()'s idempotency guard
+     * last saw - see that field's own doc for why a restored world must clamp this on load. */
+    public long getLastTickedGameTime() {
+        return this.lastTickedGameTime;
+    }
+
     /** Test-support accessor (same role as {@link #getBuildOrderPositions}): build progress banked
      * but not yet spent on a placement. Exists so a test can assert tick()'s accumulation SCALING
      * directly - N workers must add {@code min(N, cap) * workPerRatPerTick} per game tick, however

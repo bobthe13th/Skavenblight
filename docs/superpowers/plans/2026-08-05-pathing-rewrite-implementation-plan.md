@@ -2216,9 +2216,34 @@ Expected: FAIL (compile error).
 Run: `./gradlew test --tests "org.ratden.skavenblight.ai.pathing.SiegeProjectStoreTest"`
 Expected: PASS
 
-- [ ] **Step 5: Wire persistence calls into `SiegeProjectManager`/`SiegeProject.tick()`** per the
-  "when to persist" spec above, and the clamp-on-load fix into wherever `TerritoryRegionMap`/
-  `SiegeProjectManager` reconstructs projects from the store during network rebuild.
+**Correction (2026-08-05, found executing Step 5, advisor unavailable this session so flagged rather
+than guessed): Step 5's wiring needs a real design decision this plan doesn't specify, not a
+mechanical wire-in.** `addOrReplace(SiegeProject project, UUID networkId)`'s `networkId` parameter is
+a WarpFluxNetwork's own stable id (`WarpFluxNetwork.getId()`, confirmed via direct read — NOT
+`SiegeProject.getNetworkId()`, which is a same-named-but-different field: a connector's paired-project
+identity, unrelated to which nexus network owns the project). Confirmed via direct read that neither
+`TerritoryRegionMap` (Task 14, done) nor `SiegeProjectManager` (Task 11, done) holds any reference to
+its owning `WarpFluxNetwork`'s id today — `TerritoryRegionMap` has no network-identity field at all,
+it's constructed and owned directly by `WarpFluxNetwork` with no back-reference. Wiring Step 5 as
+written would require either (a) adding a new constructor parameter threading the network id down
+into `TerritoryRegionMap`/`SiegeProjectManager` (a real signature change to two already-committed
+classes, touching every call site that constructs them — `WarpFluxNetwork` itself, plus every
+GameTest in `PathingRegionGameTests`/`SiegeProjectManagerTest`/etc. that constructs a bare
+`TerritoryRegionMap` directly, none of which pass a network id today), or (b) some other mechanism not
+yet designed. Neither option is safe to guess at without verifying every affected call site, which
+this task's own file list doesn't cover and the advisor tool — this session's normal check for exactly
+this kind of decision — is unavailable right now. **Steps 1-4 (the standalone, fully self-contained,
+fully tested persistence subsystem) are implemented and committed below; Step 5 (wiring persistence
+calls into `SiegeProjectManager`/`SiegeProject.tick()`/`TerritoryRegionMap`'s rebuild path) is left
+undone, tracked here rather than guessed at.** Whoever picks this up next should either get advisor
+input on the network-id-threading design, or confirm with the user whether `TerritoryRegionMap`
+gaining a network-id field (and updating its handful of direct-construction call sites) is acceptable
+before implementing it.
+
+- [ ] **Step 5 (NOT YET DONE — see correction above): Wire persistence calls into
+  `SiegeProjectManager`/`SiegeProject.tick()`** per the "when to persist" spec above, and the
+  clamp-on-load fix into wherever `TerritoryRegionMap`/`SiegeProjectManager` reconstructs projects
+  from the store during network rebuild.
 
 - [ ] **Step 6: Commit**
 
