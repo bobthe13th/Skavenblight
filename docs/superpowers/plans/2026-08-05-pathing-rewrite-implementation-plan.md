@@ -1963,9 +1963,18 @@ already-explained compile-red window) rather than guessed at during Task 9.
 
 **The onBlockChanged authority fix (the design doc's own explicit instruction — a deletion, not a new
 filter):**
-1. Delete `SiegeProject.tick()`'s `flowField.forceRecalculation(step.pos())` call entirely (ported
-   into Task 12's rewrite already — confirm it's genuinely gone, don't re-add it here out of habit
-   while porting `tick()`'s surrounding structure).
+
+**Correction (2026-08-05, found executing Task 13): this call is NOT already gone.** Confirmed via
+direct read of the committed `SiegeProject.java` (Task 12): `tick()` still calls
+`flowField.forceRecalculation(step.pos())` at its own line ~477, with the surrounding comment ("Without
+this call, a placement here would never get discovered...") arguing FOR keeping it — the exact opposite
+of this task's own instruction. Task 12's own spec never mentioned deleting this call (it says "port
+`tick()`...verbatim" with substitutions unrelated to this), so nothing dropped it by omission; the plan's
+"ported into Task 12's rewrite already" claim is simply wrong. Step 1 below is real, live work for THIS
+task, not a confirmation-only checkbox — delete the call and its surrounding comment block when you get
+here, and don't skip Step 1 assuming it's a no-op.
+1. Delete `SiegeProject.tick()`'s `flowField.forceRecalculation(step.pos())` call entirely (see the
+   correction directly above — this is NOT already done, do the deletion here).
 2. Make an active project's planned final state authoritative for terrain evaluation, both before and
    during construction, by wiring Task 4's `TerrainSnapshot` planned-state override into BOTH of this
    file's `TerrainSnapshot.refresh(...)` call sites (`rebuild()` and `tick()`). Build the override
