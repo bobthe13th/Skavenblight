@@ -206,6 +206,25 @@ public class SiegeInteractionHandler {
     }
 
     /**
+     * The {@code BlockState} this action places once complete, for TerritoryRegionMap's
+     * planned-cell terrain override (an active project's planned final state is authoritative for
+     * terrain evaluation - see that class's onBlockChanged authority fix). {@code WALK} returns
+     * null ("no override" - TerrainSnapshot's plannedStateOverride hook treats null that way): a
+     * WALK step never changes terrain, so the real world state is already correct. Facing is
+     * deliberately not modeled here (unlike the real placement in {@link #constructSiegeBlock}) -
+     * a stair's blocksMotion()/isSolidRender()/getDestroySpeed(), the only properties terrain
+     * evaluation reads off an overridden state, don't vary with facing.
+     */
+    public static BlockState finalBlockStateFor(PathAction action) {
+        return switch (action) {
+            case WALK -> null;
+            case TUNNEL -> Blocks.AIR.defaultBlockState();
+            case BRIDGE -> Blocks.COBBLESTONE.defaultBlockState();
+            case CARVED_STAIR, AIR_STAIR -> Blocks.COBBLESTONE_STAIRS.defaultBlockState();
+        };
+    }
+
+    /**
      * Whether {@code pos} is clear enough to place a block into without entombing something -
      * checked against each nearby entity's own {@code blockPosition()} (feet), not full AABB
      * overlap. Clanrats are 1.8 blocks tall (see ModEntities#CLANRAT), so a mob simply standing

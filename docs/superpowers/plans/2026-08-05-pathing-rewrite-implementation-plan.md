@@ -1961,11 +1961,41 @@ e.g. a generation counter already exposed via `getGeneration()`, or does the tes
 not a rename — before this file's ~35 call sites can be ported. Left broken (already-known,
 already-explained compile-red window) rather than guessed at during Task 9.
 
+**Correction (2026-08-05, found executing this task): the gap note above misidentifies which test
+exercises the fast path.** Confirmed via direct read of both `RegionGraph[] indexBeforeChange`
+identity-check blocks (`testDirtyRegionBatchProducesOneCoherentFinalIndex` at the time-of-writing
+line ~738, and `testConnectorCellsSurviveADirtyRegionRescan` at line ~1008 — NOT
+`testRepeatedConnectorCompletionsDontExplodeRebuildCount`, which contains no identity check at all,
+just direct region-id probes): **both** identity-check tests' own javadoc/inline comments explicitly
+state they always land on the topology-changed/full-rebuild branch, never the non-topology-changed
+fast path ("this recompute is always a full rebuild in this geometry, not the fast path the method
+name suggests"). Neither currently-existing test exercises the fast-path identity semantics the gap
+note describes. This does NOT make the underlying design question moot, though: the fast path
+(`recomputeDirtyRegions`'s non-topology-changed branch) still needs `regionGraph`'s LOOKUP refreshed
+against `updatedRegions` for plain correctness (any position resolution after a fast-path recompute
+must see current membership, independent of whether any test currently checks object identity for
+it) — so the fix implemented here (`RegionGraph.withUpdatedRegions`, called from that branch,
+producing a fresh instance sharing the OLD instance's connectors) stands regardless. The mechanical
+rename (`getRegionIndex()` → `getRegionGraph()`, `RegionIndex` → `RegionGraph`) turned out to be
+correct and sufficient for both existing identity-check tests without any test-behavior change,
+since a full rebuild already produces a fresh `RegionGraph` via `RegionGraph.build` either way.
+
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/ai/pathing/region/TerritoryRegionMap.java`
 - Modify: `src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java` (full port of
-  its ~35 `getRegionIndex()` call sites — see gap note above for the identity-check subtlety that
-  makes this more than a rename)
+  its ~35 `getRegionIndex()` call sites — see gap note above and this task's own correction for the
+  identity-check subtlety)
+- Modify: `src/main/java/org/ratden/skavenblight/network/WarpFluxNetwork.java` (one-line
+  `getRegionIndex()` → `getRegionGraph()` redirect) and
+  `src/main/java/org/ratden/skavenblight/item/custom/DebugFlowFieldReaderItem.java` (same, two call
+  sites) — **gap found executing this task, not previously in this document's file-disposition
+  survey or this task's own file list:** both are real production consumers of
+  `TerritoryRegionMap.getRegionIndex()` outside `ai.pathing`/`ai.goal.clanrat`/the already-fixed
+  Task-9 consumer list (`ClanratEntity`, `DebugPathingCommands`, `PathingDebugFileWriter`), confirmed
+  via `compileJava` surfacing them the moment `getRegionIndex()` was deleted (they were invisible
+  before that point because `TerritoryRegionMap.java` itself didn't compile). Both are trivial
+  one-line-per-call-site redirects, same as the Task 9 consumer fixes — `DebugFlowFieldReaderItem`'s
+  own remaining `Map<BlockPos, SiegeNode>` usage is unrelated and stays Task 25's job, untouched here.
 - Test: `src/test/java/org/ratden/skavenblight/ai/pathing/region/TerritoryRegionMapOnBlockChangedTest.java`
 
 **Interfaces:**

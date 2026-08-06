@@ -11,10 +11,10 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.Skavenblight;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionConnector;
-import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
+import org.ratden.skavenblight.ai.pathing.region.RegionGraph;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.slf4j.Logger;
 
@@ -157,7 +157,7 @@ public class PathingRegionGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 1,
                     "expected exactly 1 region on a flat open platform, found " + regions.size());
             check(regions.get(0).cellCount() > 100,
@@ -275,14 +275,14 @@ public class PathingRegionGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 2, "expected exactly 2 regions (split by the trench), found " + regions.size());
             check(regionMap.getRegionGraph().getAllConnectors().size() == 1,
                     "expected exactly 1 connector between the 2 regions, found "
                             + regionMap.getRegionGraph().getAllConnectors().size());
 
             int farRegionId = regions.stream().mapToInt(Region::getId)
-                    .filter(id -> id != regionMap.getRegionIndex().regionIdAt(nexusPos.north())) // arbitrary non-nexus-side probe
+                    .filter(id -> id != regionMap.getRegionGraph().regionIdAt(nexusPos.north())) // arbitrary non-nexus-side probe
                     .findFirst().orElseThrow();
             check(regionMap.getRouteTree().isReachable(farRegionId),
                     "far region should be reachable via the planned connector");
@@ -412,16 +412,16 @@ public class PathingRegionGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 3, "expected 3 regions (A/B/C), found " + regions.size());
 
             // Resolved to primitive ints (after the null checks) and used as primitives
             // throughout below - deliberately, so every comparison against them is an unambiguous
             // value comparison rather than the boxed-Integer reference-equality trap the class
             // javadoc/testTwoDisconnectedRegionsGetOneConnector already warns about.
-            Integer regionCBoxed = regionMap.getRegionIndex().regionIdAt(probeC);
+            Integer regionCBoxed = regionMap.getRegionGraph().regionIdAt(probeC);
             check(regionCBoxed != null, "region C probe position isn't in any region - adjust the probe");
-            Integer regionBBoxed = regionMap.getRegionIndex().regionIdAt(probeB);
+            Integer regionBBoxed = regionMap.getRegionGraph().regionIdAt(probeB);
             check(regionBBoxed != null, "region B probe position isn't in any region - adjust the probe");
             int regionC = regionCBoxed;
             int regionB = regionBBoxed;
@@ -484,7 +484,7 @@ public class PathingRegionGameTests {
     }
 
     /**
-     * Characterization test for {@link RegionIndex#regionAt}/{@code regionIdAt}, written BEFORE
+     * Characterization test for {@link RegionGraph#regionAt}/{@code regionIdAt}, written BEFORE
      * the task-6 refactor that replaces its linear scan-every-Region-and-call-contains()
      * implementation with a real O(1) per-chunk flat-array lookup. Same assertions must hold
      * both before and after that refactor - this test exists to prove behavior didn't change,
@@ -498,7 +498,7 @@ public class PathingRegionGameTests {
      * chunk's own 16-wide window can land anywhere in [1, 31] depending on the run's chunk
      * alignment - it is NOT guaranteed to contain a fixed point like relative x=5. A probe placed
      * outside the actual territory chunk would non-deterministically resolve to null regardless
-     * of which RegionIndex implementation is under test, so - as this class's other multi-probe
+     * of which RegionGraph implementation is under test, so - as this class's other multi-probe
      * tests already do - every coordinate below is anchored via {@link #anchorChunkFor} and
      * expressed as an offset from that chunk's own {@code baseX}/{@code baseZ} instead.
      *
@@ -524,7 +524,7 @@ public class PathingRegionGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            RegionIndex index = regionMap.getRegionIndex();
+            RegionGraph index = regionMap.getRegionGraph();
 
             BlockPos walkable = helper.absolutePos(new BlockPos(baseX + 5, 2, baseZ + 5));
             check(index.regionIdAt(walkable) != null, "an open floor cell should resolve to a region");
@@ -595,7 +595,7 @@ public class PathingRegionGameTests {
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
 
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 2,
                     "expected exactly 2 regions (main floor + elevated platform), found " + regions.size());
 
@@ -622,7 +622,7 @@ public class PathingRegionGameTests {
             // docs/pathing/region-pathing-hardening-findings.md's Finding C, "Task 8", for the
             // tie-break note).
             for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
-                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                Integer resolvedRegion = regionMap.getRegionGraph().regionIdAt(step);
                 check(resolvedRegion != null,
                         "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
                 if (logThisPass) {
@@ -630,7 +630,7 @@ public class PathingRegionGameTests {
                 }
             }
             for (BlockPos step : connector.projectTowardB().getInstructions().keySet()) {
-                check(regionMap.getRegionIndex().regionIdAt(step) != null,
+                check(regionMap.getRegionGraph().regionIdAt(step) != null,
                         "connector cell " + step.toShortString() + " isn't claimed by any region - a mob standing there would be orphaned");
             }
             loggedDump[0] = true;
@@ -642,11 +642,11 @@ public class PathingRegionGameTests {
      * Task 9 Step 0: {@code recomputeDirtyRegions} used to rebuild {@code this.regionIndex} from
      * the FULL region list once per dirty region INSIDE its per-region loop (task-6 made this a
      * real ~384KB-per-chunk allocation, not the old cheap {@code List.copyOf}) - for N
-     * simultaneously-dirty regions in one batch that discarded N-1 intermediate RegionIndex
+     * simultaneously-dirty regions in one batch that discarded N-1 intermediate RegionGraph
      * instances unread before the batch finished. The fix moves the reconstruction out of the
      * loop to run exactly once per batch.
      *
-     * <p>This is primarily a wasted-allocation fix, and the final published {@code RegionIndex}'s
+     * <p>This is primarily a wasted-allocation fix, and the final published {@code RegionGraph}'s
      * CONTENT is the same either way (the OLD code's per-iteration index was already built from an
      * up-to-date region list each time, so whichever iteration ran last already published the
      * right answer) - so there is deliberately no failing-before/passing-after split on content.
@@ -735,7 +735,7 @@ public class PathingRegionGameTests {
         int[] nearRegionBefore = {-1};
         int[] farRegionBefore = {-1};
         boolean[] changesReported = {false};
-        RegionIndex[] indexBeforeChange = {null};
+        RegionGraph[] indexBeforeChange = {null};
         long[] generationBeforeChange = {-1};
 
         helper.succeedWhen(() -> {
@@ -743,17 +743,17 @@ public class PathingRegionGameTests {
             check(!regionMap.isCalculating(), "region map still calculating");
 
             if (indexBeforeChange[0] == null) {
-                List<Region> regions = regionMap.getRegionIndex().getRegions();
+                List<Region> regions = regionMap.getRegionGraph().getRegions();
                 check(regions.size() == 2, "expected exactly 2 regions before the dirty batch, found " + regions.size());
 
-                Integer nearId = regionMap.getRegionIndex().regionIdAt(nearProbe);
-                Integer farId = regionMap.getRegionIndex().regionIdAt(farProbe);
+                Integer nearId = regionMap.getRegionGraph().regionIdAt(nearProbe);
+                Integer farId = regionMap.getRegionGraph().regionIdAt(farProbe);
                 check(nearId != null && farId != null, "both probes must resolve before the dirty batch");
                 check(!nearId.equals(farId), "the two probes must be in different regions to begin with");
 
                 nearRegionBefore[0] = nearId;
                 farRegionBefore[0] = farId;
-                indexBeforeChange[0] = regionMap.getRegionIndex();
+                indexBeforeChange[0] = regionMap.getRegionGraph();
                 generationBeforeChange[0] = regionMap.getGeneration();
 
                 // Both queued before either is drained by a tick() call, so the very next dirty
@@ -765,7 +765,7 @@ public class PathingRegionGameTests {
             }
 
             check(changesReported[0], "block changes were never reported");
-            check(regionMap.getRegionIndex() != indexBeforeChange[0],
+            check(regionMap.getRegionGraph() != indexBeforeChange[0],
                     "getRegionIndex() is still the SAME instance as before the block changes - the dirty "
                             + "batch hasn't been recomputed yet");
 
@@ -776,8 +776,8 @@ public class PathingRegionGameTests {
                     "expected the dirty batch to trigger a full rebuild (generation bump) - if this "
                             + "ever fails, the fast path became reachable and this test's javadoc caveat is stale");
 
-            Integer nearIdAfter = regionMap.getRegionIndex().regionIdAt(nearProbe);
-            Integer farIdAfter = regionMap.getRegionIndex().regionIdAt(farProbe);
+            Integer nearIdAfter = regionMap.getRegionGraph().regionIdAt(nearProbe);
+            Integer farIdAfter = regionMap.getRegionGraph().regionIdAt(farProbe);
             check(nearIdAfter != null && farIdAfter != null, "both probes must still resolve after the batch recompute");
             check(nearIdAfter == nearRegionBefore[0],
                     "near-side probe resolved to a different region after the batch (" + nearIdAfter + " vs " + nearRegionBefore[0] + ")");
@@ -792,7 +792,7 @@ public class PathingRegionGameTests {
 
     /**
      * Task 9 Step 0b: {@code RegionGraph.registerConnector} (task-8) claims a connector's traced
-     * cells into BOTH endpoint regions, but {@code RegionIndex}'s shared-cell tie-break
+     * cells into BOTH endpoint regions, but {@code RegionGraph}'s shared-cell tie-break
      * (last-write-wins in region SCAN/discovery order) and the route tree's parent/child
      * assignment (cost order from the root) are unrelated orderings.
      * {@code rebuildRegionsAndGraph}'s active-project injection used to only ever give the
@@ -811,7 +811,7 @@ public class PathingRegionGameTests {
      * Y-ascending within a single-chunk territory, so the low main floor is ALWAYS discovered (and
      * numbered) before the high platform, regardless of where the nexus sits - moving the nexus
      * onto the platform therefore makes the platform BOTH the route tree's root/parent (it
-     * contains the nexus) AND the region {@code RegionIndex} writes LAST for any cell the
+     * contains the nexus) AND the region {@code RegionGraph} writes LAST for any cell the
      * connector claims into both endpoints (last-write-wins) - i.e. the tie-break winner is now
      * the PARENT, the exact case task-8's own test happened not to cover (there, the child
      * coincidentally won both the tie-break and the project injection). The root/parent-id
@@ -847,7 +847,7 @@ public class PathingRegionGameTests {
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
 
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 2,
                     "expected exactly 2 regions (main floor + elevated platform), found " + regions.size());
             check(regionMap.getRegionGraph().getAllConnectors().size() == 1,
@@ -877,7 +877,7 @@ public class PathingRegionGameTests {
 
             boolean anyCellResolvedToParent = false;
             for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
-                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                Integer resolvedRegion = regionMap.getRegionGraph().regionIdAt(step);
                 check(resolvedRegion != null,
                         "connector cell " + step.toShortString() + " isn't claimed by any region");
 
@@ -889,7 +889,7 @@ public class PathingRegionGameTests {
                     anyCellResolvedToParent = true;
                 }
 
-                SiegeNode instruction = regionMap.getRegionFlowFieldFor(step).getNextSiegeNode(helper.getLevel(), step);
+                FlowStep instruction = regionMap.getRegionFlowFieldFor(step).getNextStep(helper.getLevel(), step);
                 check(instruction != null,
                         "connector cell " + step.toShortString() + " resolved to region " + resolvedRegion
                                 + " but got no flow-field instruction - a mob standing there would be stuck");
@@ -1005,7 +1005,7 @@ public class PathingRegionGameTests {
         TerritoryRegionMap regionMap = new TerritoryRegionMap();
         regionMap.rebuild(helper.getLevel(), territory, nexusPos);
 
-        RegionIndex[] indexBeforeChange = {null};
+        RegionGraph[] indexBeforeChange = {null};
         long[] generationBeforeChange = {-1};
         boolean[] changeReported = {false};
         boolean[] loggedDump = {false};
@@ -1017,7 +1017,7 @@ public class PathingRegionGameTests {
             if (indexBeforeChange[0] == null) {
                 // First settle: capture the post-rebuild index/generation and fire the unrelated
                 // block change that should provoke exactly one dirty-region recompute.
-                indexBeforeChange[0] = regionMap.getRegionIndex();
+                indexBeforeChange[0] = regionMap.getRegionGraph();
                 generationBeforeChange[0] = regionMap.getGeneration();
                 regionMap.onBlockChanged(unrelatedPos);
                 changeReported[0] = true;
@@ -1025,7 +1025,7 @@ public class PathingRegionGameTests {
             }
 
             check(changeReported[0], "unrelated block change was never reported");
-            check(regionMap.getRegionIndex() != indexBeforeChange[0],
+            check(regionMap.getRegionGraph() != indexBeforeChange[0],
                     "getRegionIndex() is still the SAME instance as before the block change - the dirty "
                             + "recompute hasn't run yet (or never will)");
 
@@ -1037,7 +1037,7 @@ public class PathingRegionGameTests {
                             + "this ever fails, the fast path became reachable and this test's javadoc "
                             + "caveat is stale");
 
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(regions.size() == 2,
                     "expected still exactly 2 regions after the recompute (no real topology change to "
                             + "the SHAPE of either region, just a full rebuild that reconstructs the same "
@@ -1053,7 +1053,7 @@ public class PathingRegionGameTests {
             }
 
             for (BlockPos step : connector.projectTowardA().getInstructions().keySet()) {
-                Integer resolvedRegion = regionMap.getRegionIndex().regionIdAt(step);
+                Integer resolvedRegion = regionMap.getRegionGraph().regionIdAt(step);
                 check(resolvedRegion != null,
                         "connector cell " + step.toShortString() + " was dropped by the dirty rescan - a "
                                 + "mob standing there would be orphaned");
@@ -1062,7 +1062,7 @@ public class PathingRegionGameTests {
                 }
             }
             for (BlockPos step : connector.projectTowardB().getInstructions().keySet()) {
-                check(regionMap.getRegionIndex().regionIdAt(step) != null,
+                check(regionMap.getRegionGraph().regionIdAt(step) != null,
                         "connector cell " + step.toShortString() + " was dropped by the dirty rescan - a "
                                 + "mob standing there would be orphaned");
             }
@@ -1313,13 +1313,13 @@ public class PathingRegionGameTests {
             // the topology-changed branch), BOTH ids can independently take the fast path in the
             // SAME batch once the gap is fully closed - each re-flooding the identical, now-unified
             // chunk and getting stamped with its OWN id via `withId`, producing two Region objects
-            // in `updatedRegions` with fully overlapping cell sets. RegionIndex's last-write-wins
+            // in `updatedRegions` with fully overlapping cell sets. RegionGraph's last-write-wins
             // per-cell stamping (see its constructor) would then make whichever region processed
             // LAST the only one any position actually resolves to, silently orphaning the other
             // (still present in getRegions(), zero resolvable cells) - while regionGraph/routeTree,
             // untouched by the fast path, keep listing the now-physically-stale connector between
             // them. This directly inspects the post-merge state to confirm or refute that.
-            List<Region> finalRegions = regionMap.getRegionIndex().getRegions();
+            List<Region> finalRegions = regionMap.getRegionGraph().getRegions();
             for (Region r : finalRegions) {
                 LOGGER.info("[Skavenblight][test][diagnostic] post-merge region {} min={} max={} cells={}",
                         r.getId(), r.getMin(), r.getMax(), r.cellCount());
@@ -1333,7 +1333,7 @@ public class PathingRegionGameTests {
             // 6+FILL_COLUMN_COUNT+1, well inside the pre-fill far region) - two positions that
             // were on opposite sides of the trench before any column was ever filled. Once the
             // trench is fully closed these are physically one connected floor; if the duplicate-
-            // region hypothesis is correct, RegionIndex's tie-break resolves BOTH to whichever
+            // region hypothesis is correct, RegionGraph's tie-break resolves BOTH to whichever
             // region's id happened to be processed last in updatedRegions, even though
             // finalRegions.size() still reports >= 2 (the orphaned duplicate never gets removed
             // from the list, only masked from lookups).
@@ -1348,8 +1348,8 @@ public class PathingRegionGameTests {
             // never actually reading near-region floor.
             BlockPos nearProbe = helper.absolutePos(new BlockPos(baseX + 1, 2, baseZ));
             BlockPos farProbe = helper.absolutePos(new BlockPos(baseX + 6 + FILL_COLUMN_COUNT + 1, 2, baseZ + fillLocalZ));
-            Integer nearProbeId = regionMap.getRegionIndex().regionIdAt(nearProbe);
-            Integer farProbeId = regionMap.getRegionIndex().regionIdAt(farProbe);
+            Integer nearProbeId = regionMap.getRegionGraph().regionIdAt(nearProbe);
+            Integer farProbeId = regionMap.getRegionGraph().regionIdAt(farProbe);
             LOGGER.info("[Skavenblight][test][diagnostic] post-merge nearProbe -> region {}, farProbe -> region {}, "
                             + "region count={}, blockChangeRebuildCount={}",
                     nearProbeId, farProbeId, finalRegions.size(), regionMap.getBlockChangeRebuildCount());
@@ -1471,7 +1471,7 @@ public class PathingRegionGameTests {
                 // start out of the region (no support below it yet), so its presence afterward
                 // (checked below, once the fast path has run) is a genuine gain, not something
                 // that was already there.
-                check(regionMap.getRegionIndex().regionIdAt(unrelatedPos) == null,
+                check(regionMap.getRegionGraph().regionIdAt(unrelatedPos) == null,
                         "expected unrelatedPos to start out of the region (no support below it yet)");
 
                 // The actual terrain change: give unrelatedPos real solid support for the first
@@ -1497,7 +1497,7 @@ public class PathingRegionGameTests {
             // the "before" check above); if the newly-supported cell had never been picked up
             // (e.g. the fast-path rescan silently dropped it, or never ran at all), this would
             // still resolve to null.
-            check(regionMap.getRegionIndex().regionIdAt(unrelatedPos) != null,
+            check(regionMap.getRegionGraph().regionIdAt(unrelatedPos) != null,
                     "expected the newly-supported cell to now resolve to a region - the fast-path "
                             + "rescan must have picked up a genuinely non-empty delta, not a no-op");
 
@@ -1561,7 +1561,7 @@ public class PathingRegionGameTests {
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
 
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
 
             if (!loggedDump[0]) {
                 for (Region region : regions) {
@@ -1694,7 +1694,7 @@ public class PathingRegionGameTests {
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
 
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
 
             if (!loggedDump[0]) {
                 for (Region region : regions) {

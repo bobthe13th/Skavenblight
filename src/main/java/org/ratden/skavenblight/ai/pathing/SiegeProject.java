@@ -161,6 +161,16 @@ public class SiegeProject {
         return Collections.unmodifiableMap(instructions);
     }
 
+    /** The build-order step at {@code pos}, or null if this project has none there - used by
+     * TerritoryRegionMap's planned-cell terrain override (see TerrainSnapshot's
+     * plannedStateOverride hook) to make an active project's planned final state authoritative for
+     * terrain evaluation. Linear scan: a project's build order is bounded by
+     * maxCandidateProjectLength (at most 32 entries), so this is cheap without needing a second,
+     * map-backed index kept in sync alongside buildOrder. */
+    public PlannedStep plannedStepAt(BlockPos pos) {
+        return buildOrder.stream().filter(s -> s.pos().equals(pos)).findFirst().orElse(null);
+    }
+
     /** Every position in this project's build order that PlatformInserter marked as a
      * construction-type seam - see PlatformInserter's own doc. */
     public Set<BlockPos> getPlatformPositions() {
@@ -460,23 +470,6 @@ public class SiegeProject {
             // against in the first place.
             SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false,
                     this.platformPositions.contains(step.pos()));
-
-            // The old per-goal onChainComplete was the ONLY thing that ever told the region system
-            // "a rat just built something here" - SiegeInteractionHandler's direct
-            // level.setBlockAndUpdate/destroyBlock calls don't fire the NeoForge BlockEvents
-            // SiegeBlockEventHandler listens for, and TerritoryRegionMap.tick() early-returns with
-            // nothing to do when there are no dirty regions (no periodic fallback refresh). Without
-            // this call, a placement here would never get discovered - the exact "built a real
-            // pillar, but that position stayed 'wilderness' three rebuild generations later" bug
-            // forceRecalculation's own javadoc describes. Called once per PLACEMENT (not once per
-            // tick(), and not batched/cooldown-gated here) deliberately: forceRecalculation/
-            // onBlockChanged must be given the EXACT position that changed, and this loop can place
-            // more than one step per tick() call when a step's cost is cheap relative to
-            // Config.workPerRatPerTick - each placement can land in a different chunk, so each
-            // needs its own call.
-            if (flowField != null) {
-                flowField.forceRecalculation(step.pos());
-            }
 
             Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
             step = following.orElse(null);

@@ -5,6 +5,7 @@ import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.state.BlockState;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.ai.pathing.*;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 /**
  * Per-network owner of the region graph, route tree, and per-region local flow fields.
@@ -23,15 +25,11 @@ public class TerritoryRegionMap {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    private final TerrainEvaluator terrainEvaluator = new TerrainEvaluator();
-    private final SiegeLineTracer lineTracer = new SiegeLineTracer(terrainEvaluator);
-    // Only RegionScanner has been ported to PathStepEvaluator so far (Task 8) - everything else
-    // here still uses terrainEvaluator until its own task lands.
     private final PathStepEvaluator pathStepEvaluator = new PathStepEvaluator();
     private final RegionScanner regionScanner = new RegionScanner(pathStepEvaluator);
-    private final SiegeProjectManager projectManager = new SiegeProjectManager(terrainEvaluator);
+    private final SiegeProjectManager projectManager = new SiegeProjectManager(pathStepEvaluator);
     private final CalculationThrottler throttler = new CalculationThrottler();
-    private final FlowFieldCalculator calculator = new FlowFieldCalculator(terrainEvaluator, projectManager, throttler);
+    private final FlowFieldCalculator calculator = new FlowFieldCalculator(pathStepEvaluator, projectManager, throttler);
 
     private volatile TerrainSnapshot terrainSnapshot = null;
     private final Set<ChunkPos> dirtySnapshotChunks = new HashSet<>();
@@ -94,9 +92,15 @@ public class TerritoryRegionMap {
     private long lastTopologyRebuildTime = 0;
     private static final long TOPOLOGY_REBUILD_COOLDOWN_MS = 2000;
 
-    private volatile RegionIndex regionIndex = new RegionIndex(List.of());
-    private volatile RegionGraph regionGraph = null;
+    // forTesting is the existing test-only seam for building a RegionGraph directly from known
+    // regions/connectors (see its own doc) - reused here since it's exactly "no regions, no
+    // connectors yet", with no real TerrainSnapshot to trace against before the first rebuild.
+    private volatile RegionGraph regionGraph = RegionGraph.forTesting(List.of(), List.of());
     private volatile RegionRouteTree routeTree = null;
+    // Diagnostic only - see confirmedUnreachableRegionIds's own accessor doc on RegionGraph for why
+    // this is never used to gate or retry an edge, just to observe how many regions genuinely have
+    // no route from the root after a normal build+compute.
+    private volatile Set<Integer> confirmedUnreachableRegionIds = Set.of();
     private volatile Map<Integer, FlowFieldState> regionStates = Map.of();
     // Per-region query facades handed out to goal-facing code (see getRegionFlowFieldFor). Kept
     // stable (same instance per regionId) across the "cheap path" in recomputeDirtyRegions - only
@@ -177,7 +181,7 @@ public class TerritoryRegionMap {
         dirtySnapshotChunks.addAll(territory);
         TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(
                 level, terrainSnapshot, territory, dirtySnapshotChunks,
-                level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE);
+                level.getMinBuildHeight(), level.getMaxBuildHeight(), Integer.MAX_VALUE, plannedStateOverride());
         dirtySnapshotChunks.removeAll(result.capturedChunks());
         terrainSnapshot = result.snapshot();
 
@@ -193,7 +197,7 @@ public class TerritoryRegionMap {
             }
         }, Util.backgroundExecutor()).thenAcceptAsync(v ->
                 LOGGER.info("[Skavenblight] TerritoryRegionMap rebuild FINISHED: {} regions, {} connectors",
-                        regionIndex.getRegions().size(), regionGraph != null ? regionGraph.getAllConnectors().size() : 0),
+                        regionGraph.getRegions().size(), regionGraph.getAllConnectors().size()),
                 level.getServer());
     }
 
@@ -201,43 +205,39 @@ public class TerritoryRegionMap {
         TerrainSnapshot snapshot = this.terrainSnapshot;
         List<Region> regions = regionScanner.scan(snapshot, territoryChunks, nexusPos,
                 snapshot.getMinBuildHeight(), snapshot.getMaxBuildHeight());
-        // Built from the flood-fill-only membership, and passed to RegionGraph.build for ITS OWN
-        // internal use (tryTrace's "did this trace land inside a different region" check) - that
-        // detection must see only genuine flood-fill membership, not connector claims a trace in
-        // progress might itself be adding, or a trace could spuriously terminate early against
-        // its own not-yet-finished chain.
-        RegionIndex preGraphIndex = new RegionIndex(regions);
-        RegionGraph newGraph = RegionGraph.build(snapshot, preGraphIndex, territoryChunks, nexusPos, terrainEvaluator, lineTracer);
-
-        // RegionGraph.build's registerConnector (see task-8) calls Region.addCell on both of a
-        // connector's endpoint regions for every cell it traced, mutating the SAME Region objects
-        // this method's own `regions` list holds - which would leave preGraphIndex (built BEFORE
-        // those addCell calls) stale for exactly the connector cells task-8 exists to stop
-        // orphaning. RegionGraph.build's LAST step re-stamps preGraphIndex in place for exactly the
-        // chunks its own connector claims touched (see RegionIndex.refreshChunks), so by the time
-        // build() returns, preGraphIndex already reflects every addCell mutation - a second,
-        // whole-territory `new RegionIndex(regions)` construction here would be redundant (this
-        // index's per-chunk arrays are a real `int[16*16*height]` allocation per occupied chunk -
-        // doing that twice per full rebuild was a real, avoidable cost). Reuse the SAME index
-        // object for rootRegion resolution and everything published below - getRegionFlowFieldFor
-        // and every other real caller of getRegionIndex() only ever sees this field, so this is the
-        // one index that actually needs to be current, and now it already is.
-        RegionIndex newIndex = preGraphIndex;
+        // RegionGraph.build both discovers connectors AND absorbs the old RegionIndex's lookup job
+        // (see that method's own doc) - registerConnector's addCell calls mutate these SAME Region
+        // objects, and build()'s own lookup.refreshChunks call re-stamps its internal RegionLookup
+        // for exactly the chunks those addCell calls touched before returning, so the graph
+        // returned here is already current for every connector-claimed cell.
+        RegionGraph newGraph = RegionGraph.build(snapshot, regions, territoryChunks, nexusPos, pathStepEvaluator);
 
         // The nexus block itself is solid (see WARPSTONE_NEXUS/ACTIVE_WARPSTONE_NEXUS in
         // ModBlocks - plain full-collision blocks, no shape override), so RegionScanner never
         // assigns nexusPos to any region: it only ever adds walkable cells. A direct
-        // newIndex.regionAt(nexusPos) lookup was therefore always null, which made rootRegion,
+        // newGraph.regionAt(nexusPos) lookup was therefore always null, which made rootRegion,
         // and everything downstream of it (the whole route tree and every region's target),
         // always null too - no region ever got a real FlowFieldState. Check the nexus's
         // orthogonal neighbors as well, same as tick()'s dirty-marking already does for the
         // identical "the block of interest itself isn't walkable" situation.
         Region rootRegion = neighborsAndSelf(nexusPos).stream()
-                .map(newIndex::regionAt)
+                .map(newGraph::regionAt)
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
         RegionRouteTree newRouteTree = rootRegion != null ? RegionRouteTree.compute(newGraph, rootRegion.getId()) : null;
+
+        // Diagnostic only (see confirmedUnreachableRegionIds's own accessor doc on RegionGraph) -
+        // logs how many regions have no route from the root after this normal build+compute, never
+        // gates or retries anything.
+        Set<Integer> unreachable = (rootRegion != null && newRouteTree != null)
+                ? newGraph.confirmedUnreachableRegionIds(rootRegion.getId(), newRouteTree)
+                : Set.of();
+        if (!unreachable.isEmpty()) {
+            LOGGER.info("[Skavenblight] TerritoryRegionMap rebuild: {} confirmed-unreachable region(s): {}",
+                    unreachable.size(), unreachable);
+        }
+        this.confirmedUnreachableRegionIds = unreachable;
 
         Map<Integer, FlowFieldState> newStates = new HashMap<>();
         for (Region region : regions) {
@@ -304,7 +304,6 @@ public class TerritoryRegionMap {
                     new RegionFlowField(this, entry.getKey(), entry.getValue(), projectManager, calculator, throttler));
         }
 
-        this.regionIndex = newIndex;
         this.regionGraph = newGraph;
         this.routeTree = newRouteTree;
         this.regionStates = Map.copyOf(newStates);
@@ -325,7 +324,7 @@ public class TerritoryRegionMap {
      * region rather than reset per lookup.
      */
     public RegionFlowField getRegionFlowFieldFor(BlockPos pos) {
-        Integer regionId = regionIndex.regionIdAt(pos);
+        Integer regionId = regionGraph.regionIdAt(pos);
         if (regionId == null) return null;
         return regionFlowFields.get(regionId);
     }
@@ -346,7 +345,7 @@ public class TerritoryRegionMap {
      * on that): if nothing is reachable, it falls back to the old nearest-getMin() behavior.
      */
     public BlockPos getWildernessHeadingTarget(BlockPos pos) {
-        List<Region> regions = regionIndex.getRegions();
+        List<Region> regions = regionGraph.getRegions();
         RegionRouteTree tree = this.routeTree;
 
         BlockPos best = null;
@@ -380,8 +379,10 @@ public class TerritoryRegionMap {
         return best;
     }
 
-    public RegionIndex getRegionIndex() {
-        return regionIndex;
+    /** Confirmed-unreachable region ids after the last full rebuild - diagnostic only, see
+     * RegionGraph.confirmedUnreachableRegionIds's own doc. */
+    public Set<Integer> getConfirmedUnreachableRegionIds() {
+        return confirmedUnreachableRegionIds;
     }
 
     /** Bumped on every completed full rebuild - see the {@code generation} field doc. */
@@ -473,7 +474,7 @@ public class TerritoryRegionMap {
             // checking them is what actually lets a merge get detected.
             for (BlockPos candidate : neighborsAndSelf(changed)) {
                 dirtySnapshotChunks.add(new ChunkPos(candidate));
-                Integer regionId = regionIndex.regionIdAt(candidate);
+                Integer regionId = regionGraph.regionIdAt(candidate);
                 if (regionId != null) {
                     dirtyRegionIds.add(regionId);
                 }
@@ -501,7 +502,7 @@ public class TerritoryRegionMap {
         Set<ChunkPos> territoryChunks = this.territoryChunks;
         TerrainSnapshot.RefreshResult result = TerrainSnapshot.refresh(
                 level, terrainSnapshot, territoryChunks, dirtySnapshotChunks,
-                level.getMinBuildHeight(), level.getMaxBuildHeight(), 10);
+                level.getMinBuildHeight(), level.getMaxBuildHeight(), 10, plannedStateOverride());
         dirtySnapshotChunks.removeAll(result.capturedChunks());
         terrainSnapshot = result.snapshot();
 
@@ -526,16 +527,16 @@ public class TerritoryRegionMap {
         TerrainSnapshot snapshot = this.terrainSnapshot;
 
         // Task 9 Step 0 fix: accumulated across the WHOLE batch and turned into exactly one new
-        // RegionIndex after the loop finishes, instead of the old code's `this.regionIndex = new
-        // RegionIndex(updatedRegions)` sitting INSIDE the loop below (one full ~384KB-per-chunk
-        // reconstruction per dirty region in this batch, N-1 of which were built from a
-        // still-incomplete snapshot and discarded unread before the batch finished). Seeded from
-        // the pre-batch region list, exactly like the old per-iteration code's own
-        // `new ArrayList<>(regionIndex.getRegions())` did on its first iteration.
-        List<Region> updatedRegions = new ArrayList<>(regionIndex.getRegions());
+        // RegionGraph (via withUpdatedRegions) after the loop finishes, instead of reassigning the
+        // lookup INSIDE the loop below (one full ~384KB-per-chunk reconstruction per dirty region in
+        // this batch, N-1 of which were built from a still-incomplete snapshot and discarded unread
+        // before the batch finished). Seeded from the pre-batch region list, exactly like the old
+        // per-iteration code's own `new ArrayList<>(regionIndex.getRegions())` did on its first
+        // iteration.
+        List<Region> updatedRegions = new ArrayList<>(regionGraph.getRegions());
 
         for (int regionId : dirtyIds) {
-            Region oldRegion = regionIndex.getRegions().stream().filter(r -> r.getId() == regionId).findFirst().orElse(null);
+            Region oldRegion = regionGraph.getRegions().stream().filter(r -> r.getId() == regionId).findFirst().orElse(null);
             if (oldRegion == null || oldRegion.getMin() == null || oldRegion.getMax() == null) continue;
 
             // Rescan just this region's old footprint (plus its neighbors would require a wider
@@ -597,7 +598,7 @@ public class TerritoryRegionMap {
             // reachability is scenario-dependent") for the full reconciliation.
             boolean absorbedForeignRegion = rescanned.size() == 1 && rescanned.get(0).cellsNotIn(oldRegion).stream()
                     .anyMatch(pos -> {
-                        Integer owner = regionIndex.regionIdAt(pos);
+                        Integer owner = regionGraph.regionIdAt(pos);
                         return owner != null && owner != regionId;
                     });
             boolean topologyChanged = rescanned.size() != 1 || absorbedForeignRegion;
@@ -704,7 +705,7 @@ public class TerritoryRegionMap {
             return;
         }
 
-        this.regionIndex = new RegionIndex(updatedRegions);
+        this.regionGraph = this.regionGraph.withUpdatedRegions(updatedRegions);
     }
 
     /**
@@ -802,5 +803,28 @@ public class TerritoryRegionMap {
                 projectManager.addSharedConnectorProject(connector.projectFor(otherId));
             }
         }
+    }
+
+    /**
+     * The onBlockChanged authority fix: makes every ACTIVE project's planned final state
+     * authoritative for terrain evaluation, both before and during construction, replacing
+     * {@code SiegeProject.tick()}'s old direct {@code forceRecalculation} call (deleted - see this
+     * task's own commit). Returns null ("no override" - {@link TerrainSnapshot}'s
+     * plannedStateOverride parameter treats null that way) for any position no active project
+     * claims a build-order step at, so a genuinely unclaimed position always falls through to the
+     * real, unbuilt world state - the grief-recovery requirement this exists to preserve. Also
+     * returns null for a project's own WALK steps (see {@code SiegeInteractionHandler
+     * .finalBlockStateFor}'s doc): a WALK step places nothing, so there is nothing to override.
+     */
+    private Function<BlockPos, BlockState> plannedStateOverride() {
+        return pos -> {
+            for (SiegeProject project : projectManager.getActiveProjects()) {
+                PlannedStep step = project.plannedStepAt(pos);
+                if (step == null) continue;
+                BlockState overridden = SiegeInteractionHandler.finalBlockStateFor(step.action());
+                if (overridden != null) return overridden;
+            }
+            return null;
+        };
     }
 }

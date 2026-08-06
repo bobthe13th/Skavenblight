@@ -194,7 +194,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             // FollowFlowFieldGoal's identical use of this for wandering mobs), so
                             // grab any available region's field as a proxy instead of skipping
                             // visualization entirely for the one mode that needs this most.
-                            sharedField = regionMap.getRegionIndex().getRegions().stream()
+                            sharedField = regionMap.getRegionGraph().getRegions().stream()
                                     .map(r -> regionMap.getRegionFlowFieldFor(r.getMin()))
                                     .filter(Objects::nonNull)
                                     .findFirst().orElse(null);
@@ -229,7 +229,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             highlightedChunks = Set.of();
                         } else {
                             RegionFlowField highlightField = sharedField;
-                            highlightedChunks = regionMap.getRegionIndex().getRegions().stream()
+                            highlightedChunks = regionMap.getRegionGraph().getRegions().stream()
                                     .filter(r -> r.getId() == highlightField.getRegionId())
                                     .findFirst()
                                     .map(r -> r.getChunkCells().keySet())

@@ -204,6 +204,12 @@ public class SiegeProjectManager {
         return Collections.unmodifiableSet(this.lockedPositions);
     }
 
+    /** Defensive copy, mirroring {@link #getLockedPositions} - used by TerritoryRegionMap to build
+     * its planned-cell terrain override (see TerrainSnapshot's plannedStateOverride hook). */
+    public List<SiegeProject> getActiveProjects() {
+        return List.copyOf(this.activeProjects);
+    }
+
     public Optional<SiegeProject> findProjectContaining(BlockPos pos) {
         for (SiegeProject project : activeProjects) {
             if (project.getInstructions().containsKey(pos)) return Optional.of(project);

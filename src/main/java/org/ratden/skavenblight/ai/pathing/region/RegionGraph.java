@@ -367,6 +367,24 @@ public class RegionGraph {
     }
 
     /**
+     * Republishes this graph's connectors against a freshly-rescanned region list - used by
+     * {@code TerritoryRegionMap}'s steady-state dirty-region fast path, which replaces region
+     * MEMBERSHIP but never re-traces connectors. Returns a NEW instance (never mutates {@code
+     * this}) so callers relying on object identity to detect "a fresh lookup was published" -
+     * mirroring the old {@code RegionIndex}'s own two-assignment-site contract (full rebuild AND
+     * steady-state dirty rescan each produced a new instance) - keep working now that RegionIndex's
+     * lookup job lives here instead.
+     */
+    public RegionGraph withUpdatedRegions(List<Region> updatedRegions) {
+        RegionGraph refreshed = new RegionGraph(new RegionLookup(updatedRegions));
+        refreshed.allConnectors.addAll(this.allConnectors);
+        for (Map.Entry<Integer, List<RegionConnector>> entry : this.connectorsByRegion.entrySet()) {
+            refreshed.connectorsByRegion.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        return refreshed;
+    }
+
+    /**
      * Diagnostic accessor ONLY - per this task's own correction to the originally-approved design,
      * {@link #build} always offers every {@code PathStepEvaluator.candidateSteps} candidate at its
      * real cost (bedrock-tier mining included) with no gating flag and no second pass, so there is
