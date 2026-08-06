@@ -68,6 +68,16 @@
   "gui.skavenblight.research_table.tooltip.progress_idle_title": "Research Progress: Idle",
   "gui.skavenblight.research_table.tooltip.progress_idle_desc": "No spell selected to study, yes-yes!",
 
+  "gui.skavenblight.nexus": "Warpstone Nexus",
+  "gui.skavenblight.nexus.tab.network": "Network",
+  "gui.skavenblight.nexus.tab.network.tooltip": "View status and connections of your Warp-Flux network.",
+  "gui.skavenblight.nexus.tab.schemes": "Schemes",
+  "gui.skavenblight.nexus.tab.schemes.tooltip": "Enact dark plans and subvert the surface world, yes-yes!",
+  "gui.skavenblight.nexus.tab.research": "Research",
+  "gui.skavenblight.nexus.tab.research.tooltip": "Open your Nexus Research book to study spells and arcane lore.",
+  "gui.skavenblight.nexus.network_status": "Warp-Network Status: Active",
+  "gui.skavenblight.nexus.active_schemes": "Active Schemes",
+
   "sounds.skavenblight.game_over": "Ominous squeaking echoes",
   "sounds.skavenblight.nexus_speed": "Warpstone Nexus hums violently",
 
