@@ -3062,10 +3062,27 @@ different readiness point in the Execution Order list above.**
   `PathStepEvaluator`/`FlowStep`/`RegionGraph` while touching these files anyway for Task 20's other
   edits (don't make this a separate pass over the same files).
 
+  **Correction (2026-08-05, found executing this step): the "comments only, never compiled code"
+  premise is wrong for one of the three files.** Confirmed via direct grep that
+  `PathingGoalRecalculationGameTests.java` has extensive REAL `SiegeNode` code (constructor calls,
+  `Map<BlockPos, SiegeNode>` declarations, `.action()`/`SiegeNode.SiegeAction.BUILD_STAIR` usages —
+  dozens of call sites), not a javadoc-only mention — this file was already broken independently
+  (24 errors before this deletion, from its own unrelated `TerrainEvaluator`/old-`SiegeProject`-
+  constructor issues, per Task 20's own gap note) and is explicitly Task 20's full-retype scope, not
+  a quick sweep. Deleting `SiegeNode.java` here is still safe (confirmed via `compileJava`: this
+  file's error count grows, 24 → 53, but no NEW file appears in the error list - the same
+  already-broken, already-scheduled file, exactly the "adds no new class of breakage" reasoning this
+  plan already used for the `SiegeLineTracer`/`TerrainEvaluator` deletions), but it is NOT touched
+  in this step's own commit - its real retype (code, not comments) stays Task 20's job, done there
+  in one pass rather than a separate javadoc-only touch now. Only `PathingRegionGameTests.java` (one
+  stale LEAP-javadoc line, confirmed genuinely comment-only, already compiles clean) and
+  `StackedStairColumnReTraversalGameTests.java` (one stale class-javadoc block, confirmed genuinely
+  comment-only - the file's own test method never references any pathing-rewrite type at all, only
+  raw vanilla blocks) are swept here.
+
   ```bash
   git rm src/main/java/org/ratden/skavenblight/ai/pathing/SiegeNode.java
   git add src/main/java/org/ratden/skavenblight/gametest/PathingRegionGameTests.java \
-          src/main/java/org/ratden/skavenblight/gametest/PathingGoalRecalculationGameTests.java \
           src/main/java/org/ratden/skavenblight/gametest/StackedStairColumnReTraversalGameTests.java
   git commit -m "chore(pathing): delete SiegeNode.java, update stale javadoc references to it"
   ```

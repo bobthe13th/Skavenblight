@@ -246,9 +246,9 @@ public class PathingRegionGameTests {
         int baseX = anchor.baseX();
         int baseZ = anchor.baseZ();
 
-        // A 4-block-wide trench (exceeds LEAP's documented 1-block-only range - see
-        // SiegeNode.SiegeAction.LEAP's javadoc - so only a BUILD_BRIDGE-type connector can cross
-        // it), splitting the chunk into a nexus side (local x 0-5) and a far side (local x 10-15).
+        // A 4-block-wide trench (wider than a single WALK step can ever cross - so only a
+        // BRIDGE-type connector can cross it), splitting the chunk into a nexus side (local x 0-5)
+        // and a far side (local x 10-15).
         // Carved full-depth (see method javadoc) so no walkable sliver survives underneath it.
         int minRelY = minRelY(helper);
         for (int lx = 6; lx <= 9; lx++) {
