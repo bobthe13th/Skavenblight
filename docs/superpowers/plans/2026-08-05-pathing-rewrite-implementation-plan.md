@@ -2936,6 +2936,130 @@ signpost and the `activeProjects` race). The gate's own 4 tests still fail — m
 walked toward the first real stair once it's built, but can't physically climb onto it — which is the
 third, unfixed defect above, not a regression from anything landed this session.
 
+**Correction (2026-08-06, fourth session): the third defect's premise above did not reproduce, and
+its own root cause is confirmed — a construction-geometry bug, not a movement-layer bug. Both
+candidate movement fixes attempted this session were reverted; the gate stays NO-GO with a
+precisely-scoped, different next task.**
+
+The "mob standing exactly at `entryPos`, hop-1 already built" scenario above never reproduced this
+session. All three full-suite `runGameTestServer` runs this session showed **0 stairs built, ever,
+in all 4 gate tests** — an earlier-stage symptom than what's on record. This was only visible because
+this session isolated `[DEBUG-CLIMB]` logging by `mob.getId()`: `StaircaseSiegeGroupGameTests` runs
+all 4 gate tests concurrently in one batch (`Running test batch 'staircase_siege_group:0' (4 tests)`),
+so un-tagged log lines from a prior attempt this session conflated roughly 15 rats across 4 different
+geometries — every aggregate conclusion drawn from those early un-tagged logs (a 14:1
+`NUDGE_ACROSS`:`MOVE_OR_HOP` ratio, "all hops crawl") was contaminated and had to be discarded.
+
+Two movement-layer fixes were tried against the single-rat test's own isolated climb-stuck scenario,
+both in `FollowFlowFieldGoal.java`, both reverted (final state matches `d1b4f63`, no net change):
+
+1. Gating the `NUDGE_ACROSS` branch on `!getNavigation().isInProgress()` in addition to the existing
+   `lastHopOrigin` check, on the theory that the branch fires prematurely for hops still legitimately
+   in progress. **Made things measurably worse** — a full-suite re-run showed net rat displacement
+   drop ~6x. `isInProgress()` reads `false` by the *next* 10-tick decision point for the overwhelming
+   majority of hops regardless of whether they actually succeeded (a short hop typically finishes
+   navigation well within 10 ticks either way), so it wasn't a useful discriminator between "genuinely
+   stuck" and "just finished."
+
+2. Sustaining `nudgeAcross` every tick via a new `activeNudgeTarget` field, instead of only once per
+   10-tick decision cycle. Confirmed via the decompiled `MoveControl.tick()`/`Mob.setSpeed()` source
+   (NeoFormRuntime local cache) that a single `setWantedPosition` call supplies exactly one tick of
+   forward `zza` before `MoveControl`'s own `WAIT` branch (`else { this.mob.setZza(0.0F); }`) zeroes it
+   again the very next tick. This produced a real but incomplete improvement: the single rat's
+   continuous Y position finally moved past exactly `-58.0` (never observed in any prior run this
+   session), and `MoveControl`'s own jump heuristic correctly triggered — but the rat still never
+   crossed. An isolated per-tick trace (filtered to `id=1`) showed a **bit-for-bit identical jump arc
+   repeating forever**: Y sequence `-58.0000 → -57.2468 → -56.8339 → -56.7478 → -56.9756 → -57.5048 →
+   -58.0000` every single 10-tick cycle, X frozen to 4 decimal places, `horizontalCollision=false`
+   (ruling out a flush-collision explanation). Peak rise: **~1.2522 blocks**.
+
+**Root cause, confirmed directly via block-state logging at the climb target
+(`level.getBlockState(nextInChain)`/`.below()`):** the target cell holds a genuine, correctly-placed
+`cobblestone_stairs[facing=east,half=bottom,shape=straight]`, with `below=air` (confirming this really
+is an `AIR_STAIR` bridging a gap — the pre-build state at the same cell was `air` over `stone`,
+confirming the classification and construction were both correct). The geometry:
+
+- Mob's approach floor top: `y=-58.0` (standing on solid ground one cell below).
+- The stair occupies cell `y=-57` — **one full cell above** the approach floor, per
+  `PathStepEvaluator.candidateSteps`' `(dx, dy=+1, dz)` neighbor offset and
+  `SiegeInteractionHandler.constructSiegeBlock` placing directly at that returned position.
+- A bottom-half stair's own low tread (the side an approaching mob touches first, per its `FACING`)
+  sits at `cell-base + 0.5` = `-57.0 + 0.5` = `-56.5`.
+- **Required rise from the mob's actual feet position: 1.5 blocks.** Vanilla's own jump height,
+  confirmed via the measured arc above: **~1.25 blocks**. This is physically unreachable by any jump,
+  regardless of horizontal momentum — no movement-layer fix can close a gap that was never about
+  momentum in the first place.
+
+Why ordinary vanilla ascending staircases don't have this problem, and why this is specific to the
+*first* hop of a chain: a real staircase places each stair at the **same cell level as the approach
+floor**, not one level above it. Walking onto a stair whose cell matches the mob's own current
+standing cell gives a normal ~0.5-block auto-step onto its low tread, then another ~0.5 onto its own
+high/riser portion while crossing through the block — a full 1.0 rise achieved via that ONE block's
+own internal geometry, landing the mob exactly one cell higher and correctly set up for an identically
+-placed next stair. `AIR_STAIR`'s neighbor offset places the stair one cell too high for this to work
+on the *first* hop from real, solid ground. Every *subsequent* hop in the same chain only needs a
+normal ~0.5 auto-step, since the mob is by then already standing on the previous stair's own surface
+one level higher — which is exactly why prior sessions, whose evidence came from mid-chain observation
+or hand-built fixtures, never isolated this specific first-hop defect.
+
+This is squarely the construction-side defect `FollowFlowFieldGoal.moveOrHop`'s own javadoc already
+anticipates and defers to this gate ("if it can't [cross via ordinary pathfinding], that's a
+construction-side bug for Task 21's go/no-go gate to catch, not something this goal should paper over
+with special movement code") — which is why both movement-layer fixes above were reverted rather than
+iterated on further, per the same "don't land a cross-cutting change without dedicated verification"
+judgment call this investigation's own predecessor sessions already established.
+
+**Found and deliberately NOT fixed this session (out of scope, not reachable by this test's
+geometry):** `SiegeProject.approachFacing`'s tie-break (`Math.abs(dx) > Math.abs(dz)`) silently drops
+the `dx` component whenever `|dx| == |dz|` (a true 45-degree diagonal hop), producing an axis-aligned
+`FACING` for a genuinely diagonal approach. This test's own crossing has `dz=0` throughout (confirmed:
+`relativeGroundSpawn` and `relativeNexusPos` share the same Z in `StaircaseSiegeGroupGameTests`), so
+the tie-break is provably unreached by anything in this gate — flagged for a future session that
+exercises genuinely diagonal (both axes nonzero) `AIR_STAIR`/`CARVED_STAIR` hops.
+
+**Also flagged, not yet confirmed as exploited:** `PathStepEvaluator.isActionCompleted`'s
+`AIR_STAIR`/`BRIDGE` branch (`state.blocksMotion() || isWalkableScaffold(state)`) accepts *any* solid
+block as "done" — not specifically a genuinely-placed, standable stair — a different predicate from
+`isWalkableTerrain`'s actual standability check. Not implicated in this session's specific finding
+(the stair here was genuinely, correctly built), but worth a second look once the placement-cell fix
+below lands, in case the two interact.
+
+**Precisely-scoped next task (deliberately not attempted this session):** change where `AIR_STAIR`
+(and likely `CARVED_STAIR`, which shares the identical `(dx, dy=+1, dz)` neighbor-offset generation
+branch in `PathStepEvaluator.candidateSteps`) actually **places** its stair block — at the approach
+cell's own level (`dx, 0, dz`) rather than one level above it (`dx, +1, dz`) — while keeping the
+Dijkstra flood/`FlowStep`'s own *logical* cell bookkeeping unchanged (still `dx, +1, dz`, since that's
+genuinely where the mob ends up once it's crossed). This needs coordinated changes across at minimum:
+
+- `PathStepEvaluator.candidateSteps` — the offset that becomes the *logical* step position likely
+  stays as-is; only the *physical placement* target needs to change, which may mean threading an
+  additional "place at" position through `EvaluatedStep`/`FlowStep`, distinct from the logical `pos()`.
+- `SiegeInteractionHandler.constructSiegeBlock` — the actual `level.setBlockAndUpdate` call.
+- `PathStepEvaluator.isActionCompleted` — currently checks completion AT the logical position; if
+  placement moves to `pos().below()` for `AIR_STAIR`/`CARVED_STAIR`, either this check needs to look
+  one cell down for those two actions specifically, or the logical/physical split needs its own
+  explicit, unambiguous field rather than an implicit convention.
+- Every hand-fed GameTest/unit fixture that currently encodes the OLD placement convention (at minimum
+  `SiegeConstructionActionsGameTests` and anything else that hand-injects an `AIR_STAIR`/`CARVED_STAIR`
+  instruction and asserts on the resulting block position) — these would start asserting the wrong
+  thing the moment placement moves, the same class of risk the Task 21 `FlowStep`-convention fix
+  (second/third sessions) already had to work through for hand-fed fixtures.
+
+This is a genuinely cross-cutting change with its own blast radius (construction geometry, not just
+movement), deliberately left for its own dedicated session with fresh verification against this exact
+single-rat gate test as the reproduction case.
+
+**Gate verdict (fourth session): still NO-GO.** No production code changed net this session — both
+movement-layer attempts were reverted, and `FollowFlowFieldGoal.java` is bit-for-bit identical to its
+`d1b4f63` state. Tasks 22-24 remain blocked.
+
+**Files (this session, fourth pass):**
+- `FollowFlowFieldGoal.java` — two fix attempts implemented, tested, and reverted; net diff is zero.
+  No production code changes landed this session.
+- Reference: the isolated single-rat evidence above (per-`mob.getId()` `[DEBUG-CLIMB]` logging,
+  block-state check at the climb target) was gathered via temporary instrumentation, confirmed, then
+  fully reverted before the final commit — no debug code or scratch log files left in the tree.
+
 **Files (this session, third pass):**
 - `SiegeProjectManager.java` (`injectActiveProjects`'s `entryPos` signpost fix; `activeProjects`'s
   `CopyOnWriteArrayList` type change) — both implemented, both verified via instrumented GameTest runs
