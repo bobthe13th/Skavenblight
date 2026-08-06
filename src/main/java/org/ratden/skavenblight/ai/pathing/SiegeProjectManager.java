@@ -35,7 +35,18 @@ public class SiegeProjectManager {
     public static final int DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH = 32;
     private int maxCandidateProjectLength = DEFAULT_MAX_CANDIDATE_PROJECT_LENGTH;
 
-    private final List<SiegeProject> activeProjects = new ArrayList<>();
+    // CopyOnWriteArrayList, not ArrayList: injectActiveProjects/finalizeCandidateProjects mutate
+    // this from the async flow-field calculation thread (TerritoryRegionMap's own
+    // CompletableFuture.runAsync), while findProjectContaining reads it synchronously from the
+    // server thread via every mob's own AbstractSiegeProjectGoal.canUse() every tick - a plain
+    // ArrayList throws ConcurrentModificationException the moment a read's iterator is live
+    // while the calc thread concurrently removeIf's a completed project (confirmed via a real
+    // GameTest crash - "Worker-Main" calc thread racing SiegeProjectManager.findProjectContaining
+    // on the server thread, once Task 21's entryPos-signpost fix let projects actually progress
+    // and churn instead of deadlocking near-instantly). Read-heavy/write-rare is exactly this
+    // type's intended use case; add/remove/removeIf/List.copyOf all keep their existing call-site
+    // semantics unchanged, snapshotting iteration instead of throwing.
+    private final List<SiegeProject> activeProjects = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final List<SiegeProject> candidateProjects = new ArrayList<>();
     // Spatial index of every anchor evaluateMacroProjects() has fired on this calculation,
     // bucketed so isNearExistingProject() doesn't have to linearly scan every anchor seen so
@@ -179,9 +190,35 @@ public class SiegeProjectManager {
             // NOT key its own entryPos in `instructions` - "the far region's own pass already covers
             // it" (see that method's own doc) - so there's nothing to fall back to there, and
             // inserting a literal null would NPE the first caller that reads it back out.
+            //
+            // Root-cause fix (2026-08-06, Task 21 go/no-go gate, second correction): the static
+            // instruction this map stores at `entry` describes the FIRST hop's action
+            // (e.g. AIR_STAIR) with predecessorPos() pointing at that hop's real target - but its
+            // own pos() is `entry` itself (entryPos), which is real, already-walkable ground and
+            // can NEVER satisfy any construction action's isActionCompleted check. Re-seeding this
+            // SAME static value unconditionally on every pass (the fix immediately above, still
+            // correct and still needed) means RegionFlowField.getNextStep's own completion-collapse
+            // check - isActionCompleted(node.pos(), node.action()), correct for every ordinary
+            // flood entry and for every OTHER position in this connector's own instruction map,
+            // where node.pos() really is the position the action applies to - evaluates at the
+            // WRONG position for this one signpost entry, and so NEVER collapses to WALK, even
+            // after the real target (predecessorPos()) is genuinely built. Confirmed via
+            // instrumented GameTest evidence: a worker stands at entryPos (this goal never moves a
+            // mob while it builds) and builds several real hops - each of THEIR own map entries
+            // correctly flips completed@key=true once built, since their own pos() is the real
+            // built position - but entryPos's own entry stays permanently "AIR_STAIR ahead," so
+            // FollowFlowFieldGoal's non-WALK branch freezes the mob in place forever once the
+            // project's own work radius outruns it, never walking it onto the stairs it just built.
+            // Fix: check completion at the position the action ACTUALLY applies to
+            // (predecessorPos()), not at entry - once that's done, seed WALK instead, letting
+            // ordinary movement finally close the gap onto real ground.
             FlowStep ownEntryInstruction = project.getInstructions().get(entry);
             if (ownEntryInstruction != null) {
-                nextInstructionMap.put(entry, ownEntryInstruction);
+                BlockPos firstRealTarget = ownEntryInstruction.predecessorPos();
+                boolean firstHopDone = pathStepEvaluator.isActionCompleted(terrain, firstRealTarget, ownEntryInstruction.action());
+                nextInstructionMap.put(entry, firstHopDone
+                        ? new FlowStep(entry, PathAction.WALK, firstRealTarget)
+                        : ownEntryInstruction);
             }
 
             if (entryCost < nextCostMap.getOrDefault(entry, Integer.MAX_VALUE)) {

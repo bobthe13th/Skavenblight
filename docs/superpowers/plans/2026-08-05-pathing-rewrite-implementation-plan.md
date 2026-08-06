@@ -2854,6 +2854,97 @@ the build order at discovery time, or should `canAcceptWorker`/`nextUnbuiltInstr
 against the nearest *reachable* unbuilt step rather than the first one in build order? Either fix
 belongs in its own session, verified against this exact single-rat gate test as the reproduction case.
 
+**Correction (2026-08-06, third session): the "build-order / work-radius defect" diagnosed above is
+WRONG. It was never re-verified against fresh instrumentation before being written down, and it doesn't
+survive one.** Direct per-position instrumentation of `SiegeProject.canAcceptWorker` (dumping
+`instructions`, `buildOrder`, and live `isActionCompleted` at every entry) shows the two build-order
+steps the prior session pointed at as "already-solid natural terrain silently skipped" are neither: the
+CARVED_STAIR step flagged `platform=true` is a genuine `PlatformInserter` seam (an action-type
+transition, not already-solid terrain) that showed `state=air, completed=false` in every capture; the
+step after it is real `minecraft:stone`, correctly reported unbuilt. Nothing in the build order is a
+false positive. `nextUnbuiltInstruction`'s own reported jump (a nearby step, then a step ~2 hops
+farther) is real, not a bug: a `SiegeProject` can register several workers whose combined
+`workPerRatPerTick` finishes more than one step inside a handful of ticks, and the worker's own
+position never moves while it builds — so the next unbuilt step naturally ends up farther from a
+stationary mob purely because construction outpaced it, not because a step was skipped. Confirmed via
+the same instrumentation: the interior hop the prior session called "silently marked complete" was
+`state=Block{minecraft:cobblestone_stairs}` in the capture — a REAL placed stair, `completed=true` for
+the honest reason.
+
+**The real root cause, found by tracing `RegionFlowField.getNextStep` → `SiegeProjectManager
+.injectActiveProjects` → `RegionGraph.outboundInstructions`/`inboundInstructions`:** every position in
+a connector's own instruction map correctly satisfies `isActionCompleted` once its real target is
+built — CONFIRMED directly: an interior hop's own map entry (keyed by its own real position) flips
+`completed@key=true` the instant a real stair lands there, by the same coincidence that makes
+`AIR_STAIR`/`BRIDGE`'s completion check (`state.blocksMotion() || isWalkableScaffold(state)`) true for
+ANY real, solid, walkable cell regardless of which specific action built it. The ONE entry that never
+resolves is the connector's own `entryPos` signpost. `outboundInstructions`/`inboundInstructions` key
+that entry by the real, always-open, always-standable entry cell itself, with an `action()` describing
+the FIRST hop (e.g. `AIR_STAIR`) that actually applies at `predecessorPos()`, not at the key. Since a
+mob standing at `entryPos` can never make that position itself "blocksMotion or a walkable scaffold,"
+`isActionCompleted(entryPos, AIR_STAIR)` is false forever, by construction — regardless of whether the
+real hop-1 target ever gets built. `SiegeProjectManager.injectActiveProjects` re-seeds this exact static
+value into the region's own `nextInstructionMap` UNCONDITIONALLY on every recompute (a deliberate,
+correct fix from earlier this same investigation, still needed — see that method's own doc), so this
+one stale entry is what a worker standing at `entryPos` reads back forever: `RegionFlowField.getNextStep`
+never collapses it to `WALK`, `FollowFlowFieldGoal`'s `targetNode.action() != WALK` branch freezes the
+mob in place every tick, and the moment the project's own build front outpaces `Config.projectWorkRadius`
+(3.5) from that same, never-moved mob, `canAcceptWorker` correctly refuses re-registration — leaving the
+mob stuck at `entryPos` forever, next to real stairs it will never be told to climb. No `SiegeNodeLookahead`
+self-reference latch is involved this time; the mob never leaves `entryPos` in the first place.
+
+**Fix landed this session (`SiegeProjectManager.injectActiveProjects`):** check completion at the
+position the signpost's own action actually applies to (`ownEntryInstruction.predecessorPos()`), not at
+`entry`; seed `WALK` toward that target once it's done, instead of unconditionally re-seeding the static
+first-hop action. Confirmed via instrumented `FollowFlowFieldGoal` evidence: `targetNode` at `entryPos`
+correctly flips from `AIR_STAIR/pred=hop1Pos` to `WALK/pred=hop1Pos` within one throttled recompute
+window (`TerritoryRegionMap.RECALC_COOLDOWN_TICKS` = 80 game ticks) of hop 1 actually completing, on
+both the large-group and single-rat projects.
+
+**A second, unrelated defect this fix's own success surfaced: `SiegeProjectManager.activeProjects` was
+a plain `ArrayList` read from the server thread (`findProjectContaining`, called every mob's every tick
+via `AbstractSiegeProjectGoal.canUse()`) while mutated from the async flow-field calculation thread
+(`TerritoryRegionMap`'s own `CompletableFuture.runAsync` → `injectActiveProjects`/`removeIf`).** Before
+this session's fix, projects deadlocked near-instantly at `entryPos` and this race was never exercised
+hard enough to fire; once workers actually register, build, and churn `activeProjects` at realistic
+volume, it throws `ConcurrentModificationException` and crashes the whole game-test server (confirmed
+crash, full stack trace in the session's own run logs, not reproduced in every run — a genuine race, not
+deterministic). **Fixed** by changing `activeProjects`'s declared type to `CopyOnWriteArrayList` — the
+single call site that does indexed `size()`/`remove(0)` eviction is unaffected (no iterator involved),
+and every other call site's semantics (`add`/`removeIf`/`List.copyOf`/`for`) are unchanged under COW.
+
+**A third defect, real but explicitly NOT fixed this session — its own separate investigation:** once
+`targetNode` correctly resolves to `WALK` and `FollowFlowFieldGoal` issues `moveOrHop`/`nudgeAcross`
+toward the real, just-built hop-1 stair, the mob's own `blockPosition()` never advances. Exact
+reproduction signature, confirmed on the SINGLE-rat project specifically (ruling out multi-rat crowding
+as the cause): mob standing exactly at `entryPos`; `targetNode` = `WALK` with `predecessorPos()` one
+block over and one block up (the real, placed hop-1 stair); `mob.onGround()` = true; `NUDGE_ACROSS`
+fires every 10-tick cycle; `blockPosition()` reads identical across the whole observed window (t=5789
+to t=6069, ~280 ticks / 28 real seconds) with zero displacement. This is precisely the failure
+`FollowFlowFieldGoal.moveOrHop`'s own javadoc anticipates and explicitly defers to this gate ("if it
+can't [cross via ordinary pathfinding], that's a construction-side bug for Task 21's go/no-go gate to
+catch"). Candidate causes not yet distinguished: (a) `AbstractSiegeProjectGoal.tick()`'s own
+`mob.setDeltaMovement(0, …, 0)` fighting `FollowFlowFieldGoal`'s movement command in a priority
+tug-of-war if the two goals keep swapping control; (b) the placed stair's `facing` not matching the
+mob's actual approach angle; (c) sub-block motion that never crosses a full block boundary within the
+observed window, invisible to `blockPosition()`-based instrumentation. **This needs its own session**,
+with fresh instrumentation scoped to exactly this question — not a continuation of this investigation's
+own now-reverted debug logging.
+
+**Gate verdict: still NO-GO.** Two real production defects are fixed this session (the `entryPos`
+signpost and the `activeProjects` race). The gate's own 4 tests still fail — mobs now correctly get
+walked toward the first real stair once it's built, but can't physically climb onto it — which is the
+third, unfixed defect above, not a regression from anything landed this session.
+
+**Files (this session, third pass):**
+- `SiegeProjectManager.java` (`injectActiveProjects`'s `entryPos` signpost fix; `activeProjects`'s
+  `CopyOnWriteArrayList` type change) — both implemented, both verified via instrumented GameTest runs
+  (instrumentation added, confirmed, then fully reverted before this commit — no debug code or scratch
+  log files left in the tree).
+- No changes to `RegionGraph.java`, `PathStepEvaluator.java`, or `SiegeProject.java` — the task brief's
+  two candidate fixes (already-solid cells in the build order; radius measured against the wrong step)
+  are both premised on a defect that direct instrumentation disproved. Neither was implemented.
+
 **Files (this session, second pass):**
 - `RegionFlowField.java` (`getNextStep`), `FollowFlowFieldGoal.java`, `SiegeNodeLookahead.java` — the
   scoped consumer-side fix above, implemented.
