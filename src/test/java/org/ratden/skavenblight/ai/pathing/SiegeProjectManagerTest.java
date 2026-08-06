@@ -356,6 +356,15 @@ class SiegeProjectManagerTest {
      * anchor - which, paired with the anchor's own pre-existing instruction pointing forward at that
      * same far cell, forms a direct mutual 2-cycle. FlowFieldCalculator's cycle-breaker then drops
      * the (unlocked) far cell's entry entirely, leaving it with no instruction at all.
+     *
+     * <p>Unlike the other tests in this file, this one's MECHANISM (not just its final assertion) is
+     * unverified until Task 14 restores a compiling state: it depends on {@code isWalkableTerrain
+     * (farSide)} evaluating true via the trace-through in this task's own commit message (support
+     * from {@code upstream} being STONE, open foot/head). If that trace is wrong, this test would
+     * still pass, but VACUOUSLY - by aborting the line for some other reason rather than by
+     * discarding a genuinely single-WALK-hop empty build order. A green run at Task 14 confirms the
+     * assertion; it does not by itself confirm this test exercised the intended path - check the
+     * mechanism, not just the result, when that batch run lands.
      */
     @Test
     void evaluateMacroProjectsMustNotOverwriteAGenuinelyWalkableCellWithADegenerateEmptyBuildOrderLine() {

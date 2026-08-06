@@ -51,6 +51,9 @@ public class SiegeProjectManager {
     // is firing on nearly every node looks very different from one that's slow for some
     // other reason, and there was previously no way to tell the two apart from outside.
     private int macroEvaluationCount = 0;
+    // Pre-existing dead counter, carried forward as-is (not this task's to fix): declared, reset
+    // every pass, exposed via getLineStepsEvaluated() for PathingDebugFileWriter, but never actually
+    // incremented anywhere - confirmed unchanged from the pre-rewrite file. Always reads 0.
     private long lineStepsEvaluated = 0;
     // getCandidateProjectCount() (candidateProjects.size()) is always 0 by the time anything
     // outside this class can read it - finalizeCandidateProjects() unconditionally clears
