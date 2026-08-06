@@ -1663,7 +1663,19 @@ which doesn't change. The only real substitution: `evaluateSingleLine`'s call in
 `lineTracer.trace(...)` becomes a direct chained-hop loop over `PathStepEvaluator.candidateSteps`
 (same 14-direction fan-out from `evaluateMacroProjects`, same `maxCandidateProjectLength` cap, same
 `costCeiling`-as-`nextCostMap.getOrDefault` relative comparison — NOT an absolute ceiling, matching
-Task 9's confirmation that no absolute ceiling survives anywhere in the new code). Port the
+Task 9's confirmation that no absolute ceiling survives anywhere in the new code). **Keep that relative
+ceiling; drop the bespoke cost FORMULA it was comparing against.** `SiegeLineTracer.trace()`'s own
+internal cost computation (`buildingBasePenalty * COST_MULTIPLIER`, then
+`(dy != 0) ? (projectCost * 2) * 0.75f : projectCost * 2`) was a second, divergent cost model that
+existed only for macro-project line evaluation — RegionGraph's own port (Task 9) already replaced the
+identical formula there with the sum of each hop's real `PathStepEvaluator.EvaluatedStep.cost()`
+(`baseCostFor` + `miningCost`), the same model every other cost comparison in this rewrite uses.
+`evaluateSingleLine` must make the SAME substitution, not port the old formula forward — otherwise
+connector costs (Task 9) and macro-project costs (this task) stop being comparable again, silently
+reintroducing the exact two-cost-model split the design exists to eliminate. Note also (flagged during
+Task 9, relevant here too): the old formula gave vertical traces a 25% discount the new summed-cost
+model doesn't carry forward — if a chained-vertical GameTest (Task 21+) regresses, this is a suspect,
+not just the frontier threshold Task 6 already flagged there. Port the
 `isChainedLanding` guard as `isChainedPlatform` (checks whether `nextInstructionMap.get(anchorPos)`'s
 action, when the anchor sits at a Task 7 `PlatformInserter` seam, should still refuse continuing a
 capped region's chain the same way — confirm empirically via this task's test whether the mechanism
@@ -2605,6 +2617,21 @@ full log output for `testSingleRatBuildsStaircaseAcrossSmallGap`,
   not automatically transfer to the new code, since the goal layer (Tasks 17-19) is substantially
   rewritten. Re-diagnose from scratch against the new implementation if a failure occurs; do not
   assume the old bug's root cause is the new bug's root cause.
+
+  **Two specific suspects flagged during earlier tasks, worth checking before a from-scratch
+  re-diagnosis if `testLargeGroupBuildsChainedStaircaseAcrossGiantGap` (the vertical/chained-gap
+  test) is the one that fails:**
+  1. `FlowFieldCalculator.FRONTIER_WALK_THRESHOLD` (Task 6) — deliberately left provisional at 4,
+     separate from `RegionScanner.BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD`'s 6. If a chain never
+     triggers a needed macro-project search (or triggers one somewhere it shouldn't), this
+     threshold is the first thing to check.
+  2. The vertical cost-bias removal (Task 9) — the old `SiegeLineTracer`/`RegionGraph` cost formula
+     gave vertical traces a 25% discount (`(dy != 0) ? (projectCost * 2) * 0.75f : projectCost * 2`)
+     that the new unified per-step cost model (summed `PathStepEvaluator.EvaluatedStep.cost()`, no
+     directional bias) does not carry forward. This changes which connector wins
+     `RegionGraph.bestPerPair`'s cheaper-wins comparison whenever a vertical and a horizontal route
+     both reach the same region pair — a vertical route that used to win a cost tie may now lose
+     one. If a giant vertical gap fails to chain correctly, check this before assuming a new bug.
 
 - [ ] **Step 4: Once all 4 pass, commit** (only if Step 3 required production fixes; if all 4 pass
   on the first run with no changes, no commit is needed for this task — proceed directly to Task 22).
