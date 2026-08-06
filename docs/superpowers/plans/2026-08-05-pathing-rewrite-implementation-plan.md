@@ -2926,6 +2926,19 @@ different readiness point in the Execution Order list above.**
   own mention of `SiegeLineTracer` is a comment, not code. `StrandedGoal.java`'s mention died with
   Task 16.
 
+  **Correction (2026-08-05, found executing Task 11): that grep's consumer list is incomplete —
+  `TerritoryRegionMap.java` also has a real reference (`private final SiegeLineTracer lineTracer =
+  new SiegeLineTracer(terrainEvaluator);` plus passing it into `RegionGraph.build(...)` at its own
+  call site). This doesn't change the deletion verdict: `TerritoryRegionMap.java` is already broken
+  independently (it still references the Task-9-deleted `RegionIndex` and the pre-Task-11
+  `TerrainEvaluator`/old `SiegeProjectManager` constructor shape, and its `RegionGraph.build` call
+  site already targets an overload Task 9 removed) and is already Task 14's own scope to fully
+  retype, `lineTracer` field included — deleting `SiegeLineTracer.java` here adds no new class of
+  breakage to a file that's already this broken, and Task 14 was always going to remove this field
+  regardless of whether the class file itself still exists on disk. Recorded here only because the
+  original justification ("all done by this point") undercounted a real consumer, not because the
+  action it recommends is wrong.
+
   ```bash
   git rm src/main/java/org/ratden/skavenblight/ai/pathing/SiegeLineTracer.java
   git commit -m "chore(pathing): delete SiegeLineTracer.java, folded into PathStepEvaluator/RegionGraph/SiegeProjectManager"
