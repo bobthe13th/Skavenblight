@@ -8,7 +8,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -27,43 +26,96 @@ public class SiegeInteractionHandler {
      * @param actor the mob performing the action, or null if unattributed (kept nullable so
      *              this stays callable from any future non-mob-driven trigger). Used only for
      *              diagnostics: the self-entombment check below and {@link SiegeActivityLog}.
+     * @param isPlatform when true, dispatch to platform-clearing behavior (3x3 floor + headroom,
+     *              ported from the old BUILD_LANDING case) regardless of {@code action}, then
+     *              return early - a PLATFORM seam (see PlatformInserter) is a post-process
+     *              annotation on an EXISTING build-order step, not a 6th PathAction, so this stays
+     *              a separate boolean rather than a value {@code action} could hold.
      */
     public static void constructSiegeBlock(
             ServerLevel level,
             BlockPos pos,
             Direction facing,
-            SiegeNode.SiegeAction action,
+            PathAction action,
             RegionFlowField flowField,
             LivingEntity actor,
-            boolean supportSolidAtClaim
+            boolean supportSolidAtClaim,
+            boolean isPlatform
     ) {
-        if (action == SiegeNode.SiegeAction.WALK || action == SiegeNode.SiegeAction.LEAP) {
+        if (action == PathAction.WALK) {
             return;
         }
 
-        if (action == SiegeNode.SiegeAction.MINE) {
+        // Checked FIRST, before any breach/canBeReplaced/climb-dependent logic below - a platform
+        // seam (see PlatformInserter) can land on ANY of the four construction actions' own build-
+        // order position, including one whose pos is solid rock (a CARVED_STAIR or TUNNEL step).
+        // Platform clearing is self-sufficient: its own headroom loop already destroys whatever
+        // blocks motion at pos itself (the x=0,z=0,y=0 iteration below), so a separate breach here
+        // first would be redundant work that also drops items and logs a spurious "breached" entry
+        // for a cell about to be cleared again anyway. Old BUILD_LANDING never needed this ordering
+        // question - a landing node was, by construction, already an open mid-air cell - but
+        // PLATFORM is no longer tied to one specific action the way BUILD_LANDING was.
+        if (isPlatform) {
+            // 3x3 staging platform beneath the node, plus 2 blocks of headroom above it. A
+            // platform seam chained mid-tunnel (between two staircases) previously only got a
+            // floor - the space above stayed whatever solid rock the line was driven through, so
+            // the "platform" had nowhere to actually stand or turn.
+            for (int x = -1; x <= 1; x++) {
+                for (int z = -1; z <= 1; z++) {
+                    BlockPos platformPos = pos.below().offset(x, 0, z);
+                    if (level.getBlockState(platformPos).canBeReplaced()) {
+                        level.setBlockAndUpdate(platformPos, Blocks.COBBLESTONE.defaultBlockState());
+                    }
+
+                    for (int y = 0; y <= 1; y++) {
+                        BlockPos headroomPos = pos.offset(x, y, z);
+                        BlockState headroomState = level.getBlockState(headroomPos);
+                        if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
+                            // Diagnostic only (systematic-debugging evidence-gathering): this
+                            // destroy was previously silent - only the main placement got logged -
+                            // so a headroom-clear that happens to hit an already-completed
+                            // sibling step left zero trace of what knocked it down, even though
+                            // SiegeActivityLog otherwise records every siege action.
+                            SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, PathAction.TUNNEL,
+                                    "headroom-clear for platform at " + pos.toShortString(), regionIdOf(flowField));
+                            level.destroyBlock(headroomPos, false);
+                        }
+                    }
+                }
+            }
+            SiegeActivityLog.record(level.getGameTime(), actor, pos, action, "platform + headroom cleared", regionIdOf(flowField));
+            // Return early so cobblestone isn't placed inside the node's own standing area.
+            return;
+        }
+
+        // CARVED_STAIR mines AND places: PathStepEvaluator.candidateSteps only ever classifies a
+        // neighbor CARVED_STAIR when its own foot or head is a genuine blocking obstacle, so pos
+        // itself is typically solid rock at execution time - mining must run BEFORE the
+        // canBeReplaced() guard below, or that guard would silently no-op every CARVED_STAIR
+        // forever (it never becomes replaceable on its own).
+        if (action == PathAction.TUNNEL) {
             executeBreach(level, pos, flowField, actor);
             return;
+        } else if (action == PathAction.CARVED_STAIR) {
+            executeBreach(level, pos, flowField, actor);
         }
 
         if (!level.getBlockState(pos).canBeReplaced()) {
             return;
         }
 
-        // supportSolidAtClaim (see AbstractSiegeConstructionGoal#supportSolidAtClaim) is only
-        // true when this target's support was ALREADY solid back when it was selected/claimed -
-        // never for a macro SiegeProject's next unbuilt chain step, whose support is the PREVIOUS
-        // step, built moments earlier (a placed stair/pillar/spiral is self-supporting for
-        // pathing purposes regardless of what ends up below it - see
-        // TerrainEvaluator.isWalkableTerrain's scaffold short-circuit). So this guard only fires
-        // for the actual race: support that WAS there got removed by a different clanrat's
-        // concurrent MINE/headroom-clear action sometime in the getActionDurationTicks() +
-        // getMaxStalledTicks() window between claim and execution. Placing anyway there would
-        // produce an unreachable floating step and silently stall the whole build (the reported
-        // "group places one floating stair and stops" bug) - but requiring support unconditionally
-        // (an earlier version of this guard did) wrongly blocked every legitimate mid-chain step,
-        // which never had support to begin with, causing construction to stall on turn one instead.
-        if (action.isClimbDependent() && supportSolidAtClaim && !level.getBlockState(pos.below()).blocksMotion()) {
+        // supportSolidAtClaim (see AbstractSiegeProjectGoal#supportSolidAtClaim) is only true
+        // when this target's support was ALREADY solid back when it was selected/claimed - never
+        // for a macro SiegeProject's next unbuilt chain step, whose support is the PREVIOUS step,
+        // built moments earlier (a placed stair is self-supporting for pathing purposes
+        // regardless of what ends up below it - see PathStepEvaluator.isWalkableTerrain's
+        // scaffold short-circuit). So this guard only fires for the actual race: support that WAS
+        // there got removed by a different clanrat's concurrent action sometime in the window
+        // between claim and execution. CARVED_STAIR/AIR_STAIR are the only two actions that place
+        // something meant to be stood ON (mirroring old BUILD_STAIR/BUILD_PILLAR/BUILD_SPIRAL
+        // minus the removed pure-climb actions); BRIDGE is excluded like old BUILD_BRIDGE -
+        // expected to have open air below by design.
+        if (isClimbDependent(action) && supportSolidAtClaim && !level.getBlockState(pos.below()).blocksMotion()) {
             SiegeActivityLog.record(level.getGameTime(), actor, pos, action,
                     "aborted placement - support at " + pos.below().toShortString() + " no longer solid, would float",
                     regionIdOf(flowField));
@@ -72,7 +124,7 @@ public class SiegeInteractionHandler {
 
         // A mob's own hitbox can overlap the block it's about to place into - isSpaceClear()
         // deliberately excludes the builder from ITS check (a rat must be able to stand where
-        // its own pillar/stair target is to reach it), so nothing else was verifying this.
+        // its own construction target is to reach it), so nothing else was verifying this.
         // Reported in testing: "the rat that made it up placed a block inside where they were
         // standing, then hung." Root-caused via a controlled GameTest capture (see
         // ClanratEntity's recoverFromStuckAirborne doc): this exact self-overlap, immediately
@@ -100,114 +152,52 @@ public class SiegeInteractionHandler {
         }
 
         Direction validFacing = (facing != null) ? facing : Direction.NORTH;
-        BlockState stateToPlace;
+        BlockState stateToPlace = Blocks.COBBLESTONE.defaultBlockState();
 
         switch (action) {
-            case BUILD_STAIR -> {
+            case CARVED_STAIR, AIR_STAIR -> {
                 stateToPlace = Blocks.COBBLESTONE_STAIRS.defaultBlockState()
                         .setValue(StairBlock.FACING, validFacing);
-
-                // Clear 2 blocks of headroom above the step (3 total with the step itself),
-                // matching the clearance TerrainEvaluator#determineMacroAction already requires
-                // at plan time. That check only runs once, when the line is first traced, but
-                // the line is executed one step at a time over many ticks - a different
-                // project, or a later step of this same line, can obstruct that headroom before
-                // a rat actually reaches it, sealing the passage it just climbed. Reported in
-                // testing: rats got stuck "placing more stairs on top of the staircase,
-                // blocking the path."
-                for (int y = 1; y <= 2; y++) {
-                    BlockPos headroomPos = pos.above(y);
-                    BlockState headroomState = level.getBlockState(headroomPos);
-                    if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
-                        // Diagnostic only (systematic-debugging evidence-gathering): this destroy
-                        // was previously silent - only the main placement below got logged - so a
-                        // headroom-clear that happens to hit an already-completed sibling step
-                        // (e.g. in a tight vertical spiral shaft) left zero trace of what knocked
-                        // it down, even though SiegeActivityLog otherwise records every siege
-                        // action. Investigating a report of repeated identical BUILD_SPIRAL
-                        // executions at the same position - this will show directly whether a
-                        // later step's headroom-clear is destroying an earlier, already-built one.
-                        SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, SiegeNode.SiegeAction.MINE,
-                                "headroom-clear for " + action + " at " + pos.toShortString(), regionIdOf(flowField));
-                        level.destroyBlock(headroomPos, false);
-                    }
-                }
+                clearStairHeadroom(level, pos, action, flowField, actor);
             }
-
-            case BUILD_SPIRAL -> {
-                Direction spiralFacing = Direction.from2DDataValue(Math.abs(pos.getY()) % 4);
-                stateToPlace = Blocks.COBBLESTONE_STAIRS.defaultBlockState()
-                        .setValue(StairBlock.FACING, spiralFacing);
-            }
-
-            case BUILD_LADDER -> {
-                Direction wallDirection = null;
-                for (Direction dir : Direction.Plane.HORIZONTAL) {
-                    BlockPos adjacentPos = pos.relative(dir);
-                    if (level.getBlockState(adjacentPos).isSolidRender(level, adjacentPos)) {
-                        wallDirection = dir;
-                        break;
-                    }
-                }
-
-                if (wallDirection != null) {
-                    stateToPlace = Blocks.LADDER.defaultBlockState()
-                            .setValue(LadderBlock.FACING, wallDirection.getOpposite());
-                } else {
-                    // The planner (TerrainEvaluator#determineMacroAction) only ever emits
-                    // BUILD_LADDER when it found a wall at plan time - if none exists by
-                    // execution time, terrain changed in between (commonly: a nearby
-                    // MINE/BUILD project cleared the exact wall this ladder needed). Silently
-                    // falling back to a plain block means a rat can still climb it like a
-                    // pillar, but the plan's intent (a climbable ladder) quietly failed with no
-                    // other record of it - log it so a recurring pattern is visible.
-                    LOGGER.warn("[Skavenblight] BUILD_LADDER at {} found no adjacent wall at execution time - " +
-                            "substituting a plain block instead of a ladder", pos.toShortString());
-                    stateToPlace = Blocks.COBBLESTONE.defaultBlockState();
-                }
-            }
-            case BUILD_LANDING -> {
-                // 3x3 staging platform beneath the landing node, plus 2 blocks of headroom
-                // above it. A landing chained mid-tunnel (between two staircases) previously
-                // only got a floor - the space above stayed whatever solid rock the line was
-                // driven through, so the "platform" had nowhere to actually stand or turn.
-                for (int x = -1; x <= 1; x++) {
-                    for (int z = -1; z <= 1; z++) {
-                        BlockPos platformPos = pos.below().offset(x, 0, z);
-                        if (level.getBlockState(platformPos).canBeReplaced()) {
-                            level.setBlockAndUpdate(platformPos, Blocks.COBBLESTONE.defaultBlockState());
-                        }
-
-                        for (int y = 0; y <= 1; y++) {
-                            BlockPos headroomPos = pos.offset(x, y, z);
-                            BlockState headroomState = level.getBlockState(headroomPos);
-                            if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
-                                // See the matching comment on BUILD_STAIR's headroom clear above -
-                                // same previously-silent-destroy diagnostic gap.
-                                SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, SiegeNode.SiegeAction.MINE,
-                                        "headroom-clear for BUILD_LANDING at " + pos.toShortString(), regionIdOf(flowField));
-                                level.destroyBlock(headroomPos, false);
-                            }
-                        }
-                    }
-                }
-                SiegeActivityLog.record(level.getGameTime(), actor, pos, action, "landing platform + headroom cleared", regionIdOf(flowField));
-                // Return early so cobblestone isn't placed inside the target node standing area
-                return;
-            }
-
-            case BUILD_BRIDGE, BUILD_PILLAR -> {
-                stateToPlace = Blocks.COBBLESTONE.defaultBlockState();
-            }
-
-            default -> {
-                stateToPlace = Blocks.COBBLESTONE.defaultBlockState();
-            }
+            default -> { /* BRIDGE uses the COBBLESTONE default above; WALK/TUNNEL already returned. */ }
         }
 
         level.setBlockAndUpdate(pos, stateToPlace);
         level.levelEvent(2001, pos, Block.getId(stateToPlace));
         SiegeActivityLog.record(level.getGameTime(), actor, pos, action, stateToPlace.getBlock().getDescriptionId(), regionIdOf(flowField));
+    }
+
+    /**
+     * True for actions that place a block meant to be stood ON, so a mid-construction race that
+     * yanks away solid ground out from under the target is worth guarding against (see the
+     * supportSolidAtClaim check above) - mirrors old SiegeNode.SiegeAction.isClimbDependent's
+     * {@code BUILD_STAIR || BUILD_PILLAR || BUILD_SPIRAL} minus the two pure-climb actions this
+     * rewrite permanently removes. TUNNEL/BRIDGE are excluded: TUNNEL places nothing, and BRIDGE
+     * is expected to have open air below at placement time by design, same as the old model.
+     */
+    private static boolean isClimbDependent(PathAction action) {
+        return action == PathAction.CARVED_STAIR || action == PathAction.AIR_STAIR;
+    }
+
+    /**
+     * 2 blocks of headroom above the tread (3 total with the step itself), matching the clearance
+     * PathStepEvaluator.candidateSteps already requires at plan time. That check only runs once,
+     * when the line is first traced, but the line is executed one step at a time over many ticks -
+     * a different project, or a later step of this same line, can obstruct that headroom before a
+     * rat actually reaches it, sealing the passage it just climbed. Reported in testing: rats got
+     * stuck "placing more stairs on top of the staircase, blocking the path."
+     */
+    private static void clearStairHeadroom(ServerLevel level, BlockPos pos, PathAction action, RegionFlowField flowField, LivingEntity actor) {
+        for (int y = 1; y <= 2; y++) {
+            BlockPos headroomPos = pos.above(y);
+            BlockState headroomState = level.getBlockState(headroomPos);
+            if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {
+                SiegeActivityLog.record(level.getGameTime(), actor, headroomPos, PathAction.TUNNEL,
+                        "headroom-clear for " + action + " at " + pos.toShortString(), regionIdOf(flowField));
+                level.destroyBlock(headroomPos, false);
+            }
+        }
     }
 
     /** Region id to attribute a logged action to, or null when the actor has no field assigned. */
@@ -272,19 +262,8 @@ public class SiegeInteractionHandler {
         }
     }
 
-    public static int calculateMiningTicks(ServerLevel level, BlockPos pos) {
-        BlockState state = level.getBlockState(pos);
-        float destroySpeed = state.getDestroySpeed(level, pos);
-
-        if (destroySpeed < 0.0F) {
-            return 10000;
-        }
-
-        return Math.max(10, (int) (destroySpeed * 12.0F));
-    }
-
     public static void executeBreach(ServerLevel level, BlockPos pos, RegionFlowField flowField, LivingEntity actor) {
         level.destroyBlock(pos, true);
-        SiegeActivityLog.record(level.getGameTime(), actor, pos, SiegeNode.SiegeAction.MINE, "breached", regionIdOf(flowField));
+        SiegeActivityLog.record(level.getGameTime(), actor, pos, PathAction.TUNNEL, "breached", regionIdOf(flowField));
     }
 }

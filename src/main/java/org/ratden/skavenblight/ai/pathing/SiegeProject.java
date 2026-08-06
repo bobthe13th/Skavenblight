@@ -458,7 +458,8 @@ public class SiegeProject {
             // A placed stair/pillar is self-supporting for pathing purposes regardless of what ends
             // up below it once built - there is no floating-step risk here for tick() to guard
             // against in the first place.
-            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false);
+            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false,
+                    this.platformPositions.contains(step.pos()));
 
             // The old per-goal onChainComplete was the ONLY thing that ever told the region system
             // "a rat just built something here" - SiegeInteractionHandler's direct

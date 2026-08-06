@@ -198,6 +198,27 @@ entirely.
     Task 10 needs `SiegeInteractionHandler` done first.
 12. **Task 14** (`TerritoryRegionMap` targeted port + `onBlockChanged` fix) — needs everything above
     (Tasks 4-13) real. This is the last task before `compileJava` is green again.
+
+    **Correction (2026-08-05, found executing Task 13, confirmed via advisor + a direct `find`): this
+    is wrong.** `src/main/java/org/ratden/skavenblight/gametest/` sits under `src/main`, not `src/test` -
+    confirmed directly, it is not a naming assumption. `compileJava` compiles the whole `src/main`
+    source set, so it cannot go green while ANY GameTest file in the compile-error list is still
+    broken - and those are owned by Tasks 17, 18, 19, and **20** (execution-order position 20, not 12).
+    Task 14 does NOT restore a compiling state; it's necessary but not sufficient. Practical effect on
+    every earlier correction that said "written-and-not-yet-executed until Task 14 restores a compiling
+    state, then run every accumulated test file as one batch once it does" (see Task 12's own
+    correction note above): read **Task 20** for "Task 14" in that sentence. `compileTestJava` — and
+    with it every accumulated unit test (`FlowStepTest`, `PathStepEvaluatorCostTest`, `SiegeProjectTest`,
+    `SiegeProjectManagerTest`, `FlowFieldCalculatorTest`, `RegionGraphTest`, `PlatformInserterTest`, and
+    whatever Tasks 14/15 add) — stays unrunnable until the END of Task 20, immediately before Task 21's
+    go/no-go gate. This concentrates real risk: the first green build AND the first run of every
+    accumulated unit test both land in the same narrow window right before the gate that decides
+    whether to proceed to Tasks 22-24. Treat that window as higher-scrutiny than an ordinary task
+    boundary when you reach it - budget time to actually read failures, not just re-run until green.
+    (The position-13-15 note two entries below already half-said this — "these 11 files must be fixed
+    before ANY later task's `./gradlew test`/`runGameTestServer` run can succeed at all" — this
+    correction is what reconciles that with the "through Task 14" framing above, which never accounted
+    for GameTest files living in `src/main`.)
 13. **Task 25** (NEW — see its own section below: debug/network consumer port, mechanical group).
 14. **Task 26** (NEW — `PathingDebugFileWriter` glyph redesign).
 15. **Task 27** (NEW — `ClientRenderHandler` color redesign).
@@ -2741,12 +2762,22 @@ already-decided filler-value question. The other 3 (`PathingDebugFileWriter.java
 respectively, because each involves a real decision (glyph/color redesign) or a real sequencing
 dependency (`DebugPathingCommands`) that shouldn't be hidden inside a "mechanical" task.
 
+**Correction (2026-08-05, found executing Task 13): `SiegeActivityLog.java` is no longer this task's
+file — it moved to Task 13.** `SiegeInteractionHandler` has a hard, unavoidable compile dependency on
+`SiegeActivityLog.record(...)`'s action parameter (it logs every construction/mining action, not an
+optional call), and that method only accepted `SiegeNode.SiegeAction`. Deferring its retype to here
+would leave `SiegeInteractionHandler.java` itself red until this task ran, which sits at execution-order
+position 13 — six tasks and a go/no-go gate's worth of tasks after Task 13. Since this file was already
+"Group A — no decision needed" (confirmed: its only other real consumer, `PathingDebugFileWriter:365`,
+just interpolates `entry.action()` into a format string, which works identically for either type), it
+was pulled forward and ported as part of Task 13's own commit instead. Group A below is now 4 files, not
+5; don't re-port it here.
+
 **Files:**
 - Modify: `src/main/java/org/ratden/skavenblight/client/ClientDebugData.java`
 - Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/DetailedServerMode.java`
 - Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/IServerDebugMode.java`
 - Modify: `src/main/java/org/ratden/skavenblight/item/custom/DebugFlowFieldReaderItem.java`
-- Modify: `src/main/java/org/ratden/skavenblight/debug/SiegeActivityLog.java`
 - Modify: `src/main/java/org/ratden/skavenblight/network/payload/SyncFlowFieldDebugPayload.java`
 - Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/WildernessServerMode.java`
 - Modify: `src/main/java/org/ratden/skavenblight/debug/mode/server/MacroServerMode.java`
@@ -2758,9 +2789,9 @@ dependency (`DebugPathingCommands`) that shouldn't be hidden inside a "mechanica
   `PathAction` in place of `SiegeNode.SiegeAction`.
 
 **Group A — pure mechanical retype, no decision needed** (`ClientDebugData`, `DetailedServerMode`,
-`IServerDebugMode`, `DebugFlowFieldReaderItem`, `SiegeActivityLog`): every `Map<BlockPos, SiegeNode>`
+`IServerDebugMode`, `DebugFlowFieldReaderItem`): every `Map<BlockPos, SiegeNode>`
 becomes `Map<BlockPos, FlowStep>`, every `SiegeNode.SiegeAction` parameter/field becomes `PathAction`.
-None of these five files branch on a specific action value — confirmed by direct read — so there is
+None of these four files branch on a specific action value — confirmed by direct read — so there is
 nothing to redesign, only to rename.
 
 **Group B — mechanical retype + one filler-value decision** (`SyncFlowFieldDebugPayload`,
@@ -2797,7 +2828,6 @@ git add src/main/java/org/ratden/skavenblight/client/ClientDebugData.java \
         src/main/java/org/ratden/skavenblight/debug/mode/server/DetailedServerMode.java \
         src/main/java/org/ratden/skavenblight/debug/mode/server/IServerDebugMode.java \
         src/main/java/org/ratden/skavenblight/item/custom/DebugFlowFieldReaderItem.java \
-        src/main/java/org/ratden/skavenblight/debug/SiegeActivityLog.java \
         src/main/java/org/ratden/skavenblight/network/payload/SyncFlowFieldDebugPayload.java \
         src/main/java/org/ratden/skavenblight/debug/mode/server/WildernessServerMode.java \
         src/main/java/org/ratden/skavenblight/debug/mode/server/MacroServerMode.java

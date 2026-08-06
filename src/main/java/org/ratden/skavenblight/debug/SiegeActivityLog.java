@@ -3,7 +3,7 @@ package org.ratden.skavenblight.debug;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.LivingEntity;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.PathAction;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -24,7 +24,7 @@ public final class SiegeActivityLog {
     }
 
     public static synchronized void record(long gameTime, LivingEntity actor, BlockPos targetPos,
-                                            SiegeNode.SiegeAction action, String note, Integer regionId) {
+                                            PathAction action, String note, Integer regionId) {
         String mobType = actor != null ? BuiltInRegistries.ENTITY_TYPE.getKey(actor.getType()).toString() : "?";
         String mobId = actor != null ? actor.getStringUUID() : "?";
         BlockPos mobPos = actor != null ? actor.blockPosition() : null;
@@ -36,7 +36,7 @@ public final class SiegeActivityLog {
     }
 
     /** Backward-compatible overload for call sites that don't (yet) have a region id handy. */
-    public static void record(long gameTime, LivingEntity actor, BlockPos targetPos, SiegeNode.SiegeAction action, String note) {
+    public static void record(long gameTime, LivingEntity actor, BlockPos targetPos, PathAction action, String note) {
         record(gameTime, actor, targetPos, action, note, null);
     }
 
@@ -47,6 +47,6 @@ public final class SiegeActivityLog {
     }
 
     public record Entry(long gameTime, String mobType, String mobId, BlockPos mobPos, BlockPos targetPos,
-                         SiegeNode.SiegeAction action, String note, Integer regionId) {
+                         PathAction action, String note, Integer regionId) {
     }
 }
