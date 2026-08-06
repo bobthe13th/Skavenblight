@@ -141,7 +141,14 @@ public class RegionFlowField {
         return owner != null && owner.isAlive();
     }
 
-    /** AwaitFormationGoal needs this to reach the real Region object (via getRegionIndex()) for terrain-validated formation-slot search. */
+    /** Count of currently-claimed (live-claimant) formation slots - AwaitFormationGoal uses this
+     * to size its own formation grid to observed demand, without needing a shared "how many rats
+     * total" oracle: each rat sees how many slots are already taken and requests a grid one larger. */
+    public int getClaimedFormationSlotCount() {
+        return (int) formationSlots.values().stream().filter(Mob::isAlive).count();
+    }
+
+    /** AwaitFormationGoal needs this to reach the real Region object (via getRegionGraph()) for terrain-validated formation-slot search. */
     public TerritoryRegionMap getOwner() {
         return this.owner;
     }

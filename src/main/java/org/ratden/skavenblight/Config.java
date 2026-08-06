@@ -272,6 +272,17 @@ public final class Config {
                     20
             );
 
+    private static final ModConfigSpec.DoubleValue FORMATION_SLOT_SPACING =
+            BUILDER.comment(
+                    "Block spacing between adjacent slots in AwaitFormationGoal's "
+                            + "row/column formation grid."
+            ).defineInRange(
+                    "formationSlotSpacing",
+                    1.5,
+                    1.0,
+                    5.0
+            );
+
     private static final ModConfigSpec.IntValue
             REGION_SCAN_MAX_CELLS =
             BUILDER.comment(
@@ -434,6 +445,7 @@ public final class Config {
     public static int workersPerWidenStep;
     public static double workPerRatPerTick;
     public static int maxProjectWidth;
+    public static double formationSlotSpacing;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -512,6 +524,9 @@ public final class Config {
 
         maxProjectWidth =
                 MAX_PROJECT_WIDTH.get();
+
+        formationSlotSpacing =
+                FORMATION_SLOT_SPACING.get();
 
         wlCoilCapacity =
                 WL_COIL_CAPACITY.get();
