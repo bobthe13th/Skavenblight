@@ -7,7 +7,8 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.ChunkPos;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
+import org.ratden.skavenblight.ai.pathing.PathAction;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,11 +25,11 @@ public class SyncFlowFieldDebugPayload implements CustomPacketPayload {
     );
 
     private final Set<ChunkPos> territoryChunks;
-    private final Map<BlockPos, SiegeNode> flowFieldNodes;
+    private final Map<BlockPos, FlowStep> flowFieldNodes;
     private final Set<ChunkPos> mappedChunks;
     private final int currentMode;
 
-    public SyncFlowFieldDebugPayload(Set<ChunkPos> territoryChunks, Map<BlockPos, SiegeNode> flowFieldNodes, Set<ChunkPos> mappedChunks, int currentMode) {
+    public SyncFlowFieldDebugPayload(Set<ChunkPos> territoryChunks, Map<BlockPos, FlowStep> flowFieldNodes, Set<ChunkPos> mappedChunks, int currentMode) {
         this.territoryChunks = territoryChunks;
         this.flowFieldNodes = flowFieldNodes;
         this.mappedChunks = mappedChunks;
@@ -49,8 +50,9 @@ public class SyncFlowFieldDebugPayload implements CustomPacketPayload {
         for (int i = 0; i < nodeSize; i++) {
             BlockPos pos = buf.readBlockPos();
             BlockPos targetPos = buf.readBlockPos();
-            SiegeNode.SiegeAction action = buf.readEnum(SiegeNode.SiegeAction.class);
-            this.flowFieldNodes.put(pos, new SiegeNode(targetPos, action));
+            PathAction action = buf.readEnum(PathAction.class);
+            BlockPos predecessorPos = buf.readBlockPos();
+            this.flowFieldNodes.put(pos, new FlowStep(targetPos, action, predecessorPos));
         }
 
         // 3. Read and initialize mappedChunks
@@ -71,10 +73,15 @@ public class SyncFlowFieldDebugPayload implements CustomPacketPayload {
         }
 
         buf.writeInt(this.flowFieldNodes.size());
-        for (Map.Entry<BlockPos, SiegeNode> entry : this.flowFieldNodes.entrySet()) {
+        for (Map.Entry<BlockPos, FlowStep> entry : this.flowFieldNodes.entrySet()) {
             buf.writeBlockPos(entry.getKey());
             buf.writeBlockPos(entry.getValue().pos());
             buf.writeEnum(entry.getValue().action());
+            // Self-referencing filler (see Task 25's decision): this debug sync has no real
+            // predecessor to send - every reconstructed FlowStep just points at its own pos(),
+            // matching the established "position pointing at itself" idiom for "no real
+            // predecessor" (FlowStepTest/FlowFieldCalculatorTest already use it).
+            buf.writeBlockPos(entry.getValue().pos());
         }
 
         buf.writeInt(this.mappedChunks.size());
@@ -106,7 +113,7 @@ public class SyncFlowFieldDebugPayload implements CustomPacketPayload {
         return territoryChunks;
     }
 
-    public Map<BlockPos, SiegeNode> flowFieldNodes() {
+    public Map<BlockPos, FlowStep> flowFieldNodes() {
         return flowFieldNodes;
     }
 

@@ -2,13 +2,13 @@ package org.ratden.skavenblight.client;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
 
 import java.util.*;
 
 public class ClientDebugData {
     public static final Set<ChunkPos> territoryChunks = new HashSet<>();
-    public static final Map<BlockPos, SiegeNode> flowFieldNodes = new HashMap<>();
+    public static final Map<BlockPos, FlowStep> flowFieldNodes = new HashMap<>();
 
     // --- NEW: Macro NavMesh Data ---
     public static final Set<ChunkPos> mappedChunks = new HashSet<>();
@@ -19,7 +19,7 @@ public class ClientDebugData {
     public static int maxTraffic = 1;
 
     // Updated update method signature
-    public static void update(Set<ChunkPos> chunks, Map<BlockPos, SiegeNode> nodes, Set<ChunkPos> mapped, int mode) {
+    public static void update(Set<ChunkPos> chunks, Map<BlockPos, FlowStep> nodes, Set<ChunkPos> mapped, int mode) {
         territoryChunks.clear();
         territoryChunks.addAll(chunks);
 

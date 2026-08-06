@@ -16,7 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.debug.PathingDebugFileWriter;
@@ -211,7 +211,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             continue;
                         }
 
-                        Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+                        Map<BlockPos, FlowStep> localNodes = new HashMap<>();
                         currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, regionMap, localNodes);
 
                         // The borrowed field above is picked arbitrarily (whichever region's
