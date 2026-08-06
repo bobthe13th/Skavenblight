@@ -3009,13 +3009,19 @@ with special movement code") — which is why both movement-layer fixes above we
 iterated on further, per the same "don't land a cross-cutting change without dedicated verification"
 judgment call this investigation's own predecessor sessions already established.
 
-**Found and deliberately NOT fixed this session (out of scope, not reachable by this test's
-geometry):** `SiegeProject.approachFacing`'s tie-break (`Math.abs(dx) > Math.abs(dz)`) silently drops
-the `dx` component whenever `|dx| == |dz|` (a true 45-degree diagonal hop), producing an axis-aligned
-`FACING` for a genuinely diagonal approach. This test's own crossing has `dz=0` throughout (confirmed:
-`relativeGroundSpawn` and `relativeNexusPos` share the same Z in `StaircaseSiegeGroupGameTests`), so
-the tie-break is provably unreached by anything in this gate — flagged for a future session that
-exercises genuinely diagonal (both axes nonzero) `AIR_STAIR`/`CARVED_STAIR` hops.
+**Found and deliberately NOT fixed this session (unreached by the specific hop measured, NOT a
+blanket clearance of the whole gate — see caveat below):** `SiegeProject.approachFacing`'s tie-break
+(`Math.abs(dx) > Math.abs(dz)`) silently drops the `dx` component whenever `|dx| == |dz|` (a true
+45-degree diagonal hop), producing an axis-aligned `FACING` for a genuinely diagonal approach. The
+*specific climb hop this session measured and diagnosed* was `dx=+1, dz=0` (confirmed directly from
+its own logged `currentPos`/`nextInChain` values), so the tie-break is provably not implicated in
+*that* hop. This is weaker than "the whole crossing is axis-aligned": `relativeGroundSpawn` and
+`relativeNexusPos` share the same Z (so the overall start/end geometry is axis-aligned), but rat 1's
+own approach-walk trace this session showed real Z drift (`z≈-4600991` → `z≈-4600977`) before reaching
+the measured hop, and the *third* session's own evidence described a hop's `predecessorPos()` as "one
+block over" without specifying which axis. Don't assume the tie-break is cleared for every hop in this
+gate's connector — only for the one this session actually measured. Flagged for a future session that
+exercises or re-checks genuinely diagonal (both axes nonzero) `AIR_STAIR`/`CARVED_STAIR` hops.
 
 **Also flagged, not yet confirmed as exploited:** `PathStepEvaluator.isActionCompleted`'s
 `AIR_STAIR`/`BRIDGE` branch (`state.blocksMotion() || isWalkableScaffold(state)`) accepts *any* solid
