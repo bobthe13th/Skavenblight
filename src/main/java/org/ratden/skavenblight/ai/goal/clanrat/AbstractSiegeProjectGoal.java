@@ -8,9 +8,10 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.ai.goal.SiegeGoal;
 import org.ratden.skavenblight.ai.pathing.LiveTerrainAccess;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
 import org.ratden.skavenblight.ai.pathing.SiegeProject;
-import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
+import org.ratden.skavenblight.ai.pathing.PathAction;
+import org.ratden.skavenblight.ai.pathing.PathStepEvaluator;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 import java.util.EnumSet;
@@ -20,18 +21,16 @@ import java.util.Optional;
  * Shared skeleton for project-scoped construction goals: a rat registers as a worker on the
  * SiegeProject nearest unbuilt work belongs to, keeps station (approach + animate) near it while
  * registered, and the project itself - not this goal - places blocks as accumulated work covers
- * their cost (see SiegeProject.tick()). Sibling to AbstractSiegeConstructionGoal, not a subclass:
- * the claim/fixed-duration-execute core those goals share is exactly what this class replaces, so
- * inheriting from it would mean overriding away most of what it provides. Shares only the
- * lookahead lookup (SiegeNodeLookahead) with that class. WidenStairsGoal, SmartBreachGoal,
- * SpiralSapperGoal, and DeployClimbableGoal are unaffected by this class - see the design doc's
- * Scope section for why the latter two stay on the old per-block claim.
+ * their cost (see SiegeProject.tick()). BuildFlowFieldGoal is its only remaining concrete subclass
+ * (Task 16 deleted every goal that used to split off a subset of construction actions), matching
+ * all four construction PathAction values now that climbing and the old per-block claim goals are
+ * gone.
  */
 public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal {
 
     protected final PathfinderMob mob;
     protected RegionFlowField flowField;
-    private final TerrainEvaluator terrainEvaluator = new TerrainEvaluator();
+    private final PathStepEvaluator pathStepEvaluator = new PathStepEvaluator();
 
     private SiegeProject registeredProject;
 
@@ -45,11 +44,11 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
         this.flowField = flowField;
     }
 
-    /** Which SiegeNode.SiegeAction values this goal handles - e.g. BuildFlowFieldGoal's
-     * BUILD_STAIR/BUILD_BRIDGE/BUILD_PILLAR/BUILD_LANDING/BUILD_LADDER/BUILD_SPIRAL. */
-    protected abstract boolean matchesAction(SiegeNode.SiegeAction action);
+    /** Which PathAction values this goal handles - BuildFlowFieldGoal's is all four construction
+     * actions (TUNNEL/BRIDGE/CARVED_STAIR/AIR_STAIR). */
+    protected abstract boolean matchesAction(PathAction action);
 
-    private Optional<SiegeNode> findEffectiveNode() {
+    private Optional<FlowStep> findEffectiveNode() {
         return SiegeNodeLookahead.findEffectiveNode(this.flowField, this.mob, this::matchesAction);
     }
 
@@ -86,7 +85,7 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
     }
 
     private boolean canWorkOn(SiegeProject project, ServerLevel serverLevel) {
-        return project.canAcceptWorker(this.mob, new LiveTerrainAccess(serverLevel), this.terrainEvaluator,
+        return project.canAcceptWorker(this.mob, new LiveTerrainAccess(serverLevel), this.pathStepEvaluator,
                 Config.projectWorkRadius, Config.maxProjectWorkers, Config.workersPerWidenStep);
     }
 
@@ -94,7 +93,7 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
     public void start() {
         findCandidateProject().ifPresent(project -> {
             if (this.mob.level() instanceof ServerLevel serverLevel
-                    && project.tryRegisterWorker(this.mob, new LiveTerrainAccess(serverLevel), this.terrainEvaluator,
+                    && project.tryRegisterWorker(this.mob, new LiveTerrainAccess(serverLevel), this.pathStepEvaluator,
                     Config.projectWorkRadius, Config.maxProjectWorkers, Config.workersPerWidenStep)) {
                 this.registeredProject = project;
             }
@@ -138,7 +137,7 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
 
         if (this.mob.tickCount % 5 == 0) this.mob.swing(InteractionHand.MAIN_HAND);
 
-        this.registeredProject.tick(serverLevel, this.flowField, this.terrainEvaluator);
+        this.registeredProject.tick(serverLevel, this.flowField, this.pathStepEvaluator);
     }
 
     @Override
@@ -157,6 +156,6 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
         return findEffectiveNode()
                 .filter(node -> matchesAction(node.action()))
                 .filter(node -> this.flowField.findProjectFor(node.pos()).map(SiegeProject::isAtCapacity).orElse(false))
-                .map(SiegeNode::pos);
+                .map(FlowStep::pos);
     }
 }
