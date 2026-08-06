@@ -40,7 +40,7 @@ public class SiegeProjectTickGameTests {
 
     @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
     public static void testTickPlacesInstructionOnceWorkAccumulates(GameTestHelper helper) {
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -54,9 +54,9 @@ public class SiegeProjectTickGameTests {
         FlowFieldState state = new FlowFieldState(anchor, Set.of());
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, java.util.UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
@@ -69,10 +69,10 @@ public class SiegeProjectTickGameTests {
         check(project.tryRegisterWorker(mob, new LiveTerrainAccess(helper.getLevel()), evaluator, 3.5, 4, 10),
                 "worker should register: mob is within radius of the only unbuilt step");
 
-        // buildingBasePenalty * 10 = cost (default Config.buildingBasePenalty=150 -> cost 1500), so
-        // one worker at the default workPerRatPerTick=100 covers it in ~15 GAME ticks. Driven one
-        // tick() per real game tick (see this class's javadoc for why a synchronous loop can't work
-        // any more); this test only needs "eventually placed", not an exact tick count.
+        // A BRIDGE step costs bridgeBaseCost = 600 by default, so one worker at the default
+        // workPerRatPerTick=100 covers it in ~6 GAME ticks. Driven one tick() per real game tick
+        // (see this class's javadoc for why a synchronous loop can't work any more); this test only
+        // needs "eventually placed", not an exact tick count.
         helper.succeedWhen(() -> {
             project.tick(helper.getLevel(), flowField, evaluator);
             helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE),
@@ -100,14 +100,14 @@ public class SiegeProjectTickGameTests {
      * advances a real game tick and ticks once more, so the guard is proven to be per-game-tick and
      * not "once ever" (which would stall every project after its first tick).
      *
-     * <p>Reads {@code getAccumulatedWork()} rather than counting placed blocks: a BUILD_BRIDGE step
-     * costs {@code buildingBasePenalty * 10} = 1500 by default, far above the ~200-400 this test
-     * banks, so no placement can run and spend the work before it is measured - which makes the
-     * assertion a direct read of the scaling arithmetic instead of an inference from block counts.
+     * <p>Reads {@code getAccumulatedWork()} rather than counting placed blocks: a BRIDGE step
+     * costs {@code bridgeBaseCost} = 600 by default, above the ~200-400 this test banks, so no
+     * placement can run and spend the work before it is measured - which makes the assertion a
+     * direct read of the scaling arithmetic instead of an inference from block counts.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
     public static void testTickAccumulatesOncePerGameTickNotOncePerCall(GameTestHelper helper) {
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -121,9 +121,9 @@ public class SiegeProjectTickGameTests {
         FlowFieldState state = new FlowFieldState(anchor, Set.of());
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, java.util.UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         LiveTerrainAccess live = new LiveTerrainAccess(helper.getLevel());
@@ -174,7 +174,7 @@ public class SiegeProjectTickGameTests {
 
     @GameTest(template = "pathing_test", timeoutTicks = 100, skyAccess = true)
     public static void testFindProjectContainingLocatesRegisteredProject(GameTestHelper helper) {
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
 
         BlockPos relativeAnchor = new BlockPos(4, 2, 4);
@@ -182,9 +182,9 @@ public class SiegeProjectTickGameTests {
         BlockPos anchor = helper.absolutePos(relativeAnchor);
         BlockPos target = helper.absolutePos(relativeTarget);
 
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_BRIDGE));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, java.util.UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         check(projectManager.findProjectContaining(target).isPresent(), "should find the project owning target");

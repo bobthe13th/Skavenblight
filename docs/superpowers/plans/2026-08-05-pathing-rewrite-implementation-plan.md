@@ -2015,6 +2015,32 @@ since a full rebuild already produces a fresh `RegionGraph` via `RegionGraph.bui
 **The onBlockChanged authority fix (the design doc's own explicit instruction — a deletion, not a new
 filter):**
 
+**Correction (2026-08-06, found executing Task 20): the deletion below was wrong and has been
+reverted — the call is necessary, not a leftover.** Task 14 was executed exactly as this task
+specified: the `flowField.forceRecalculation(step.pos())` call was deleted from `SiegeProject.tick()`
+and the guard test below (`TerritoryRegionMapOnBlockChangedTest`) was added and passed. But the
+premise — "planned-cell authority in `TerrainSnapshot` is what replaces it" — is incomplete: the
+planned-state override makes a project's OWN cells passable for planning purposes, but nothing else
+ever marks the surrounding REGION dirty when a real block gets placed there, because
+`SiegeInteractionHandler`'s `level.setBlockAndUpdate`/`destroyBlock` calls (used for every real
+construction placement) do not fire NeoForge's `BlockEvent` — confirmed via `RegionFlowField
+.forceRecalculation`'s own doc comment, which explicitly names this exact gap and existed
+specifically as the intended fix, with zero real call sites anywhere in the codebase once Task 14's
+deletion landed. Without it, a region's bounds/membership never grows to include a newly-built cell
+(`FlowFieldState.isOutOfBounds` keeps rejecting it against the region's stale, pre-construction
+bounds forever), silently stalling every chain after its first placed step. This was invisible until
+now because `compileJava` stayed red from Task 5 through Task 20 — Task 14's own guard test never
+actually ran for real against production code until this task's `./gradlew test` milestone, and this
+is the first-ever full `./gradlew runGameTestServer` run since Task 12. It reproduced as "0 stair
+block(s) built" across every `StaircaseSiegeGroupGameTests` scenario; adding the call back (in
+`SiegeProject.tick()`, immediately after the successful `SiegeInteractionHandler.constructSiegeBlock`
+call) fixed `testBuildFlowFieldGoalMarksRegionDirty` but did NOT fix the 4 real GameTests — a second,
+separate root cause survives in the connector-discovery path (see Task 21's notes). The guard test
+itself has been deleted (`git rm`), since it now asserts the literal opposite of required behavior;
+equivalent positive coverage already exists in `testBuildFlowFieldGoalMarksRegionDirty`. Steps 1-2 and
+their code sample below are preserved as history/context for how this was originally (incorrectly)
+specified — do not re-apply Step 1's deletion.
+
 **Correction (2026-08-05, found executing Task 13): this call is NOT already gone.** Confirmed via
 direct read of the committed `SiegeProject.java` (Task 12): `tick()` still calls
 `flowField.forceRecalculation(step.pos())` at its own line ~477, with the surrounding comment ("Without

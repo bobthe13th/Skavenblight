@@ -172,7 +172,17 @@ class SiegeProjectTest {
     }
 
     @Test
-    void nextUnbuiltInstructionStopsAtAnIncompleteTunnelStep() {
+    void nextUnbuiltInstructionReturnsTheIncompleteTunnelStepItselfNotThePastIt() {
+        // Corrected (2026-08-05, found running ./gradlew test for the first time since Task 12):
+        // this test previously asserted .isEmpty() here, on the premise that an incomplete TUNNEL
+        // step blocks nextUnbuiltInstruction entirely - a leftover from the OLD design, where TUNNEL/
+        // MINE steps were handled by a separate per-rat goal (SmartBreachGoal, deleted in Task 16)
+        // and deliberately left out of the macro chain's own build order walk. That goal is gone;
+        // BuildFlowFieldGoal now matches all four construction actions (see its own doc: "matching
+        // all four construction actions ... now that ... the old per-block claim goals are gone"),
+        // so TUNNEL is a perfectly ordinary chain step tick()/nextUnbuiltInstruction must return like
+        // any other - "stops at" (this test's own name) means "returns this step, not the one past
+        // it", not "returns nothing".
         BlockPos anchor = new BlockPos(0, 64, 0);
         BlockPos tunnelPos = new BlockPos(1, 64, 0);
         BlockPos buildPos = new BlockPos(2, 64, 0);
@@ -189,9 +199,11 @@ class SiegeProjectTest {
         FakeTerrain terrain = new FakeTerrain();
         terrain.set(tunnelPos, Blocks.STONE.defaultBlockState()); // not yet mined through
 
-        // Blocked on the still-solid TUNNEL step (handled by the old per-rat SmartBreachGoal path,
-        // untouched by this overhaul) - must not skip ahead to the BRIDGE step past it.
-        assertTrue(project.nextUnbuiltInstruction(terrain, evaluator).isEmpty());
+        java.util.Optional<PlannedStep> next = project.nextUnbuiltInstruction(terrain, evaluator);
+
+        assertTrue(next.isPresent(), "the still-solid TUNNEL step itself must be reported, not skipped");
+        assertEquals(tunnelPos, next.get().pos());
+        assertEquals(PathAction.TUNNEL, next.get().action());
     }
 
     /**

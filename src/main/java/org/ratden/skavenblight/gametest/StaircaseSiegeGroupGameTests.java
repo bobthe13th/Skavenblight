@@ -55,7 +55,7 @@ public class StaircaseSiegeGroupGameTests {
      * own Y) - an isolated elevated platform, disconnected from anything else by the open air
      * around/below it that this template already has by default.
      */
-    private static void buildElevatedPlatform(GameTestHelper helper, BlockPos relativeCenter, int size) {
+    static void buildElevatedPlatform(GameTestHelper helper, BlockPos relativeCenter, int size) {
         int half = size / 2;
         int floorY = relativeCenter.getY() - 1;
         for (int dx = -half; dx <= half; dx++) {
@@ -82,7 +82,7 @@ public class StaircaseSiegeGroupGameTests {
      * ground away under the platform removes that alternative outright, rather than relying on
      * relative cost to keep favoring the diagonal path every time.
      */
-    private static void carveGroundBeneathPlatform(GameTestHelper helper, int relativeGroundFloorY,
+    static void carveGroundBeneathPlatform(GameTestHelper helper, int relativeGroundFloorY,
                                                      BlockPos relativeNexusPos, int platformSize) {
         int half = platformSize / 2 + 2;
         for (int dx = -half; dx <= half; dx++) {
@@ -106,7 +106,7 @@ public class StaircaseSiegeGroupGameTests {
      * {@link #restrictTerritoryToMinimalArea}) before any level tick lets it bootstrap a region
      * scan.
      */
-    private static WarpFluxNetwork placeNexusAndConduit(GameTestHelper helper, BlockPos relativeNexusPos) {
+    static WarpFluxNetwork placeNexusAndConduit(GameTestHelper helper, BlockPos relativeNexusPos) {
         helper.setBlock(relativeNexusPos, ModBlocks.ACTIVE_WARPSTONE_NEXUS.get().defaultBlockState());
         BlockPos relativeConduitPos = relativeNexusPos.relative(Direction.EAST);
         helper.setBlock(relativeConduitPos, ModBlocks.WARP_FLUX_CONDUIT.get().defaultBlockState());
@@ -156,7 +156,7 @@ public class StaircaseSiegeGroupGameTests {
      * within the same {@code @GameTest} method body) - the bootstrap takes a defensive
      * {@code Set.copyOf} snapshot of whatever territory is present at that moment.
      */
-    private static void restrictTerritoryToMinimalArea(GameTestHelper helper, WarpFluxNetwork network,
+    static void restrictTerritoryToMinimalArea(GameTestHelper helper, WarpFluxNetwork network,
                                                          BlockPos relativeFrom, BlockPos relativeTo) {
         ChunkPos chunkFrom = new ChunkPos(helper.absolutePos(relativeFrom));
         ChunkPos chunkTo = new ChunkPos(helper.absolutePos(relativeTo));
@@ -183,7 +183,7 @@ public class StaircaseSiegeGroupGameTests {
      * funnel through the same single diagonal connector to reach the nexus regardless of where on
      * the ground floor it starts, which is exactly what the contention tests (Tasks 3-4) rely on.
      */
-    private static List<ClanratEntity> spawnClanrats(GameTestHelper helper, BlockPos relativeFirstSpawn,
+    static List<ClanratEntity> spawnClanrats(GameTestHelper helper, BlockPos relativeFirstSpawn,
                                                        int count, int spacingZ) {
         List<ClanratEntity> rats = new ArrayList<>();
         for (int i = 0; i < count; i++) {
@@ -205,7 +205,7 @@ public class StaircaseSiegeGroupGameTests {
      * territory encasement (see this file's class javadoc / the design spec's terrain-margin
      * note) - either would leave this count far below the expected diagonal step count.
      */
-    private static int countStairsInZone(GameTestHelper helper, BlockPos relativeFrom, BlockPos relativeTo) {
+    static int countStairsInZone(GameTestHelper helper, BlockPos relativeFrom, BlockPos relativeTo) {
         int minX = Math.min(relativeFrom.getX(), relativeTo.getX());
         int maxX = Math.max(relativeFrom.getX(), relativeTo.getX());
         int minY = Math.min(relativeFrom.getY(), relativeTo.getY());

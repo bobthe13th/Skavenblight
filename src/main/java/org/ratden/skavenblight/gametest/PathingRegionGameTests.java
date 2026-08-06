@@ -1043,7 +1043,15 @@ public class PathingRegionGameTests {
                             + "the SHAPE of either region, just a full rebuild that reconstructs the same "
                             + "partition), found " + regions.size());
 
-            RegionConnector connector = regionMap.getRegionGraph().getAllConnectors().get(0);
+            // Retryable check, not a bare .get(0): an ArrayIndexOutOfBoundsException (or any
+            // non-GameTestAssertException throwable) escapes this succeedWhen-style retry loop
+            // uncaught and crashes the WHOLE GameTestServer process, not just this one test -
+            // confirmed via a real crash log (Index 0 out of bounds for length 0) the first time
+            // this ran against a real, possibly-still-recomputing region graph. Unlike this
+            // method's siblings (line ~606/857), nothing above already confirmed connector count.
+            List<RegionConnector> connectors = regionMap.getRegionGraph().getAllConnectors();
+            check(!connectors.isEmpty(), "expected at least one connector between the two regions after the dirty recompute, found none");
+            RegionConnector connector = connectors.get(0);
 
             if (!loggedDump[0]) {
                 for (Region region : regions) {

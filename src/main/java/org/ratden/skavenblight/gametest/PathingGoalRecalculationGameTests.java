@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 
@@ -97,21 +98,26 @@ public class PathingGoalRecalculationGameTests {
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR)));
+        // BRIDGE, not AIR_STAIR: this target is purely horizontal from anchor (dy=0), matching
+        // candidateSteps' own dy==0/open-air classification - see PathStepEvaluator's step-
+        // generation spec. The hand-fed action here never goes through real classification (this
+        // fixture bypasses it entirely), but keeping it consistent with what the real flood would
+        // compute for this exact geometry avoids a misleading fixture.
+        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        // Single-step, default-solid-floor BUILD_STAIR project (same shape as
+        // Single-step, default-solid-floor BRIDGE project (same shape as
         // SiegeProjectAutoWidenGameTests/PathingGoalRecalculationGameTests' own widen tests) -
         // this test is about region-dirty-marking, not the no-prior-support scenario, so real
         // ground support keeps the setup minimal.
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_STAIR));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
@@ -132,17 +138,17 @@ public class PathingGoalRecalculationGameTests {
         // One goal.tick() per REAL game tick, not a synchronous loop: SiegeProject.tick() is now
         // idempotent per game tick (see its own javadoc - it has to be, since every registered
         // worker's goal instance calls it once per server tick, which made accumulation quadratic in
-        // worker count), so N calls inside one game tick bank exactly one tick's work. A
-        // BUILD_STAIR costs buildingBasePenalty * 10 = 1500 by default, so one worker at
-        // workPerRatPerTick = 100 needs ~15 game ticks - well inside this test's 200-tick budget.
+        // worker count), so N calls inside one game tick bank exactly one tick's work. A BRIDGE
+        // costs bridgeBaseCost = 600 by default, so one worker at workPerRatPerTick = 100 needs
+        // ~6 game ticks - well inside this test's 200-tick budget.
         helper.succeedWhen(() -> {
             goal.tick();
 
-            helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                    () -> "BUILD_STAIR should have placed a stair at " + relativeTarget);
+            helper.assertBlockState(relativeTarget, s -> s.is(Blocks.COBBLESTONE),
+                    () -> "BRIDGE should have placed cobblestone at " + relativeTarget);
 
             check(owner.changes.contains(target),
-                    "region map was never told about the stair placement at " + target
+                    "region map was never told about the bridge placement at " + target
                             + " - SiegeProject.tick() never called forceRecalculation (recorded changes: "
                             + owner.changes + ")");
         });
@@ -191,38 +197,41 @@ public class PathingGoalRecalculationGameTests {
         FlowFieldState state = new FlowFieldState(startPos, Set.of(new ChunkPos(startPos)));
 
         // Two DIFFERENT keyings are needed here, not one reused map: FlowFieldState's own
-        // instruction map (consumed by goal-facing code via getNextSiegeNode/getInstruction) is
-        // keyed by STANDING position with a forward-pointing value ("from here, go build at
-        // pos()") - see AwaitFormationGoal's own inline comment on this exact convention.
-        // SiegeProject's own `instructions` field (consumed by SiegeProjectManager.
-        // findProjectContaining via getInstructions().containsKey(pos)) is keyed the OPPOSITE
-        // way in real production usage (see SiegeLineTracer.trace, whose output populates this
-        // field for every real project): keyed by the BUILD/target position itself, with a
-        // backward-pointing value. Reusing the standing-position-keyed map for both would leave
-        // the project's own instructions missing a key for chain[4] (only chain[0..3] are ever
-        // "from" positions), so AbstractSiegeProjectGoal.canUse()'s own
-        // flowField.findProjectFor(node.pos()) call - node.pos() is always the BUILD target -
-        // would fail to find this project for the final step.
-        Map<BlockPos, SiegeNode> stateInstructions = new HashMap<>();
-        Map<BlockPos, SiegeNode> projectInstructions = new HashMap<>();
-        List<SiegeNode> orderedSteps = new ArrayList<>();
+        // instruction map (consumed by goal-facing code via RegionFlowField#getNextStep) is keyed
+        // by STANDING position with a forward-pointing FlowStep ("from here, go build at pos()")
+        // - see AwaitFormationGoal's own inline comment on this exact convention. SiegeProject's
+        // own `instructions` field (consumed by SiegeProjectManager.findProjectContaining via
+        // getInstructions().containsKey(pos)) is keyed the OPPOSITE way in real production usage
+        // (see SiegeProjectManager.evaluateSingleLine, whose output populates this field for every
+        // real project): keyed by the BUILD/target position itself, with a backward-pointing
+        // (predecessor) FlowStep - see SiegeProject#isCompleted's own doc on this convention.
+        // Reusing the standing-position-keyed map for both would leave the project's own
+        // instructions missing a key for chain[4] (only chain[0..3] are ever "from" positions), so
+        // AbstractSiegeProjectGoal.canUse()'s own flowField.findProjectFor(node.pos()) call -
+        // node.pos() is always the BUILD target - would fail to find this project for the final step.
+        Map<BlockPos, FlowStep> stateInstructions = new HashMap<>();
+        Map<BlockPos, FlowStep> projectInstructions = new HashMap<>();
+        List<FlowStep> orderedSteps = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
             BlockPos from = helper.absolutePos(relativeChain[i]);
             BlockPos to = helper.absolutePos(relativeChain[i + 1]);
-            stateInstructions.put(from, new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
-            projectInstructions.put(to, new SiegeNode(from, SiegeNode.SiegeAction.BUILD_STAIR));
-            orderedSteps.add(new SiegeNode(to, SiegeNode.SiegeAction.BUILD_STAIR));
+            // dx=1,dy=1,dz=0 per hop - a straight one-axis rise into open air (no support), matching
+            // candidateSteps' AIR_STAIR classification (see PathStepEvaluatorStepGenerationTest's
+            // identical regression pin for this exact shape).
+            stateInstructions.put(from, new FlowStep(to, PathAction.AIR_STAIR, from));
+            projectInstructions.put(to, new FlowStep(from, PathAction.AIR_STAIR, from));
+            orderedSteps.add(new FlowStep(to, PathAction.AIR_STAIR, from));
         }
         state.updateInstructions(stateInstructions);
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
         BlockPos chainEndPos = helper.absolutePos(relativeChain[4]);
-        SiegeProject project = new SiegeProject(projectInstructions, orderedSteps, startPos, chainEndPos, 500);
+        SiegeProject project = new SiegeProject(projectInstructions, orderedSteps, startPos, chainEndPos, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
@@ -236,9 +245,9 @@ public class PathingGoalRecalculationGameTests {
         mob.setNoGravity(true);
         helper.getLevel().addFreshEntity(mob);
 
-        // One goal.tick() per REAL game tick, four steps back to back: a BUILD_STAIR costs
-        // buildingBasePenalty * 10 = 1500 by default, so a single worker at workPerRatPerTick = 100
-        // needs ~15 game ticks per step, ~60 for the whole chain - inside this test's 400-tick
+        // One goal.tick() per REAL game tick, four steps back to back: an AIR_STAIR costs
+        // airStairBaseCost = 1000 by default, so a single worker at workPerRatPerTick = 100
+        // needs ~10 game ticks per step, ~40 for the whole chain - inside this test's 400-tick
         // budget with room to spare.
         BuildFlowFieldGoal[] currentGoal = new BuildFlowFieldGoal[1];
         net.minecraft.gametest.framework.GameTestSequence sequence = helper.startSequence();
@@ -384,14 +393,14 @@ public class PathingGoalRecalculationGameTests {
         BlockPos realLanding = helper.absolutePos(relativeAnchor.offset(11, 0, 0));
         BlockPos cappedLanding = helper.absolutePos(relativeAnchor.offset(6, 0, 0));
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         LiveTerrainAccess terrain = new LiveTerrainAccess(helper.getLevel());
         // Unconstrained FlowFieldState (2-arg constructor: no cellFilter, empty territoryChunks =
         // "Global scope") - see method javadoc for why this is deliberate.
         FlowFieldState state = new FlowFieldState(anchorPos, Set.of());
 
         Map<BlockPos, Integer> uncappedCostMap = new HashMap<>();
-        Map<BlockPos, SiegeNode> uncappedInstructionMap = new HashMap<>();
+        Map<BlockPos, FlowStep> uncappedInstructionMap = new HashMap<>();
         PriorityQueue<FlowFieldCalculator.QueueNode> uncappedQueue = new PriorityQueue<>();
 
         SiegeProjectManager uncapped = new SiegeProjectManager(evaluator);
@@ -400,12 +409,12 @@ public class PathingGoalRecalculationGameTests {
         check(uncappedInstructionMap.containsKey(realLanding),
                 "uncapped (default 32) macro-project search should have reached the real landing 11 blocks east at "
                         + realLanding + " - found instructions at: " + uncappedInstructionMap.keySet());
-        check(uncappedInstructionMap.get(realLanding).action() == SiegeNode.SiegeAction.WALK,
+        check(uncappedInstructionMap.get(realLanding).action() == PathAction.WALK,
                 "the far landing should be the REAL walkable ground the trace found (action WALK), not a synthetic "
                         + "one - found: " + uncappedInstructionMap.get(realLanding));
 
         Map<BlockPos, Integer> cappedCostMap = new HashMap<>();
-        Map<BlockPos, SiegeNode> cappedInstructionMap = new HashMap<>();
+        Map<BlockPos, FlowStep> cappedInstructionMap = new HashMap<>();
         PriorityQueue<FlowFieldCalculator.QueueNode> cappedQueue = new PriorityQueue<>();
 
         // A fresh SiegeProjectManager - setMaxCandidateProjectLength is the one thing under test.
@@ -416,10 +425,17 @@ public class PathingGoalRecalculationGameTests {
         check(!cappedInstructionMap.containsKey(realLanding),
                 "setMaxCandidateProjectLength(6) should have stopped the east-bound trace before reaching the real "
                         + "landing 11 blocks east - found instructions at: " + cappedInstructionMap.keySet());
-        SiegeNode cappedNode = cappedInstructionMap.get(cappedLanding);
-        check(cappedNode != null && cappedNode.action() == SiegeNode.SiegeAction.BUILD_LANDING,
-                "setMaxCandidateProjectLength(6) should have terminated the east-bound trace with a synthetic "
-                        + "BUILD_LANDING exactly 6 blocks out at " + cappedLanding + " (found: " + cappedNode + ")");
+        // No synthetic BUILD_LANDING anymore (that action type is gone - see
+        // SiegeProjectManager.evaluateSingleLine's own doc): hops run 1..maxCandidateProjectLength,
+        // so the cap-exhaustion terminus is a REAL BRIDGE step, one cell short of where the old
+        // synthetic landing would have sat.
+        FlowStep cappedNode = cappedInstructionMap.get(cappedLanding);
+        check(cappedNode != null && cappedNode.action() == PathAction.BRIDGE,
+                "setMaxCandidateProjectLength(6) should have terminated the east-bound trace with a real BRIDGE "
+                        + "step exactly 6 blocks out at " + cappedLanding + " (found: " + cappedNode + ")");
+        check(!cappedInstructionMap.containsKey(helper.absolutePos(relativeAnchor.offset(7, 0, 0))),
+                "with no synthetic marker to key on, confirming hop 7 is entirely absent is what actually pins "
+                        + "the 6-hop cap now");
 
         helper.succeed();
     }
@@ -456,12 +472,12 @@ public class PathingGoalRecalculationGameTests {
         BlockPos firstCappedLanding = helper.absolutePos(relativeAnchor.offset(6, 0, 0));
         BlockPos secondChainedLanding = helper.absolutePos(relativeAnchor.offset(12, 0, 0));
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         LiveTerrainAccess terrain = new LiveTerrainAccess(helper.getLevel());
         FlowFieldState state = new FlowFieldState(anchorPos, Set.of());
 
         Map<BlockPos, Integer> costMap = new HashMap<>();
-        Map<BlockPos, SiegeNode> instructionMap = new HashMap<>();
+        Map<BlockPos, FlowStep> instructionMap = new HashMap<>();
         PriorityQueue<FlowFieldCalculator.QueueNode> queue = new PriorityQueue<>();
 
         // One shared manager across BOTH calls - mirrors how FlowFieldCalculator's own Dijkstra
@@ -473,9 +489,11 @@ public class PathingGoalRecalculationGameTests {
 
         manager.evaluateMacroProjects(terrain, anchorPos, state, 0, queue, costMap, instructionMap);
 
-        SiegeNode firstLandingNode = instructionMap.get(firstCappedLanding);
-        check(firstLandingNode != null && firstLandingNode.action() == SiegeNode.SiegeAction.BUILD_LANDING,
-                "first call should cap at 6 blocks east with a synthetic BUILD_LANDING at " + firstCappedLanding
+        // No synthetic BUILD_LANDING anymore - see testMaxCandidateProjectLengthCapsMacroProjectReach's
+        // own comment. The cap-exhaustion terminus is a real BRIDGE step.
+        FlowStep firstLandingNode = instructionMap.get(firstCappedLanding);
+        check(firstLandingNode != null && firstLandingNode.action() == PathAction.BRIDGE,
+                "first call should cap at 6 blocks east with a real BRIDGE step at " + firstCappedLanding
                         + " (found: " + firstLandingNode + ")");
 
         // Simulate the Dijkstra flood reaching that landing next and firing another macro
@@ -522,17 +540,17 @@ public class PathingGoalRecalculationGameTests {
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR)));
+        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_STAIR));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_STAIR));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         LiveTerrainAccess live = new LiveTerrainAccess(helper.getLevel());
@@ -562,13 +580,23 @@ public class PathingGoalRecalculationGameTests {
     }
 
     /**
-     * Counterpart to {@link #testBuildFlowFieldGoalRegistersOnAWidenedLane}: BUILD_PILLAR is not
-     * laterally widenable (see {@code SiegeProject#effectiveCapFor} - only BUILD_STAIR/
-     * BUILD_BRIDGE scale with width), mirroring {@code SiegeProjectAutoWidenGameTests
-     * #testDoesNotWidenWhenActionIsNotLaterallyWidenable} but driven through a real goal instead
-     * of a direct {@code tryRegisterWorker} call.
+     * Counterpart to {@link #testBuildFlowFieldGoalRegistersOnAWidenedLane}, driven through a real
+     * goal instead of a direct {@code tryRegisterWorker} call - mirrors {@code
+     * SiegeProjectAutoWidenGameTests#testDoesNotWidenWhenPerpendicularLaneIsAlreadyWalkable}.
      *
-     * <p><b>Updated for the whole-branch review's Fix 3.</b> This test previously asserted
+     * <p><b>Re-anchored (2026-08-05, per advisor review): the original premise ("BUILD_PILLAR is
+     * not laterally widenable") no longer exists.</b> {@code SiegeProject#effectiveCapFor}'s new
+     * rule is {@code action != PathAction.WALK} - EVERY construction action widens now (see that
+     * method's own javadoc: "every action is parallel-lane-capable now, not just two of the old
+     * five"), and pure-vertical steps like the old BUILD_PILLAR no longer exist as a PathAction at
+     * all. The real, still-live "can't widen" path {@code isWidenEligible} still guards is the
+     * perpendicular trace itself finding nothing to build (see {@code SiegeProject#tryWiden} /
+     * {@code #traceChainedHops}'s "returns empty when the first hop is already walkable" case,
+     * unit-tested directly in {@code SiegeProjectTest
+     * #traceChainedHopsReturnsEmptyWhenTheFirstHopIsAlreadyWalkable}) - forced here via explicit
+     * terrain control rather than guessed from the template's ambient geometry.
+     *
+     * <p><b>Preserved from the whole-branch review's Fix 3.</b> This test previously asserted
      * {@code canUse() == true} here, on the grounds that "canUse() only checks a project exists, not
      * capacity" - it was documenting, and locking in, the very bug Fix 3 removed. Holding
      * {MOVE, LOOK} at priority 6 while {@code start()}'s registration silently failed left
@@ -578,35 +606,59 @@ public class PathingGoalRecalculationGameTests {
      * mirrors {@code start()}'s real preconditions via {@code SiegeProject#canAcceptWorker} and must
      * decline outright, in the same tick, freeing the rat to fall through.
      *
-     * <p>{@code canContinueToUse() == false} and {@code width == 1} are still asserted: they prove
-     * the declining is because registration genuinely couldn't happen (no project registered, no
-     * widen attempted), not because the goal simply failed to find a target.
+     * <p><b>Correction (2026-08-06, per advisor review): {@code canUse()} does NOT decline here.</b>
+     * The previous version of this test asserted {@code !canUse()}, but {@code
+     * SiegeProject#canAcceptWorker} deliberately answers TRUE for any over-cap-but-widen-eligible
+     * project without running the real trace (see that method's own javadoc: "attempting it here
+     * would turn a demand-bounded retry into a per-rat-per-tick trace... a widen-eligible project
+     * whose trace actually fails still reports true here and then fails in start()"). This fixture is
+     * exactly that one documented exception - {@code isWidenEligible} only checks
+     * {@code action != WALK} and remaining width headroom, not whether the perpendicular lane has
+     * anything left to build. So {@code canUse()} is asserted TRUE, and the real rejection is proven
+     * where it actually happens: {@code start()} runs {@link SiegeProject#tryRegisterWorker}'s real
+     * chained-hop trace, which fails, leaving no project registered - {@code canContinueToUse() ==
+     * false} and {@code width == 1} are what prove that.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
-    public static void testBuildFlowFieldGoalDoesNotRegisterOnAFullNonWidenableProject(GameTestHelper helper) {
+    public static void testBuildFlowFieldGoalDoesNotRegisterWhenWidenLaneIsAlreadyWalkable(GameTestHelper helper) {
         BlockPos relativeAnchor = new BlockPos(4, 2, 4);
-        BlockPos relativeTarget = relativeAnchor.above();
+        BlockPos relativeTarget = relativeAnchor.relative(Direction.EAST);
         BlockPos anchor = helper.absolutePos(relativeAnchor);
         BlockPos target = helper.absolutePos(relativeTarget);
 
+        // Force the widen lane's very first hop to be genuinely walkable (real solid floor + clear
+        // headroom) - see this method's own javadoc. Computed from tryWiden's own perpX/perpZ math
+        // for this exact anchor/target: trace dir (dx=1,dz=0) -> perp (0,1) -> side=-1 at width=1
+        // (odd) -> newAnchor = anchor.offset(0,0,-1) -> first hop = newAnchor.offset(1,0,0).
+        BlockPos relativeWidenHop = relativeAnchor.offset(1, 0, -1);
+        helper.setBlock(relativeWidenHop.below(), Blocks.STONE.defaultBlockState());
+        helper.setBlock(relativeWidenHop, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeWidenHop.above(), Blocks.AIR.defaultBlockState());
+
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));
-        state.updateInstructions(Map.of(anchor, new SiegeNode(target, SiegeNode.SiegeAction.BUILD_PILLAR)));
+        state.updateInstructions(Map.of(anchor, new FlowStep(target, PathAction.BRIDGE, anchor)));
 
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
         RegionFlowField flowField = new RegionFlowField(owner, 0, state, projectManager, calculator, throttler);
 
-        List<SiegeNode> orderedSteps = List.of(new SiegeNode(target, SiegeNode.SiegeAction.BUILD_PILLAR));
-        Map<BlockPos, SiegeNode> instructions = Map.of(target, new SiegeNode(anchor, SiegeNode.SiegeAction.BUILD_PILLAR));
-        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500);
+        List<FlowStep> orderedSteps = List.of(new FlowStep(target, PathAction.BRIDGE, anchor));
+        Map<BlockPos, FlowStep> instructions = Map.of(target, new FlowStep(anchor, PathAction.BRIDGE, anchor));
+        SiegeProject project = new SiegeProject(instructions, orderedSteps, anchor, target, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(project);
 
         LiveTerrainAccess live = new LiveTerrainAccess(helper.getLevel());
+        // Setup sanity: confirm the widen target really is walkable before asserting on anything
+        // downstream, or a wrong offset computation above would make this test pass for the wrong
+        // reason.
+        check(evaluator.isWalkableTerrain(live, helper.absolutePos(relativeWidenHop)),
+                "setup sanity: the widen lane's first hop must be genuinely walkable, or this test proves nothing");
+
         List<ClanratEntity> filler = new ArrayList<>();
-        for (int i = 0; i < org.ratden.skavenblight.Config.maxProjectWorkers; i++) {
+        for (int i = 0; i < org.ratden.skavenblight.Config.workersPerWidenStep; i++) {
             ClanratEntity rat = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
             rat.setPos(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
             helper.getLevel().addFreshEntity(rat);
@@ -622,37 +674,28 @@ public class PathingGoalRecalculationGameTests {
         BuildFlowFieldGoal goal = new BuildFlowFieldGoal(extraRat);
         goal.setFlowField(flowField);
 
-        // Sanity: the ONLY reason canUse() may decline below is capacity. Confirm a target is
-        // genuinely proposed here, so a false from canUse() can't be mistaken for "no work found".
+        // Setup sanity: confirm the project is genuinely full and findable, so the assertions below
+        // are known to be exercising the over-cap path rather than "no work found".
         check(flowField.findProjectFor(target).isPresent(),
-                "setup sanity: the BUILD_PILLAR target's owning project must be findable, or canUse()'s "
-                        + "capacity check below isn't what's being observed");
-        check(project.isAtCapacity(),
-                "setup sanity: the project must actually be full, or there'd be nothing for canUse() to decline");
+                "setup sanity: the target's owning project must be findable");
+        check(project.isAtCapacity(), "setup sanity: the project must actually be full");
 
-        check(!goal.canUse(),
-                "canUse() must now decline a full, non-widenable project instead of taking the mob's MOVE "
-                        + "flag and then silently failing to register in start() - see this method's javadoc");
+        // canUse() is TRUE here - see this method's own javadoc correction. canAcceptWorker
+        // deliberately doesn't run the real trace, so an over-cap-but-nominally-widen-eligible
+        // project always reports true, even in this exact scenario where the trace will fail.
+        check(goal.canUse(),
+                "canUse() is documented to answer true for a widen-eligible project without running "
+                        + "the real trace (see SiegeProject#canAcceptWorker) - this fixture's rejection "
+                        + "happens in start(), not canUse()");
 
-        // The other half of Fix 3, and the whole point of it: declining must HAND OFF to
-        // AwaitFormationGoal's at-capacity path in the same tick, not merely leave the rat idle.
-        // peekAtCapacityTarget() is exactly what ClanratEntity.peekAnyClaimedConstructionTarget()
-        // (and through it AwaitFormationGoal.canUse()) consults, so a present result here is the
-        // mechanical proof that Task 9's capacity mechanism is now reachable - it never was while
-        // canUse() stayed true for any project near a rat.
-        check(goal.peekAtCapacityTarget().isPresent(),
-                "a declined full project must still be reported as an at-capacity target, so "
-                        + "AwaitFormationGoal (priority 8) can pick the rat up - otherwise Fix 3 just "
-                        + "trades a rat stuck holding MOVE for a rat that walks past the problem");
-
-        // start() is still driven, to prove the rejection is real rather than merely predicted: no
-        // project gets registered and no widen is attempted, even when start() is called anyway.
+        // start() runs the REAL trace via tryRegisterWorker/tryWiden, which fails because the
+        // perpendicular lane's first hop is already walkable ground - nothing gets registered.
         goal.start();
 
         check(!goal.canContinueToUse(),
-                "registration should have been rejected (BUILD_PILLAR can't widen) - the goal should have no "
+                "registration should have been rejected (nothing to widen into) - the goal should have no "
                         + "registered project to continue with");
-        check(project.getWidth() == 1, "width must not have changed for a non-widenable action");
+        check(project.getWidth() == 1, "width must not have changed when there was nothing to widen into");
 
         helper.succeed();
     }

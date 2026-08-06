@@ -488,6 +488,15 @@ public class SiegeProject {
             // against in the first place.
             SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false,
                     this.platformPositions.contains(step.pos()));
+            // Real placements never fire NeoForge's BlockEvent (SiegeInteractionHandler uses
+            // level.setBlockAndUpdate/destroyBlock directly - see RegionFlowField#forceRecalculation's
+            // own doc), so nothing else marks this region dirty. Without this call, region membership
+            // never grows to include the newly-built cell (FlowFieldState.isOutOfBounds keeps
+            // rejecting it against the region's stale, pre-construction bounds forever), silently
+            // stalling every chain after its first placed step - confirmed via a full GameTest suite
+            // run showing 0 stairs built across every StaircaseSiegeGroupGameTests scenario before
+            // this fix.
+            flowField.forceRecalculation(step.pos());
 
             Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
             step = following.orElse(null);
