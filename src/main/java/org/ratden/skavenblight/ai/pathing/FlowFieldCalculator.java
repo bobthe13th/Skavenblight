@@ -11,16 +11,23 @@ public class FlowFieldCalculator {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    // How many consecutive MINE steps the core Dijkstra step (processOrthogonalNeighbors) may
-    // chain before a branch is abandoned. Mirrors SiegeProjectManager's own mineProjectLength
-    // cap (also 5) for its macro-project line tracer - without an equivalent cap here, the core
-    // search has no boundary telling it "this is just solid rock, stop": it will tunnel one
-    // MINE-step at a time arbitrarily deep into undisturbed stone looking for marginal cost
-    // savings, especially now that TerrainSnapshot covers the full vertical column instead of a
-    // narrow band. Observed in practice: 69535 of 114369 nodes (61%) were MINE in a single pass
-    // that ran 14+ minutes without finishing. When the core search hits this cap, evaluateMacroProjects
-    // (already triggered via hitObstacle) is the existing, deliberate fallback for longer connections.
-    private static final int MAX_CONSECUTIVE_MINE_DEPTH = 5;
+    // How many of a cell's candidateSteps must be real WALK steps before this class stops ALSO
+    // trying a macro-project search from it, on top of the ordinary per-cell candidates the core
+    // flood already relaxes. Counting ALL candidates regardless of action - what the old
+    // split-evaluator version did, specifically to fix a documented "sunburst" false-trigger bug -
+    // would be meaningless under the unified PathStepEvaluator: candidateSteps ALWAYS offers a
+    // construction candidate for every direction that fails the WALK check (frontier gating - see
+    // PathStepEvaluator's own class doc), so counting any-action candidates would almost never dip
+    // below any threshold except at a genuine dead end (out-of-bounds/locked in every direction).
+    // Counting WALK-only mirrors RegionScanner.BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD's identical
+    // reasoning, but this constant is kept separate (4, not RegionScanner's 6) and PROVISIONAL:
+    // this class's own frontier trigger only decides whether to ALSO run a macro-project search on
+    // top of a core flood that can now relax TUNNEL/BRIDGE/CARVED_STAIR/AIR_STAIR itself - a
+    // straight wall (5 of 8 WALK) may or may not need to trip this the way RegionScanner's
+    // boundary-cell bookkeeping does. Not settled by a unit test - Task 21's go/no-go gate (the 4
+    // existing air-stair GameTests) is what falsifies this threshold if it's wrong; revisit here
+    // first if any of those regress.
+    private static final int FRONTIER_WALK_THRESHOLD = 4;
 
     // Minimum real time between liveDebugMap publishes. Was previously "every 50 nodes"
     // regardless of map size - an O(n^2) cost over a full pass (~2287 full-map copies for a
@@ -32,14 +39,7 @@ public class FlowFieldCalculator {
 
     private PriorityQueue<QueueNode> calcQueue;
     private final Map<BlockPos, Integer> nextCostMap = new HashMap<>();
-    private final Map<BlockPos, SiegeNode> nextInstructionMap = new HashMap<>();
-    // Consecutive-MINE-steps-to-reach-this-position, keyed the same as nextCostMap/
-    // nextInstructionMap and always updated alongside them so it's consistent with whichever
-    // path is currently cheapest to a given position. Absent (default 0) is correct for any
-    // position reached via a macro-project injection rather than a core step, since a project's
-    // entry point represents standing on solid ground after the project completes - the same as
-    // a WALK/BUILD_* step, not a mid-tunnel MINE chain.
-    private final Map<BlockPos, Integer> mineChainDepth = new HashMap<>();
+    private final Map<BlockPos, FlowStep> nextInstructionMap = new HashMap<>();
     private long lastLiveDebugPublishMs = 0;
 
     // Diagnostics for the LAST completed pass, read by PathingDebugFileWriter/StandardFlowField's
@@ -56,7 +56,7 @@ public class FlowFieldCalculator {
     private boolean lastPassBudgetExhausted = false;
 
     // Volatile immutable map reference for atomic, zero-flicker snapshot reads across threads
-    private volatile Map<BlockPos, SiegeNode> liveDebugMap = Collections.emptyMap();
+    private volatile Map<BlockPos, FlowStep> liveDebugMap = Collections.emptyMap();
 
     // Positions dropped by breakMutualCycles() on the immediately preceding pass, so a still-
     // recurring producer bug doesn't spam a fresh WARN every single recompute (this class's own
@@ -66,12 +66,12 @@ public class FlowFieldCalculator {
     // position now affected) is still surfaced, while an unchanged repeat goes quiet.
     private Set<BlockPos> lastPassWarnedPositions = Collections.emptySet();
 
-    private final TerrainEvaluator terrainEvaluator;
+    private final PathStepEvaluator pathStepEvaluator;
     private final SiegeProjectManager projectManager;
     private final CalculationThrottler throttler;
 
-    public FlowFieldCalculator(TerrainEvaluator evaluator, SiegeProjectManager manager, CalculationThrottler throttler) {
-        this.terrainEvaluator = evaluator;
+    public FlowFieldCalculator(PathStepEvaluator pathStepEvaluator, SiegeProjectManager manager, CalculationThrottler throttler) {
+        this.pathStepEvaluator = pathStepEvaluator;
         this.projectManager = manager;
         this.throttler = throttler;
     }
@@ -79,7 +79,7 @@ public class FlowFieldCalculator {
     /**
      * Returns an unmodifiable atomic snapshot of live calculation progress.
      */
-    public Map<BlockPos, SiegeNode> getLiveDebugMap() {
+    public Map<BlockPos, FlowStep> getLiveDebugMap() {
         return this.liveDebugMap;
     }
 
@@ -121,7 +121,6 @@ public class FlowFieldCalculator {
     private void startCalculation(TerrainAccess terrain, FlowFieldState state) {
         nextCostMap.clear();
         nextInstructionMap.clear();
-        mineChainDepth.clear();
         liveDebugMap = Collections.emptyMap();
         lastLiveDebugPublishMs = System.currentTimeMillis();
 
@@ -130,7 +129,7 @@ public class FlowFieldCalculator {
 
         calcQueue.add(new QueueNode(targetPos, 0));
         nextCostMap.put(targetPos, 0);
-        nextInstructionMap.put(targetPos, new SiegeNode(targetPos, SiegeNode.SiegeAction.WALK));
+        nextInstructionMap.put(targetPos, new FlowStep(targetPos, PathAction.WALK, targetPos));
 
         projectManager.injectActiveProjects(terrain, calcQueue, nextCostMap, nextInstructionMap);
     }
@@ -165,12 +164,23 @@ public class FlowFieldCalculator {
 
             if (currentCost > nextCostMap.getOrDefault(current, Integer.MAX_VALUE)) continue;
 
-            boolean hitObstacle = processOrthogonalNeighbors(terrain, current, currentCost, state);
+            boolean hitObstacle = processNeighbors(terrain, current, currentCost, state);
 
-            SiegeNode currentInstruction = nextInstructionMap.get(current);
-            boolean isPlannedLanding = currentInstruction != null && currentInstruction.action() == SiegeNode.SiegeAction.BUILD_LANDING;
+            FlowStep currentInstruction = nextInstructionMap.get(current);
+            // Replacement for the old isPlannedLanding check: BUILD_LANDING no longer exists as an
+            // action, but the underlying need doesn't go away - this is the only path by which the
+            // flood can start a NEW macro-project search from a cell that isn't walkable in the
+            // real world YET (a planned chain's own terminal standable cell). Without it, a
+            // construction chain could only ever be one project long, since isWalkableTerrain is
+            // false there by definition and it usually isn't the target either - see
+            // testLargeGroupBuildsChainedStaircaseAcrossGiantGap, one of Task 21's go/no-go gate
+            // tests, which exercises exactly this. "current has an instruction a project wrote,
+            // planning to make it standable" generalizes the old BUILD_LANDING-specific check to
+            // any construction action - Task 11 owns refining this further if its own
+            // isChainedPlatform work finds it needs to be narrower.
+            boolean isPlannedConstructionTarget = currentInstruction != null && currentInstruction.action() != PathAction.WALK;
 
-            if (hitObstacle && (terrainEvaluator.isWalkableTerrain(terrain, current) || current.equals(state.getTargetPos()) || isPlannedLanding)) {
+            if (hitObstacle && (pathStepEvaluator.isWalkableTerrain(terrain, current) || current.equals(state.getTargetPos()) || isPlannedConstructionTarget)) {
                 projectManager.evaluateMacroProjects(terrain, current, state, currentCost, calcQueue, nextCostMap, nextInstructionMap);
             }
         }
@@ -178,41 +188,33 @@ public class FlowFieldCalculator {
         finalizeCalculation(state);
     }
 
-    private boolean processOrthogonalNeighbors(TerrainAccess terrain, BlockPos current, int currentCost, FlowFieldState state) {
-        List<TerrainEvaluator.EvaluatedStep> validSteps = terrainEvaluator.getValidOrthogonalSteps(terrain, current, projectManager.getLockedPositions(), state);
-        int currentMineDepth = mineChainDepth.getOrDefault(current, 0);
+    /** Relaxes every candidate step from {@code current} into the shared cost/instruction maps
+     * (standard Dijkstra: only write through if strictly cheaper than what's already known), then
+     * reports whether {@code current} counts as a frontier cell - see {@link #isFrontierCell}. */
+    private boolean processNeighbors(TerrainAccess terrain, BlockPos current, int currentCost, FlowFieldState state) {
+        List<PathStepEvaluator.EvaluatedStep> steps = pathStepEvaluator.candidateSteps(
+                terrain, current, projectManager.getLockedPositions(),
+                pos -> pathStepEvaluator.isOutOfBounds(terrain, pos, state));
 
-        for (TerrainEvaluator.EvaluatedStep step : validSteps) {
-            // Reset to 0 on WALK/BUILD_* (standing on solid ground); only MINE chains deeper.
-            // Beyond the cap, this branch is abandoned - see MAX_CONSECUTIVE_MINE_DEPTH.
-            int stepMineDepth = step.action() == SiegeNode.SiegeAction.MINE ? currentMineDepth + 1 : 0;
-            if (stepMineDepth > MAX_CONSECUTIVE_MINE_DEPTH) continue;
-
+        for (PathStepEvaluator.EvaluatedStep step : steps) {
             int totalCost = currentCost + step.cost();
 
             if (totalCost < nextCostMap.getOrDefault(step.pos(), Integer.MAX_VALUE)) {
                 nextCostMap.put(step.pos(), totalCost);
-                nextInstructionMap.put(step.pos(), new SiegeNode(current, step.action()));
-                mineChainDepth.put(step.pos(), stepMineDepth);
+                nextInstructionMap.put(step.pos(), new FlowStep(step.pos(), step.action(), current));
                 calcQueue.add(new QueueNode(step.pos(), totalCost));
             }
         }
 
-        // Was: only same-Y WALK steps counted. On any natural sloped/uneven terrain, a
-        // neighbor one block down or up is a perfectly ordinary, already-handled MINE or
-        // BUILD_PILLAR/BUILD_STAIR single step (see getValidOrthogonalSteps) - it never gets
-        // counted as WALK even though the core Dijkstra step has a cheap, correct way to take
-        // it right here, with no macro-project chain needed. That made hitObstacle fire on
-        // nearly every tile that wasn't a perfectly flat 4-way intersection (documented in
-        // CLAUDE.md as the known "sunburst" cause), not just genuine multi-block gaps/dead
-        // ends - confirmed in testing via 1948 macro-evaluation triggers and 486623 line-steps
-        // in a single pass, while WALK coverage stayed flat around 6600 nodes pass after pass.
-        // Counting any offered step (any action, any dy) reflects what actually needs a macro
-        // project: a direction getValidOrthogonalSteps found NOTHING for at all (a gap deeper
-        // than the single-block drop it already handles, or a solid wall in every dy).
-        long walkableNeighbors = validSteps.size();
+        return isFrontierCell(steps);
+    }
 
-        return walkableNeighbors < 4;
+    /** See {@link #FRONTIER_WALK_THRESHOLD}'s own doc for what this threshold means and why it's
+     * provisional. Split out as a pure, dependency-free function so it's unit-testable without a
+     * fully-constructed FlowFieldCalculator - see FlowFieldCalculatorTest. */
+    static boolean isFrontierCell(List<PathStepEvaluator.EvaluatedStep> steps) {
+        long walkCount = steps.stream().filter(step -> step.action() == PathAction.WALK).count();
+        return walkCount < FRONTIER_WALK_THRESHOLD;
     }
 
     private void finalizeCalculation(FlowFieldState state) {
@@ -227,7 +229,7 @@ public class FlowFieldCalculator {
         projectManager.finalizeCandidateProjects(nextCostMap, state.getInstructionMap());
     }
 
-    // Every ordinary core-flood write (processOrthogonalNeighbors) is gated by
+    // Every ordinary core-flood write (processNeighbors) is gated by
     // "totalCost < nextCostMap.getOrDefault(...)", which guarantees a monotonically-improving,
     // acyclic predecessor tree rooted at the target - the same guarantee any correct Dijkstra
     // gives. Project-instruction writes (SiegeProjectManager.injectActiveProjects/
@@ -280,11 +282,11 @@ public class FlowFieldCalculator {
             do {
                 cycle.add(current);
                 grouped.add(current);
-                current = nextInstructionMap.get(current).pos();
+                current = nextInstructionMap.get(current).predecessorPos();
             } while (!current.equals(start));
 
             BlockPos toDrop = pickCyclePositionToDrop(cycle, nextCostMap, lockedPositions);
-            SiegeNode droppedNode = nextInstructionMap.get(toDrop);
+            FlowStep droppedNode = nextInstructionMap.get(toDrop);
             long lockedCount = cycle.stream().filter(lockedPositions::contains).count();
             boolean lockedPreference = lockedCount > 0 && lockedCount < cycle.size();
 
@@ -294,7 +296,7 @@ public class FlowFieldCalculator {
                                 + "which pointed at {}, kept the other {} position(s) - reason: {} - "
                                 + "dropped so mobs fall back to local breach instead of looping forever",
                         cycle.size(), toDrop.toShortString(), droppedNode.action(), lockedPositions.contains(toDrop),
-                        droppedNode.pos().toShortString(), cycle.size() - 1,
+                        droppedNode.predecessorPos().toShortString(), cycle.size() - 1,
                         lockedPreference
                                 ? "kept every locked position in this cycle (" + lockedCount + " of " + cycle.size()
                                         + "), dropped one of the non-locked ones"
@@ -370,13 +372,13 @@ public class FlowFieldCalculator {
 
     /**
      * Finds every position in {@code instructionMap} that is part of a cycle of ANY length -
-     * reachable by repeatedly following each position's own {@code .pos()} - within this one map.
-     * Only this region's own {@code nextInstructionMap} is ever visible here: a cycle spanning two
-     * different regions' own separately-computed instruction maps is out of scope and NOT
-     * detected (see {@link #breakMutualCycles()}'s doc). Split out from {@link #breakMutualCycles()}
-     * as a pure, dependency-free function (no logging, no locked-position lookup, no instance
-     * state) so it's unit-testable against a plain fixture map instead of requiring a
-     * fully-constructed FlowFieldCalculator - see FlowFieldCalculatorTest.
+     * reachable by repeatedly following each position's own {@code .predecessorPos()} - within
+     * this one map. Only this region's own {@code nextInstructionMap} is ever visible here: a
+     * cycle spanning two different regions' own separately-computed instruction maps is out of
+     * scope and NOT detected (see {@link #breakMutualCycles()}'s doc). Split out from
+     * {@link #breakMutualCycles()} as a pure, dependency-free function (no logging, no
+     * locked-position lookup, no instance state) so it's unit-testable against a plain fixture map
+     * instead of requiring a fully-constructed FlowFieldCalculator - see FlowFieldCalculatorTest.
      * <p>
      * Walks forward from each not-yet-resolved position, tracking this walk's own path in visited
      * order (the same revisited-position idea {@code PathingDebugFileWriter.writeMobPathTraces}
@@ -395,7 +397,7 @@ public class FlowFieldCalculator {
      * Every position is walked into at most once before being marked resolved, so this stays
      * O(n) overall despite the outer loop touching every map entry.
      */
-    static Set<BlockPos> detectMutualCyclePositions(Map<BlockPos, SiegeNode> instructionMap) {
+    static Set<BlockPos> detectMutualCyclePositions(Map<BlockPos, FlowStep> instructionMap) {
         Set<BlockPos> cyclePositions = new HashSet<>();
         Set<BlockPos> resolved = new HashSet<>();
 
@@ -417,10 +419,10 @@ public class FlowFieldCalculator {
                     break;
                 }
 
-                SiegeNode node = instructionMap.get(current);
+                FlowStep node = instructionMap.get(current);
                 if (node == null) break; // dead end - no instruction here at all
 
-                BlockPos next = node.pos();
+                BlockPos next = node.predecessorPos();
                 if (next.equals(current)) break; // this region's own local Dijkstra objective - expected, not a cycle
 
                 indexInPath.put(current, path.size());

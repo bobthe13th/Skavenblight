@@ -35,10 +35,10 @@ class FlowFieldCalculatorTest {
         BlockPos b = new BlockPos(1, -61, -20);
         BlockPos c = new BlockPos(1, -62, -20);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(a, new SiegeNode(TARGET, SiegeNode.SiegeAction.WALK));
-        instructions.put(b, new SiegeNode(a, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(c, new SiegeNode(b, SiegeNode.SiegeAction.BUILD_SPIRAL));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(a, new FlowStep(a, PathAction.WALK, TARGET));
+        instructions.put(b, new FlowStep(b, PathAction.AIR_STAIR, a));
+        instructions.put(c, new FlowStep(c, PathAction.CARVED_STAIR, b));
 
         assertTrue(FlowFieldCalculator.detectMutualCyclePositions(instructions).isEmpty());
     }
@@ -47,8 +47,8 @@ class FlowFieldCalculatorTest {
     void selfReferencingLocalObjectiveIsNotACycle() {
         // Every region's own local Dijkstra target self-references (see
         // FlowFieldCalculator.startCalculation) - this is the expected end of a chain, not a bug.
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(TARGET, new SiegeNode(TARGET, SiegeNode.SiegeAction.WALK));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(TARGET, new FlowStep(TARGET, PathAction.WALK, TARGET));
 
         assertTrue(FlowFieldCalculator.detectMutualCyclePositions(instructions).isEmpty());
     }
@@ -59,9 +59,9 @@ class FlowFieldCalculatorTest {
         BlockPos upper = new BlockPos(1, -60, -20);
         BlockPos lower = new BlockPos(1, -61, -20);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(upper, new SiegeNode(lower, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(lower, new SiegeNode(upper, SiegeNode.SiegeAction.BUILD_SPIRAL));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(upper, new FlowStep(upper, PathAction.AIR_STAIR, lower));
+        instructions.put(lower, new FlowStep(lower, PathAction.CARVED_STAIR, upper));
 
         Set<BlockPos> cyclePositions = FlowFieldCalculator.detectMutualCyclePositions(instructions);
 
@@ -75,11 +75,11 @@ class FlowFieldCalculatorTest {
         BlockPos elsewhereA = new BlockPos(-6, -60, -44);
         BlockPos elsewhereB = new BlockPos(-6, -60, -43);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(upper, new SiegeNode(lower, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(lower, new SiegeNode(upper, SiegeNode.SiegeAction.BUILD_SPIRAL));
-        instructions.put(elsewhereA, new SiegeNode(elsewhereB, SiegeNode.SiegeAction.WALK));
-        instructions.put(elsewhereB, new SiegeNode(TARGET, SiegeNode.SiegeAction.WALK));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(upper, new FlowStep(upper, PathAction.AIR_STAIR, lower));
+        instructions.put(lower, new FlowStep(lower, PathAction.CARVED_STAIR, upper));
+        instructions.put(elsewhereA, new FlowStep(elsewhereA, PathAction.WALK, elsewhereB));
+        instructions.put(elsewhereB, new FlowStep(elsewhereB, PathAction.WALK, TARGET));
 
         Set<BlockPos> cyclePositions = FlowFieldCalculator.detectMutualCyclePositions(instructions);
 
@@ -95,11 +95,11 @@ class FlowFieldCalculatorTest {
         BlockPos b1 = new BlockPos(10, 5, 10);
         BlockPos b2 = new BlockPos(10, 6, 10);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(a1, new SiegeNode(a2, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(a2, new SiegeNode(a1, SiegeNode.SiegeAction.BUILD_SPIRAL));
-        instructions.put(b1, new SiegeNode(b2, SiegeNode.SiegeAction.MINE));
-        instructions.put(b2, new SiegeNode(b1, SiegeNode.SiegeAction.BUILD_STAIR));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(a1, new FlowStep(a1, PathAction.AIR_STAIR, a2));
+        instructions.put(a2, new FlowStep(a2, PathAction.CARVED_STAIR, a1));
+        instructions.put(b1, new FlowStep(b1, PathAction.TUNNEL, b2));
+        instructions.put(b2, new FlowStep(b2, PathAction.BRIDGE, b1));
 
         Set<BlockPos> cyclePositions = FlowFieldCalculator.detectMutualCyclePositions(instructions);
 
@@ -114,10 +114,10 @@ class FlowFieldCalculatorTest {
         BlockPos b = new BlockPos(1, -61, -20);
         BlockPos c = new BlockPos(1, -62, -20);
 
-        Map<BlockPos, SiegeNode> instructions = new HashMap<>();
-        instructions.put(a, new SiegeNode(b, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(b, new SiegeNode(c, SiegeNode.SiegeAction.BUILD_SPIRAL));
-        instructions.put(c, new SiegeNode(a, SiegeNode.SiegeAction.BUILD_STAIR));
+        Map<BlockPos, FlowStep> instructions = new HashMap<>();
+        instructions.put(a, new FlowStep(a, PathAction.AIR_STAIR, b));
+        instructions.put(b, new FlowStep(b, PathAction.CARVED_STAIR, c));
+        instructions.put(c, new FlowStep(c, PathAction.BRIDGE, a));
 
         Set<BlockPos> cyclePositions = FlowFieldCalculator.detectMutualCyclePositions(instructions);
 
@@ -144,11 +144,11 @@ class FlowFieldCalculatorTest {
         // with d inserted first forces the intended walk order: start at d, run up through a/b/c,
         // then close the loop back at a with the cycle already appended after d in `path` - only
         // then does seenAt land at a nonzero index (1, not 0), actually exercising the trim.
-        Map<BlockPos, SiegeNode> instructions = new LinkedHashMap<>();
-        instructions.put(d, new SiegeNode(a, SiegeNode.SiegeAction.WALK));
-        instructions.put(a, new SiegeNode(b, SiegeNode.SiegeAction.BUILD_PILLAR));
-        instructions.put(b, new SiegeNode(c, SiegeNode.SiegeAction.BUILD_SPIRAL));
-        instructions.put(c, new SiegeNode(a, SiegeNode.SiegeAction.BUILD_STAIR));
+        Map<BlockPos, FlowStep> instructions = new LinkedHashMap<>();
+        instructions.put(d, new FlowStep(d, PathAction.WALK, a));
+        instructions.put(a, new FlowStep(a, PathAction.AIR_STAIR, b));
+        instructions.put(b, new FlowStep(b, PathAction.CARVED_STAIR, c));
+        instructions.put(c, new FlowStep(c, PathAction.BRIDGE, a));
 
         Set<BlockPos> cyclePositions = FlowFieldCalculator.detectMutualCyclePositions(instructions);
 
@@ -261,5 +261,64 @@ class FlowFieldCalculatorTest {
         BlockPos dropped = FlowFieldCalculator.pickCyclePositionToDrop(cycle, costMap, lockedPositions);
 
         assertEquals(upper, dropped);
+    }
+
+    // --- isFrontierCell: what "hitObstacle" (the old split-evaluator's walkableNeighbors < 4
+    // check) becomes under the unified PathStepEvaluator - see the constant's own doc on why
+    // counting ANY-action candidates (the old fix for a "sunburst" false-trigger bug) no longer
+    // works once candidateSteps always offers a construction fallback for every failed-WALK
+    // direction.
+
+    private static PathStepEvaluator.EvaluatedStep step(int x, int z, PathAction action) {
+        return new PathStepEvaluator.EvaluatedStep(new BlockPos(x, 0, z), 10, action);
+    }
+
+    @Test
+    void isFrontierCellTrueWhenFewerThanFourCandidatesAreWalk() {
+        List<PathStepEvaluator.EvaluatedStep> steps = List.of(
+                step(1, 0, PathAction.WALK),
+                step(-1, 0, PathAction.WALK),
+                step(0, 1, PathAction.WALK),
+                step(0, -1, PathAction.TUNNEL),
+                step(1, 1, PathAction.TUNNEL),
+                step(-1, -1, PathAction.BRIDGE),
+                step(1, -1, PathAction.BRIDGE),
+                step(-1, 1, PathAction.CARVED_STAIR));
+
+        assertTrue(FlowFieldCalculator.isFrontierCell(steps), "3 WALK candidates is below the threshold of 4");
+    }
+
+    @Test
+    void isFrontierCellFalseWhenFourOrMoreCandidatesAreWalk() {
+        List<PathStepEvaluator.EvaluatedStep> steps = List.of(
+                step(1, 0, PathAction.WALK),
+                step(-1, 0, PathAction.WALK),
+                step(0, 1, PathAction.WALK),
+                step(0, -1, PathAction.WALK),
+                step(1, 1, PathAction.TUNNEL),
+                step(-1, -1, PathAction.TUNNEL),
+                step(1, -1, PathAction.BRIDGE),
+                step(-1, 1, PathAction.CARVED_STAIR));
+
+        assertFalse(FlowFieldCalculator.isFrontierCell(steps), "4 WALK candidates already meets the threshold - not a frontier");
+    }
+
+    @Test
+    void isFrontierCellCountsOnlyWalkNotAnyCandidate() {
+        // All 8 offsets returned SOME candidate (construction fills every gap the WALK check
+        // failed), but none of them are WALK - this must still count as a frontier, unlike the
+        // old any-action counting scheme which would have read this as "8 neighbors, not a
+        // frontier" and never tried a macro-project search at all.
+        List<PathStepEvaluator.EvaluatedStep> steps = List.of(
+                step(1, 0, PathAction.TUNNEL),
+                step(-1, 0, PathAction.TUNNEL),
+                step(0, 1, PathAction.BRIDGE),
+                step(0, -1, PathAction.BRIDGE),
+                step(1, 1, PathAction.CARVED_STAIR),
+                step(-1, -1, PathAction.CARVED_STAIR),
+                step(1, -1, PathAction.AIR_STAIR),
+                step(-1, 1, PathAction.AIR_STAIR));
+
+        assertTrue(FlowFieldCalculator.isFrontierCell(steps));
     }
 }
