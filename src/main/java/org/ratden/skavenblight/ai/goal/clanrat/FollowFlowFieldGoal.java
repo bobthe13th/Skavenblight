@@ -71,40 +71,14 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
         // repeat-hop detection below, which specifically needs to persist across those restarts.
     }
 
-    // TEMPORARY (Task 21, 4th-session climb investigation) - to be reverted before commit.
-    private int climbWatchTicks = 0;
-
-    // The hop nudgeAcross is currently trying to cross, or null when no nudge is outstanding.
-    // See its use in tick() below - a single MoveControl.setWantedPosition call only supplies
-    // ONE tick's worth of forward movement input before MoveControl's own internal state resets
-    // to WAIT and zeroes it again (confirmed via decompiled MoveControl.tick()/Mob.setSpeed, and
-    // via isolated single-rat GameTest diagnostics: a once-per-10-ticks nudge reliably triggered
-    // MoveControl's own jump heuristic for a climb, but supplied no horizontal momentum to carry
-    // past the jump's apex, so gravity dropped the mob straight back onto the SAME tile it jumped
-    // from, repeating forever with zero net displacement). Re-issuing the nudge every tick while
-    // one is outstanding sustains that momentum instead.
-    private BlockPos activeNudgeTarget = null;
-
     @Override
     public void tick() {
-        if (this.climbWatchTicks > 0) {
-            this.climbWatchTicks--;
-            Vec3 p = this.mob.position();
-            LOGGER.info("[DEBUG-CLIMB] id={} tick pos=({}, {}, {}) delta={} onGround={} activeGoals={}",
-                    this.mob.getId(), String.format("%.4f", p.x), String.format("%.4f", p.y), String.format("%.4f", p.z),
-                    this.mob.getDeltaMovement(), this.mob.onGround(), activeGoalNames());
-        }
-
         if (this.escapeHatchTicks > 0) {
             this.escapeHatchTicks--;
             if (this.mob.getNavigation().isDone()) {
                 this.escapeHatchTicks = 0;
             }
             return;
-        }
-
-        if (this.activeNudgeTarget != null) {
-            nudgeAcross(this.activeNudgeTarget);
         }
 
         if (--this.pathingUpdateTimer <= 0) {
@@ -157,7 +131,6 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             // multi-block detour instead of actually pathing in.
             if (targetNode == null) {
                 this.lastHopOrigin = null;
-                this.activeNudgeTarget = null;
                 BlockPos heading = this.flowField.getWildernessHeadingTarget(currentPos);
                 this.mob.getNavigation().moveTo(
                         heading.getX() + 0.5D,
@@ -171,7 +144,6 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             // If we DO have a node, but it isn't WALK, stop moving so the Builder/Miner goals can take over.
             if (targetNode.action() != PathAction.WALK) {
                 this.lastHopOrigin = null;
-                this.activeNudgeTarget = null;
                 this.mob.getNavigation().stop();
                 return;
             }
@@ -239,45 +211,13 @@ public class FollowFlowFieldGoal extends Goal implements SiegeGoal {
             // Navigation's own arrival tolerance a second time for the same hop - bypass it
             // entirely with a direct MoveControl nudge (nudgeAcross), which doesn't depend on
             // Navigation ever considering itself "arrived".
-            //
-            // (2026-08-06, Task 21 4th-session climb investigation): an isInProgress()-gated variant
-            // of this condition, tried earlier in this same investigation, made things measurably
-            // worse (net displacement dropped ~6x) and was reverted - the condition itself was never
-            // the defect. Isolated single-rat GameTest evidence (per-mob id in every [DEBUG-CLIMB]
-            // line) showed the REAL defect one level down, inside nudgeAcross itself: once this
-            // branch is reached for a climb, MoveControl's own jump heuristic (confirmed via its
-            // decompiled MOVE_TO branch) correctly triggers on a single nudgeAcross call, but that
-            // one call supplies only one tick of forward (zza) input before MoveControl's WAIT branch
-            // zeroes it again next tick - not enough horizontal momentum to carry past the jump's
-            // apex. The mob jumped straight up (~1.17 blocks, clearing the step) and fell straight
-            // back down onto the SAME tile every single 10-tick cycle, forever. Fix: sustain the
-            // nudge every tick via activeNudgeTarget (see its own field doc and the top of tick())
-            // instead of only once per 10-tick decision cycle, so momentum carries through the jump.
             if (this.lastHopOrigin != null && this.lastHopOrigin.equals(currentPos)) {
-                LOGGER.info("[DEBUG-CLIMB] id={} BRANCH=NUDGE_ACROSS currentPos={} nextInChain={} lastHopOrigin={} activeGoals={}",
-                        this.mob.getId(), currentPos, nextInChain, this.lastHopOrigin, activeGoalNames());
-                this.activeNudgeTarget = nextInChain;
                 nudgeAcross(nextInChain);
             } else {
-                LOGGER.info("[DEBUG-CLIMB] id={} BRANCH=MOVE_OR_HOP currentPos={} nextInChain={} lastHopOrigin={} activeGoals={}",
-                        this.mob.getId(), currentPos, nextInChain, this.lastHopOrigin, activeGoalNames());
-                this.activeNudgeTarget = null;
                 moveOrHop(nextInChain);
-                var path = this.mob.getNavigation().getPath();
-                LOGGER.info("[DEBUG-CLIMB] id={} post-moveOrHop path={} nodeCount={} isInProgress={} isDone={}",
-                        this.mob.getId(), path, path != null ? path.getNodeCount() : -1,
-                        this.mob.getNavigation().isInProgress(), this.mob.getNavigation().isDone());
-            }
-            if (nextInChain.getY() != currentPos.getY()) {
-                this.climbWatchTicks = 30;
             }
             this.lastHopOrigin = currentPos;
         }
-    }
-
-    // TEMPORARY (Task 21, 4th-session climb investigation) - to be reverted before commit.
-    private String activeGoalNames() {
-        return (this.mob instanceof org.ratden.skavenblight.entity.custom.ClanratEntity c) ? c.getActiveGoalNames() : "?";
     }
 
     @Override
