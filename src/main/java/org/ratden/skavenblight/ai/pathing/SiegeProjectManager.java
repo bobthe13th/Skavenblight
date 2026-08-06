@@ -149,18 +149,39 @@ public class SiegeProjectManager {
             // building there is not the same as nothing needs to ROUTE there: without this,
             // entryPos gets no instruction at all on the very next pass, stranding a mob standing on
             // it with no way to be told to walk onward into the project's still-unbuilt interior.
-            // putIfAbsent so a genuinely cheaper real route the ordinary flood found elsewhere in
-            // this SAME pass (or the project's own entry case, already put above) is never
-            // overwritten - this is a fallback for "nothing else provides an instruction here", not
-            // a preference over one that already exists. Guarded on presence: a route-tree
-            // connector project (RegionGraph.registerConnector's outbound/inbound instruction maps)
-            // deliberately does NOT key its own entryPos in `instructions` - "the far region's own
-            // pass already covers it" (see that method's own doc) - so there's nothing to fall back
-            // to there, and inserting a literal null would NPE the first caller that reads it back
-            // out.
+            //
+            // Correction (2026-08-06, found executing Task 21's go/no-go gate): this MUST be an
+            // unconditional put, not putIfAbsent. For a child region, TerritoryRegionMap.
+            // rebuildRegionsAndGraph sets that region's OWN flow-field target to exactly this same
+            // connector's entry position (target = parentConnector.entryFor(regionId)) - so by the
+            // time this method runs, FlowFieldCalculator.startCalculation has ALREADY unconditionally
+            // seeded a trivial self-referential terminal WALK step at this exact key
+            // (nextInstructionMap.put(targetPos, FlowStep(targetPos, WALK, targetPos))). A
+            // putIfAbsent here is therefore a permanent no-op for every child region: the real
+            // "start crossing" instruction can never be installed, and a mob standing at the entry
+            // point is told "you're already done, stand still" forever instead of being routed onto
+            // the crossing - confirmed via a real GameTest run showing 0 stairs ever built in every
+            // StaircaseSiegeGroupGameTests scenario, traced by instrumenting AbstractSiegeProjectGoal
+            // .canUse() and finding the effective node frozen at a self-referential WALK exactly at
+            // the rat's own position, every tick, forever. The "genuinely cheaper real route" this
+            // guard meant to protect is not actually at risk from switching to put(): ordinary
+            // Dijkstra relaxation (FlowFieldCalculator.processNeighbors) only ever overwrites
+            // nextInstructionMap together with nextCostMap when it finds something strictly cheaper
+            // than what's currently in nextCostMap, and that overwrite happens AFTER this method
+            // returns, in the main queue-processing loop - so a later, genuinely cheaper real route
+            // still wins regardless of what this seeds here. The only case actually affected by this
+            // change is exactly the one that was broken: nothing else ever independently reaches
+            // entryPos (its cost is pinned at 0, as the region's own target, and never relaxed
+            // again), so whatever this method seeds here is final either way - it must be the real
+            // crossing instruction, not the trivial placeholder that was winning the race by
+            // construction order alone. Guarded on presence: a route-tree connector project
+            // (RegionGraph.registerConnector's outbound/inbound instruction maps) deliberately does
+            // NOT key its own entryPos in `instructions` - "the far region's own pass already covers
+            // it" (see that method's own doc) - so there's nothing to fall back to there, and
+            // inserting a literal null would NPE the first caller that reads it back out.
             FlowStep ownEntryInstruction = project.getInstructions().get(entry);
             if (ownEntryInstruction != null) {
-                nextInstructionMap.putIfAbsent(entry, ownEntryInstruction);
+                nextInstructionMap.put(entry, ownEntryInstruction);
             }
 
             if (entryCost < nextCostMap.getOrDefault(entry, Integer.MAX_VALUE)) {

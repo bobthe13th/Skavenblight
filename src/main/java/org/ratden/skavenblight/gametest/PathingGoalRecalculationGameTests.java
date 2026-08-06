@@ -530,6 +530,13 @@ public class PathingGoalRecalculationGameTests {
      * standing AT {@code target} would resolve (via the neighbor-fallback lookahead) to exactly
      * that self-referential node, since the only instruction in this field's state is keyed at
      * {@code anchor} pointing at {@code target}.
+     *
+     * <p><b>Corrected (2026-08-06, per advisor review): flat, walkable floor at the widen offset
+     * makes the widen FAIL, not succeed</b> - same rationale as {@code
+     * SiegeProjectAutoWidenGameTests#testWidensWhenRegistrationRejectedAtCap}'s own identical
+     * correction: {@code SiegeProject#traceChainedHops} returns an EMPTY list the moment its first
+     * hop is already walkable, and {@code tryWiden} refuses an empty trace. A genuine gap (no floor
+     * support) is carved at the widen offset instead of relying on the default template floor.
      */
     @GameTest(template = "pathing_test", timeoutTicks = 200, skyAccess = true)
     public static void testBuildFlowFieldGoalRegistersOnAWidenedLane(GameTestHelper helper) {
@@ -537,6 +544,14 @@ public class PathingGoalRecalculationGameTests {
         BlockPos relativeTarget = relativeAnchor.relative(Direction.EAST);
         BlockPos anchor = helper.absolutePos(relativeAnchor);
         BlockPos target = helper.absolutePos(relativeTarget);
+
+        // Carve a genuine gap at the first widen's perpendicular offset - same perpX/perpZ math as
+        // SiegeProjectAutoWidenGameTests#testWidensWhenRegistrationRejectedAtCap: trace dir
+        // (dx=1,dz=0) -> perp (0,1) -> side=-1 at width=1 (odd) -> first hop = anchor.offset(1,0,-1).
+        BlockPos relativeWidenHop = relativeAnchor.offset(1, 0, -1);
+        helper.setBlock(relativeWidenHop.below(), Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeWidenHop, Blocks.AIR.defaultBlockState());
+        helper.setBlock(relativeWidenHop.above(), Blocks.AIR.defaultBlockState());
 
         RecordingRegionMap owner = new RecordingRegionMap();
         FlowFieldState state = new FlowFieldState(anchor, Set.of(new ChunkPos(anchor)));

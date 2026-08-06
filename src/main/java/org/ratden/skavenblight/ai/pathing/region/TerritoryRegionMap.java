@@ -807,9 +807,14 @@ public class TerritoryRegionMap {
 
     /**
      * The onBlockChanged authority fix: makes every ACTIVE project's planned final state
-     * authoritative for terrain evaluation, both before and during construction, replacing
-     * {@code SiegeProject.tick()}'s old direct {@code forceRecalculation} call (deleted - see this
-     * task's own commit). Returns null ("no override" - {@link TerrainSnapshot}'s
+     * authoritative for terrain evaluation, both before and during construction. Originally
+     * specified as a full replacement for {@code SiegeProject.tick()}'s direct {@code
+     * forceRecalculation} call - that call has since been restored (see {@code RegionFlowField
+     * #forceRecalculation}'s own doc and the plan doc's dated Task 14 correction note): this
+     * override covers a project's OWN planned cells for terrain-evaluation purposes, but does
+     * nothing to grow a region's membership bounds to include a newly-built cell, which is what
+     * the restored call fixes. The two mechanisms are complementary, not redundant. Returns null
+     * ("no override" - {@link TerrainSnapshot}'s
      * plannedStateOverride parameter treats null that way) for any position no active project
      * claims a build-order step at, so a genuinely unclaimed position always falls through to the
      * real, unbuilt world state - the grief-recovery requirement this exists to preserve. Also
