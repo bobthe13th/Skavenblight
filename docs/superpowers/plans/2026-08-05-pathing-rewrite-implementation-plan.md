@@ -3123,21 +3123,48 @@ test's `timeoutTicks` tripled-to-5×'d (diagnostic-only, not committed, already 
 all 4, and critically, the specific rat being checked for arrival sat at **exact spawn height** in
 every failure, regardless of the far larger budget — not partway up and out of time, at spawn, for
 the whole test. For the single-rat test this is airtight: one rat total, its own project built the
-counted stairs, and that same rat never left spawn height. Leading suspect, not yet confirmed: a
-repeating jump-bounce loop observed once during this session (`AbstractSiegeProjectGoal.canUse()`'s
-own mid-leap guard logged `!mob.onGround()` persistently true, `getDeltaMovement().y` alternating
-between two fixed values ~0.083/~0.248, for ~20 real seconds before self-resolving) — reminiscent of
-the third session's "identical jump arc repeated forever" symptom, but that one was root-caused to
-the now-fixed 1.5-block-rise geometry, so if this recurs post-fix it has a different cause. That
-observation was not on a gate test's own checked rat and was not deeply investigated this session
-(deprioritized in favor of committing durable progress first) — needs its own dedicated,
-`mob.getId()`-tagged investigation on `testSingleRatBuildsStaircaseAcrossSmallGap` specifically. This
-is now squarely a movement-layer question — the construction-geometry mandate that opened this
-session is fully discharged; do not re-attempt it.
+counted stairs, and that same rat never left spawn height. A repeating jump-bounce loop observed once
+this session (`AbstractSiegeProjectGoal.canUse()`'s own mid-leap guard logging `!mob.onGround()`
+persistently true) was initially flagged as the leading suspect — **this was wrong, retracted, do not
+chase it.** It was a single, never-repeated, log-only observation with no ground truth behind it.
 
-**Gate verdict (fifth session): still NO-GO.** Construction-geometry defect (root cause identified
-in sessions 3-4) is fixed, landed, and verified. Arrival is blocked by a distinct, unfixed
-traversal defect. Tasks 22-24 remain blocked.
+**Resolved, found by the user watching `staircase_siege_group:0` run live in-game (not from logs):** a
+connecting PLATFORM was placed on top of the last stair block instead of beside it, forming a 2-block
+wall the rat physically could not cross. `PlatformInserter` flags a build-order seam wherever two
+different non-WALK construction actions meet (e.g. AIR_STAIR transitioning into CARVED_STAIR mining),
+and `SiegeInteractionHandler.constructSiegeBlock`'s `isPlatform` branch clears a 3x3 floor centered on
+`pos.below()` for that seam's own node — wide enough that a fringe cell lands exactly on the PREVIOUS
+step's own logical position, the cell the mob must land in right after climbing the stair just before
+the seam. The floor loop found that cell open (correctly — it's a required-open landing cell) and
+filled it with cobblestone, stacking a solid block directly above the stair the mob had just climbed.
+A FOURTH consequence of the placement-geometry fix, same family as the registration-continuation bug
+and the `countStairsInZone` blind spot: unreachable before that fix, wrong once reachable, because the
+platform-clearing code predates the placement/logical split. Fixed (commit `699b281`, pushed):
+`constructSiegeBlock` takes a new `protectedPositions` parameter (every build-order step's own logical
+position) and the platform floor loop skips any cell in that set.
+
+**Verified: `testSingleRatBuildsStaircaseAcrossSmallGap` now PASSES end-to-end** — the first gate test
+to fully pass in this entire investigation, reproduced across two separate full-suite runs. The other
+3 gate tests still don't arrive within their own timeout in the full 40-test concurrent batch, but all
+build real, correctly-counted stair chains well past their minimums (11/11/41 stairs vs. required
+7/7/20) — not yet confirmed whether they simply need more build time/throughput (plausible — single-
+rat has the least total construction to do) or hit a separate remaining defect. That is the actual
+open question for the next session, not movement and not construction geometry — both of those are
+done. Also surfaced, not fixed: `playerBreakingAHalfBuiltProjectStillTriggersRealRecalculation`
+progressed past its first phase (now finds a real stair to grief) into a different, deeper failure in
+flow-field reversion after griefing.
+
+Also flagged by the user, real but explicitly deferred (not Task 21 blockers): (1) whether a PLATFORM
+seam is even necessary for a same-direction transition like AIR_STAIR→CARVED_STAIR — `PlatformInserter`
+fires on any two differing non-WALK actions, possibly broader than needed; (2) platform/headroom
+clearing destroys blocks instantly regardless of hardness (`miningCost` only prices the single
+TUNNEL/CARVED_STAIR target cell) — a real design gap the user wants addressed (mining should cost time
+proportional to the block's hardness) but scoped as its own piece, not bundled into this gate.
+
+**Gate verdict (fifth session, continued): still NO-GO, but 1 of 4.** Construction-geometry defect
+(sessions 3-4) and the platform-collision defect (this session, found via live observation) are both
+fixed, landed, and verified. `testSingleRatBuildsStaircaseAcrossSmallGap` passes. The remaining 3 gate
+tests build correctly but don't arrive in time. Tasks 22-24 remain blocked.
 
 **Files (this session, fifth pass):**
 - `PlannedStep.java` — added `placementPos()` field (backward-compatible 3-arg constructor
@@ -3147,7 +3174,9 @@ traversal defect. Tasks 22-24 remain blocked.
   moved before the radius check).
 - `PathStepEvaluator.java` — `isActionCompleted`'s `AIR_STAIR`/`CARVED_STAIR` case split from
   `BRIDGE`'s (now checks `isWalkableTerrain` at the logical target instead of raw solidity).
-- `SiegeInteractionHandler.java` — `clearStairHeadroom`'s loop extended from `y<=2` to `y<=3`.
+- `SiegeInteractionHandler.java` — `clearStairHeadroom`'s loop extended from `y<=2` to `y<=3`;
+  `constructSiegeBlock` gained a `protectedPositions` parameter, consulted only by the `isPlatform`
+  floor loop to skip any cell that's a build-order step's own logical position.
 - `AbstractSiegeProjectGoal.java` — `tick()` null-guards against `flowField` going null mid-cycle.
 - `PathingGoalRecalculationGameTests.java` — one stale hand-fed fixture
   (`testBuildFlowFieldGoalCompletesMultiStepMacroChainWithNoPriorSupport`) updated to assert the
@@ -3156,11 +3185,13 @@ traversal defect. Tasks 22-24 remain blocked.
   rewritten to use it, `awaitArrivalAndStaircase` throttles the scan to once per 10 ticks.
 - `SiegeProjectGriefRecoveryGameTests.java` — `findFirstStair` rewritten to use the same
   `crossingZoneBounds` helper.
-- Reference: all temporary `[DEBUG-T21]`-tagged, `mob.getId()`-scoped instrumentation added during
-  this session's investigation (in `SiegeProject.java` and `AbstractSiegeProjectGoal.java`) was fully
-  reverted before the commit — none of it is in the tree. A diagnostic timeout-bump experiment in
-  `StaircaseSiegeGroupGameTests.java` (used to rule out batch tick-starvation) was likewise reverted
-  and never committed.
+- Reference: all temporary `[DEBUG-T21]`/`[TEMP-DIAG-1]`-tagged, `mob.getId()`-scoped instrumentation
+  added during this session's investigation (in `SiegeProject.java` and
+  `AbstractSiegeProjectGoal.java`) was fully reverted before each commit — none of it is in the tree.
+  A diagnostic timeout-bump experiment in `StaircaseSiegeGroupGameTests.java` (used to rule out batch
+  tick-starvation) was likewise reverted and never committed. Two commits landed this session:
+  `7010ff7` (placement geometry + its two unblocked consequences) and `699b281` (the platform-floor
+  collision, found by the user watching the test live rather than from logs).
 
 **Files (this session, fourth pass):**
 - `FollowFlowFieldGoal.java` — two fix attempts implemented, tested, and reverted; net diff is zero.
