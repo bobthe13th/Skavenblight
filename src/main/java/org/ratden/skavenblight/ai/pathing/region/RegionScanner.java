@@ -5,8 +5,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import org.ratden.skavenblight.Config;
 import org.ratden.skavenblight.ai.pathing.FlowFieldState;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
-import org.ratden.skavenblight.ai.pathing.TerrainEvaluator;
+import org.ratden.skavenblight.ai.pathing.PathAction;
+import org.ratden.skavenblight.ai.pathing.PathStepEvaluator;
 import org.ratden.skavenblight.ai.pathing.TerrainSnapshot;
 import org.slf4j.Logger;
 
@@ -28,16 +28,7 @@ public final class RegionScanner {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    // Same cap, and for the same reason, as FlowFieldCalculator's private
-    // MAX_CONSECUTIVE_MINE_DEPTH (kept as a local constant rather than exposing that one):
-    // getValidOrthogonalSteps happily offers a MINE step into any solid block at the current Y,
-    // so a flood fill that follows those steps without a depth limit tunnels arbitrarily far
-    // through undisturbed rock - which here doesn't just waste budget, it MERGES two regions that
-    // are genuinely separated by solid stone, destroying the very partition this class exists to
-    // produce (and with it the connector/route-tree work that depends on the partition).
-    private static final int MAX_CONSECUTIVE_MINE_DEPTH = 5;
-
-    // TerrainEvaluator.HORIZONTAL_OFFSETS holds 8 entries (4 cardinal + 4 diagonal), so an
+    // PathStepEvaluator's HORIZONTAL_OFFSETS holds 8 entries (4 cardinal + 4 diagonal), so an
     // ordinary open flat cell in the middle of walkable space offers 8 WALK steps - one per
     // direction. A cell sitting against a straight wall or cliff edge loses exactly 3 of them
     // (the blocked direction plus its two flanking diagonals), so 6 is the highest threshold that
@@ -47,10 +38,10 @@ public final class RegionScanner {
     // outward from boundary cells - had nothing to trace from along flat walls/cliffs.
     private static final int BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD = 6;
 
-    private final TerrainEvaluator terrainEvaluator;
+    private final PathStepEvaluator pathStepEvaluator;
 
-    public RegionScanner(TerrainEvaluator terrainEvaluator) {
-        this.terrainEvaluator = terrainEvaluator;
+    public RegionScanner(PathStepEvaluator pathStepEvaluator) {
+        this.pathStepEvaluator = pathStepEvaluator;
     }
 
     public List<Region> scan(TerrainSnapshot snapshot, Set<ChunkPos> bounds, BlockPos boundsAnchor,
@@ -78,7 +69,7 @@ public final class RegionScanner {
                     for (int localZ = 0; localZ < 16; localZ++) {
                         BlockPos seed = new BlockPos(chunk.getMinBlockX() + localX, y, chunk.getMinBlockZ() + localZ);
 
-                        if (settled.contains(seed) || !terrainEvaluator.isWalkableTerrain(snapshot, seed)) continue;
+                        if (settled.contains(seed) || !pathStepEvaluator.isWalkableTerrain(snapshot, seed)) continue;
 
                         if (scannedCells[0] >= Config.regionScanMaxCells) {
                             budgetExhausted[0] = true;
@@ -109,30 +100,33 @@ public final class RegionScanner {
     }
 
     /**
-     * Dijkstra flood-fill, not a plain BFS: connectivity within one region must agree EXACTLY
-     * with FlowFieldCalculator.processOrthogonalNeighbors - the same step generator
-     * (TerrainEvaluator.getValidOrthogonalSteps), the same MAX_CONSECUTIVE_MINE_DEPTH cap, and
-     * critically the same cost-relaxation rule for both cost AND mine-chain-depth - or the two
-     * can settle a shared cell's mine-chain-depth differently and disagree on whether a
-     * downstream cell is within the cap. Confirmed in testing: a clean, monotonic flow-field
-     * path terminated by pointing into a cell that belonged to no region at all, nowhere near a
-     * territory boundary, causing affected mobs to lose their field assignment mid-route, fall
-     * back to wilderness wandering, wander back into the mapped area, and repeat the same walk
-     * out to the same dead end - visually indistinguishable in-game from a literal loop.
+     * Dijkstra flood-fill, not a plain BFS: relaxes cost whenever a cheaper path to a cell is
+     * found, rather than a plain unweighted BFS's {@code visited.add(pos)}-once gate - matching
+     * FlowFieldCalculator's own real Dijkstra so both traversals settle cells via the same rule.
      *
-     * A plain unweighted BFS (the previous implementation) locks in whichever mine-chain-depth
-     * its first, queue-order-dependent visit to a cell happens to find, via
-     * {@code visited.add(pos)} as the sole gate, and never revisits it even when a shorter chain
-     * is later discovered through a different neighbor. FlowFieldCalculator's real Dijkstra, by
-     * contrast, continuously relaxes both cost and mine-chain-depth whenever a cheaper path is
-     * found. In a braided area mixing WALK and MINE steps, an unweighted hop-order search and a
-     * cost-weighted search settle nodes in genuinely different sequences and can lock in
-     * different (and sometimes wrongly-too-deep) mine-chain-depths for the same intermediate
-     * cells - which can push a cell just past the cap in one algorithm while the other, having
-     * found the true minimum-depth route, brings it in under the cap. Making this a real Dijkstra
-     * with the identical relaxation rule removes the divergence at its source: region membership
-     * now always reflects the true minimum mine-chain-depth to reach a cell, exactly like the
-     * flow field's own instructions do.
+     * <p>{@code floodFill} only ever enqueues {@code PathAction.WALK} candidates from
+     * {@code candidateSteps} - never TUNNEL/BRIDGE/CARVED_STAIR/AIR_STAIR. Region membership must
+     * reflect ONLY genuine walkable connectivity, not "reachable via a construction candidate up
+     * to some depth cap" the way the pre-Task-8 MINE-step version allowed: a TUNNEL candidate is a
+     * construction edge (RegionGraph's job to discover), and if this flood ever followed one,
+     * every obstacle a SiegeProject could bridge would silently fuse the regions on either side of
+     * it, destroying the partition this class exists to produce. With the flood WALK-only, there
+     * is no construction chain left to bound - no depth cap is needed. Confirmed via
+     * {@code PathingRegionGameTests.testRepeatedConnectorCompletionsDontExplodeRebuildCount}: a
+     * solid, non-walkable cell that the OLD MINE-step version swept into a region as a side effect
+     * (167 cells) is now correctly excluded (166 cells) - this WALK-only behavior is a deliberate
+     * fix, not a regression, but it does mean any OTHER code that assumed a region could contain a
+     * non-walkable cell needs re-checking (see this task's own commit message).
+     *
+     * <p><b>Temporarily divergent from FlowFieldCalculator (until Task 6/exec-7):</b> this class
+     * now uses {@code PathStepEvaluator} exclusively, while {@code FlowFieldCalculator} still runs
+     * the old {@code TerrainEvaluator} with MINE steps and {@code MAX_CONSECUTIVE_MINE_DEPTH} until
+     * its own port lands. Until then, a region's WALK-only membership and the flow field's own
+     * MINE-inclusive traversal are NOT guaranteed to agree at every cell - the historical bug this
+     * javadoc used to warn about (a flow-field path pointing into a cell outside any region,
+     * indistinguishable in-game from a literal loop) is a real risk in this window. Task 6 restores
+     * the shared-generator equivalence by porting FlowFieldCalculator onto the same
+     * {@code PathStepEvaluator}/WALK-only-membership model.
      */
     private void floodFill(TerrainSnapshot snapshot, FlowFieldState boundsState, BlockPos seed,
                             Set<BlockPos> settled, Region region, int[] scannedCells, boolean[] budgetExhausted) {
@@ -147,11 +141,6 @@ public final class RegionScanner {
         // Best known cost to reach each cell (this flood only - fresh per region, exactly like
         // FlowFieldCalculator.startCalculation clears nextCostMap per calculateFully call).
         Map<BlockPos, Integer> costMap = new HashMap<>();
-        // Consecutive-MINE-steps-taken-to-reach-this-position along the CURRENT cheapest known
-        // path, exactly as FlowFieldCalculator.processOrthogonalNeighbors tracks it - relaxed
-        // (updated) in lockstep with costMap whenever a cheaper path is found, not locked on
-        // first visit.
-        Map<BlockPos, Integer> mineChainDepth = new HashMap<>();
 
         costMap.put(seed, 0);
         queue.add(new QueueNode(seed, 0));
@@ -178,41 +167,33 @@ public final class RegionScanner {
             region.addCell(current);
             scannedCells[0]++;
 
-            List<TerrainEvaluator.EvaluatedStep> steps =
-                    terrainEvaluator.getValidOrthogonalSteps(snapshot, current, Collections.emptySet(), boundsState);
+            List<PathStepEvaluator.EvaluatedStep> steps = pathStepEvaluator.candidateSteps(
+                    snapshot, current, Collections.emptySet(), pos -> pathStepEvaluator.isOutOfBounds(snapshot, pos, boundsState));
 
             // Only WALK steps count toward "am I at the edge of walkable space". The raw step
             // count can't answer that at all: a cell facing a solid wall still gets a full 8
-            // steps, because every blocked direction is offered back as a MINE step. Likewise
-            // only cells that are themselves standable are recorded - RegionGraph uses a boundary
-            // cell directly as a connector's entry point (the spot a mob has to reach), so a cell
-            // that only exists in this region because a MINE chain passed through solid rock is
-            // not a valid anchor to trace one from.
+            // steps, because every blocked direction is offered back as a construction candidate.
+            // Likewise only cells that are themselves standable are recorded - RegionGraph uses a
+            // boundary cell directly as a connector's entry point (the spot a mob has to reach),
+            // so a cell that only exists in this region because a construction chain passed
+            // through solid rock is not a valid anchor to trace one from.
             int walkableNeighbors = 0;
-            for (TerrainEvaluator.EvaluatedStep step : steps) {
-                if (step.action() == SiegeNode.SiegeAction.WALK) walkableNeighbors++;
+            for (PathStepEvaluator.EvaluatedStep step : steps) {
+                if (step.action() == PathAction.WALK) walkableNeighbors++;
             }
             if (walkableNeighbors < BOUNDARY_WALKABLE_NEIGHBOR_THRESHOLD
-                    && terrainEvaluator.isWalkableTerrain(snapshot, current)) {
+                    && pathStepEvaluator.isWalkableTerrain(snapshot, current)) {
                 region.addBoundaryCell(current);
             }
 
-            int currentMineDepth = mineChainDepth.getOrDefault(current, 0);
-            for (TerrainEvaluator.EvaluatedStep step : steps) {
+            for (PathStepEvaluator.EvaluatedStep step : steps) {
+                if (step.action() != PathAction.WALK) continue; // construction edges are RegionGraph's job, not this flood's
                 if (settled.contains(step.pos())) continue; // already claimed by another region
-
-                // Reset to 0 on WALK/BUILD_* (the step lands on solid ground); only MINE chains
-                // deeper. Past the cap the branch is dropped entirely - it isn't enqueued, so it
-                // never becomes a member of this region and can't fuse it to whatever lies on the
-                // far side of the rock.
-                int stepMineDepth = step.action() == SiegeNode.SiegeAction.MINE ? currentMineDepth + 1 : 0;
-                if (stepMineDepth > MAX_CONSECUTIVE_MINE_DEPTH) continue;
 
                 int totalCost = currentCost + step.cost();
 
                 if (totalCost < costMap.getOrDefault(step.pos(), Integer.MAX_VALUE)) {
                     costMap.put(step.pos(), totalCost);
-                    mineChainDepth.put(step.pos(), stepMineDepth);
                     queue.add(new QueueNode(step.pos(), totalCost));
                 }
             }

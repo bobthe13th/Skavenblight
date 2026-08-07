@@ -53,7 +53,7 @@ public class FlowFieldState {
      * StandardFlowField's isCalculatingAsync flag) guarantees only one calculation, and
      * therefore only one caller of this method, runs at a time.
      */
-    public void updateInstructions(Map<BlockPos, SiegeNode> newMap) {
+    public void updateInstructions(Map<BlockPos, FlowStep> newMap) {
         this.indexed = Indexed.build(newMap);
     }
 
@@ -66,7 +66,7 @@ public class FlowFieldState {
         this.cellFilter = cellFilter;
     }
 
-    public SiegeNode getInstruction(BlockPos pos) {
+    public FlowStep getInstruction(BlockPos pos) {
         return this.indexed.instructionMap.get(pos);
     }
 
@@ -74,7 +74,7 @@ public class FlowFieldState {
         return this.targetPos;
     }
 
-    public Map<BlockPos, SiegeNode> getInstructionMap() {
+    public Map<BlockPos, FlowStep> getInstructionMap() {
         return this.indexed.instructionMap;
     }
 
@@ -116,18 +116,18 @@ public class FlowFieldState {
     private static final class Indexed {
         static final Indexed EMPTY = new Indexed(Collections.emptyMap(), Collections.emptySet(), Collections.emptyMap());
 
-        final Map<BlockPos, SiegeNode> instructionMap;
+        final Map<BlockPos, FlowStep> instructionMap;
         final Set<ChunkPos> mappedChunks;
         final Map<ChunkPos, List<BlockPos>> chunkToBlocksIndex;
 
-        private Indexed(Map<BlockPos, SiegeNode> instructionMap, Set<ChunkPos> mappedChunks, Map<ChunkPos, List<BlockPos>> chunkToBlocksIndex) {
+        private Indexed(Map<BlockPos, FlowStep> instructionMap, Set<ChunkPos> mappedChunks, Map<ChunkPos, List<BlockPos>> chunkToBlocksIndex) {
             this.instructionMap = instructionMap;
             this.mappedChunks = mappedChunks;
             this.chunkToBlocksIndex = chunkToBlocksIndex;
         }
 
-        static Indexed build(Map<BlockPos, SiegeNode> newMap) {
-            Map<BlockPos, SiegeNode> instructionMap = Map.copyOf(newMap);
+        static Indexed build(Map<BlockPos, FlowStep> newMap) {
+            Map<BlockPos, FlowStep> instructionMap = Map.copyOf(newMap);
             Set<ChunkPos> mappedChunks = new HashSet<>();
             Map<ChunkPos, List<BlockPos>> chunkToBlocksIndex = new HashMap<>();
 

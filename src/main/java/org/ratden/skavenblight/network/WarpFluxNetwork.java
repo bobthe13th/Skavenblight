@@ -105,7 +105,7 @@ public class WarpFluxNetwork {
         // true. Without the interval that retries a full-territory TerrainSnapshot.refresh - a
         // MAIN-THREAD call - on literally every tick until it succeeds.
         if (!generators.isEmpty()
-                && this.regionMap.getRegionIndex().getRegions().isEmpty()
+                && this.regionMap.getRegionGraph().getRegions().isEmpty()
                 && !this.regionMap.isCalculating()
                 && level.getGameTime() >= this.nextRegionBootstrapTick) {
             this.nextRegionBootstrapTick = level.getGameTime() + REGION_BOOTSTRAP_RETRY_TICKS;

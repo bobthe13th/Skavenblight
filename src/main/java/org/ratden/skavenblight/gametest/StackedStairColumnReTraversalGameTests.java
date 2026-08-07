@@ -16,26 +16,24 @@ import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 
 /**
  * Documents a KNOWN, currently-unresolved limitation (not yet fixed - flagged for a deliberate
- * follow-up decision, not silently patched over): a completed {@code BUILD_SPIRAL}/{@code
- * BUILD_STAIR} column - one {@code cobblestone_stairs} block per Y level, same (x,z) column,
- * exactly the geometry {@code SiegeInteractionHandler#constructSiegeBlock} produces ({@code
- * SiegeLineTracer} only ever steps {@code dy} by 1 per node - see {@code SiegeProjectManager}'s
- * 14-direction fan) - cannot be RE-TRAVERSED from below by a fresh mob using real vanilla
- * navigation, even though the mob that originally built it climbed it fine one step at a time
- * (see {@code RegionFlowFieldClimbResolutionGameTests#testCompletedSpiralStepResolvesToOwnPosition}
- * for that separate, already-correct claim).
+ * follow-up decision, not silently patched over): a completed one-wide {@code CARVED_STAIR}/{@code
+ * AIR_STAIR} column - one {@code cobblestone_stairs} block per Y level, same (x,z) column, exactly
+ * the geometry {@code SiegeInteractionHandler#constructSiegeBlock} produces for a chained vertical
+ * run - cannot be RE-TRAVERSED from below by a fresh mob using real vanilla navigation, even though
+ * the mob that originally built it climbed it fine one step at a time.
  *
- * <p>This is a different defect than the head-clearance bug fixed in {@code TerrainEvaluator}
- * (isFitForWalking no longer exempts scaffold materials from headroom checks): tightening that
- * predicate made {@code isWalkableTerrain} correctly say "no" to standing under a stacked stair -
- * but real vanilla mob navigation independently agrees there's no way through, confirming this
- * isn't just a planning-model quirk. A second wave of rats (or the same rat backtracking) sent up
- * an already-built staircase this way will genuinely get stuck a couple of levels up - this is a
- * plausible mechanism behind the "flow field routes a rat into the back of an existing stair"
- * symptom reported against a live dump. Fixing it means widening the column or adding periodic
- * landings so a real mob's hitbox actually clears each transition - a change to how BUILD_SPIRAL/
- * chained BUILD_STAIR emit geometry, not a TerrainEvaluator predicate tweak - deliberately left
- * for a follow-up decision rather than expanded on inline here.
+ * <p>Real vanilla mob navigation independently agrees there's no way through a one-wide stacked
+ * stair, confirming this isn't just a planning-model quirk - {@code PathStepEvaluator
+ * .isWalkableTerrain}'s own foot/head clearance check already says "no" to standing under one. A
+ * second wave of rats (or the same rat backtracking) sent up an already-built staircase this way
+ * will genuinely get stuck a couple of levels up - this is a plausible mechanism behind the "flow
+ * field routes a rat into the back of an existing stair" symptom reported against a live dump.
+ * Fixing it means widening the column or adding periodic landings so a real mob's hitbox actually
+ * clears each transition - {@code PlatformInserter} (Task 7) already inserts periodic platforms
+ * into long construction chains for a related reason, but whether its current trigger conditions
+ * also cover THIS specific one-wide-vertical-run shape is unconfirmed, not assumed fixed just
+ * because PlatformInserter exists - deliberately left for a follow-up decision rather than expanded
+ * on inline here.
  */
 @GameTestHolder(Skavenblight.MODID)
 @PrefixGameTestTemplate(false)

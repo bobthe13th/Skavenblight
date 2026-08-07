@@ -10,11 +10,11 @@ import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
+import org.ratden.skavenblight.ai.pathing.PathAction;
 import org.ratden.skavenblight.ai.pathing.region.Region;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.RegionGraph;
-import org.ratden.skavenblight.ai.pathing.region.RegionIndex;
 import org.ratden.skavenblight.ai.pathing.region.RegionRouteTree;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.entity.custom.ClanratEntity;
@@ -63,7 +63,7 @@ public class PathingDebugFileWriter {
             // territory) - the live map is the actually-current picture. Once a calculation
             // is done, the live map has already been overwritten to match, so either would
             // do; use the finalized one since that's what rats are actually reading.
-            Map<BlockPos, SiegeNode> renderMap = calculating ? flowField.getLiveDebugMap() : flowField.getInstructionMap();
+            Map<BlockPos, FlowStep> renderMap = calculating ? flowField.getLiveDebugMap() : flowField.getInstructionMap();
 
             writeHeader(writer, flowField, regionMap, center, radiusX, heightY, radiusZ, calculating, renderMap);
             writeRegionGraph(writer, regionMap);
@@ -84,7 +84,7 @@ public class PathingDebugFileWriter {
     }
 
     private static void writeHeader(FileWriter writer, RegionFlowField flowField, TerritoryRegionMap regionMap, BlockPos center,
-                                     int radiusX, int heightY, int radiusZ, boolean calculating, Map<BlockPos, SiegeNode> renderMap) throws IOException {
+                                     int radiusX, int heightY, int radiusZ, boolean calculating, Map<BlockPos, FlowStep> renderMap) throws IOException {
         writer.write("====================================================\n");
         writer.write("         SKAVENBLIGHT DEEP DIAGNOSTIC DUMP          \n");
         writer.write("====================================================\n\n");
@@ -140,17 +140,17 @@ public class PathingDebugFileWriter {
      */
     private static void writeRegionGraph(FileWriter writer, TerritoryRegionMap regionMap) throws IOException {
         writer.write("--- REGION GRAPH ---\n");
-        RegionIndex index = regionMap.getRegionIndex();
         RegionGraph graph = regionMap.getRegionGraph();
         RegionRouteTree routeTree = regionMap.getRouteTree();
+        List<Region> regions = graph != null ? graph.getRegions() : List.of();
 
         writer.write(String.format("Regions: %d | Connectors: %d | Rebuild generation: %d\n",
-                index.getRegions().size(), graph != null ? graph.getAllConnectors().size() : 0, regionMap.getGeneration()));
-        if (index.getRegions().isEmpty()) {
+                regions.size(), graph != null ? graph.getAllConnectors().size() : 0, regionMap.getGeneration()));
+        if (regions.isEmpty()) {
             writer.write("  (no regions scanned yet - the region map never initialized, or its first rebuild is still running)\n");
         }
 
-        for (Region region : index.getRegions()) {
+        for (Region region : regions) {
             boolean reachable = routeTree != null && routeTree.isReachable(region.getId());
             writer.write(String.format("  region %d: %d cells, reachable=%s, hopCost=%s\n",
                     region.getId(), region.cellCount(), reachable,
@@ -159,15 +159,15 @@ public class PathingDebugFileWriter {
         writer.write("\n");
     }
 
-    private static void writeMetrics(FileWriter writer, Map<BlockPos, SiegeNode> renderMap) throws IOException {
+    private static void writeMetrics(FileWriter writer, Map<BlockPos, FlowStep> renderMap) throws IOException {
         writer.write("--- FLOW FIELD METRICS ---\n");
-        Map<SiegeNode.SiegeAction, Integer> actionCounts = new EnumMap<>(SiegeNode.SiegeAction.class);
+        Map<PathAction, Integer> actionCounts = new EnumMap<>(PathAction.class);
         int minY = Integer.MAX_VALUE;
         int maxY = Integer.MIN_VALUE;
 
-        for (Map.Entry<BlockPos, SiegeNode> entry : renderMap.entrySet()) {
+        for (Map.Entry<BlockPos, FlowStep> entry : renderMap.entrySet()) {
             BlockPos pos = entry.getKey();
-            SiegeNode node = entry.getValue();
+            FlowStep node = entry.getValue();
 
             actionCounts.put(node.action(), actionCounts.getOrDefault(node.action(), 0) + 1);
             if (pos.getY() < minY) minY = pos.getY();
@@ -184,7 +184,7 @@ public class PathingDebugFileWriter {
         if (actionCounts.isEmpty()) {
             writer.write("(none)");
         }
-        for (Map.Entry<SiegeNode.SiegeAction, Integer> entry : actionCounts.entrySet()) {
+        for (Map.Entry<PathAction, Integer> entry : actionCounts.entrySet()) {
             writer.write(String.format("[%s: %d] ", entry.getKey().name(), entry.getValue()));
         }
         writer.write("\n\n");
@@ -228,7 +228,7 @@ public class PathingDebugFileWriter {
             // "no-instruction (wilderness)" here even when its actual assigned field had a real
             // instruction, because it was being asked the exported region's field instead of its own.
             RegionFlowField mobField = regionMap.getRegionFlowFieldFor(pos);
-            SiegeNode next = mobField != null ? mobField.getNextSiegeNode(level, pos) : null;
+            FlowStep next = mobField != null ? mobField.getNextStep(level, pos) : null;
             String nextDesc = next == null ? "no-instruction (wilderness)" : String.format("%s -> %s", next.action(), next.pos().toShortString());
 
             String jamFlag = occupancy.getOrDefault(pos, 1) > 1 ? String.format(" [JAM: %d mobs on this block]", occupancy.get(pos)) : "";
@@ -242,7 +242,7 @@ public class PathingDebugFileWriter {
             String canUseState = (mob instanceof ClanratEntity clanrat) ? clanrat.describeSiegeGoalCanUseState() : "n/a";
             String claimantDesc = "";
             String claimantStateDesc = "";
-            if (next != null && next.action() != SiegeNode.SiegeAction.WALK && mobField != null) {
+            if (next != null && next.action() != PathAction.WALK && mobField != null) {
                 Mob claimant = mobField.getClaimant(next.pos());
                 if (claimant != null) {
                     double dist = Math.sqrt(claimant.blockPosition().distSqr(next.pos()));
@@ -310,12 +310,17 @@ public class PathingDebugFileWriter {
                     outcome = "left mapped territory (wilderness) at " + current.toShortString();
                     break;
                 }
-                SiegeNode node = field.getRawInstruction(current);
+                FlowStep node = field.getRawInstruction(current);
                 if (node == null) {
                     outcome = "no instruction at " + current.toShortString();
                     break;
                 }
-                if (node.pos().equals(current)) {
+                // Corrected (2026-08-06, Task 21 audit): a raw map value's pos() always equals its
+                // own key under the disambiguated FlowStep convention (see
+                // RegionFlowField.getNextStep's own doc) - walking via .pos() made every trace
+                // terminate after exactly one cell, always. The real forward pointer is
+                // predecessorPos().
+                if (node.predecessorPos().equals(current)) {
                     // Every region's own local Dijkstra target self-references (see
                     // FlowFieldCalculator.startCalculation) - reaching one is the correct, expected
                     // end of this region's portion of the chain, not a bug. Actually crossing a
@@ -324,7 +329,7 @@ public class PathingDebugFileWriter {
                     outcome = "reached region " + field.getRegionId() + "'s local objective at " + current.toShortString();
                     break;
                 }
-                current = node.pos();
+                current = node.predecessorPos();
             }
 
             StringBuilder pathStr = new StringBuilder();
@@ -382,13 +387,12 @@ public class PathingDebugFileWriter {
      * blank, making a real flow field (arrows, including loops) invisible in the dump whenever it
      * wasn't in the exact region the item happened to be pointed at.
      */
-    private static void writeGrid(FileWriter writer, ServerLevel level, Map<BlockPos, SiegeNode> renderMap,
+    private static void writeGrid(FileWriter writer, ServerLevel level, Map<BlockPos, FlowStep> renderMap,
                                    TerritoryRegionMap regionMap, boolean calculating, BlockPos center,
                                    int radiusX, int heightY, int radiusZ) throws IOException {
         writer.write("LEGEND:\n");
         writer.write("  Blocks : [#] Solid   [.] Air   [/] Stair/Slab   [H] Ladder   [~] Fluid\n");
-        writer.write("  Nodes  : [W] Walk    [S] Stair [B] Bridge       [M] Mine     [P] Pillar\n");
-        writer.write("           [L] Landing [J] Leap  [H] Ladder       [R] Spiral   [x] Out of Bounds\n");
+        writer.write("  Nodes  : [W] Walk    [S] Air-Stair [C] Carved-Stair [B] Bridge  [M] Tunnel   [x] Out of Bounds\n");
         writer.write("  Vectors: [v] Target Down   [^] Target Up    [=] Same Level   [?] Target Detached\n");
         writer.write("  Entities: [@] Entity Present\n");
         writer.write("====================================================\n");
@@ -432,7 +436,7 @@ public class PathingDebugFileWriter {
                     // region the shared calculator is presently working through) - fall back to the
                     // targeted region's map, same as before this fix. Once ready, look up THIS
                     // cell's own region rather than assuming it belongs to the targeted region.
-                    SiegeNode node;
+                    FlowStep node;
                     if (calculating) {
                         node = renderMap.get(pos);
                     } else {
@@ -445,14 +449,10 @@ public class PathingDebugFileWriter {
                     if (node != null) {
                         switch (node.action()) {
                             case WALK -> nodeChar = 'W';
-                            case BUILD_STAIR -> nodeChar = 'S';
-                            case BUILD_BRIDGE -> nodeChar = 'B';
-                            case MINE -> nodeChar = 'M';
-                            case BUILD_PILLAR -> nodeChar = 'P';
-                            case BUILD_LANDING -> nodeChar = 'L';
-                            case LEAP -> nodeChar = 'J';
-                            case BUILD_LADDER -> nodeChar = 'H';
-                            case BUILD_SPIRAL -> nodeChar = 'R';
+                            case TUNNEL -> nodeChar = 'M';
+                            case BRIDGE -> nodeChar = 'B';
+                            case AIR_STAIR -> nodeChar = 'S';
+                            case CARVED_STAIR -> nodeChar = 'C';
                         }
                     } else if (isOob) {
                         nodeChar = 'x';

@@ -4,7 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.PathfinderMob;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
+import org.ratden.skavenblight.ai.pathing.PathAction;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 
 import java.util.Optional;
@@ -40,21 +41,24 @@ final class SiegeNodeLookahead {
 
     private SiegeNodeLookahead() {}
 
-    static Optional<SiegeNode> findEffectiveNode(RegionFlowField flowField, PathfinderMob mob,
-                                                  Predicate<SiegeNode.SiegeAction> lookAheadMatch) {
+    static Optional<FlowStep> findEffectiveNode(RegionFlowField flowField, PathfinderMob mob,
+                                                  Predicate<PathAction> lookAheadMatch) {
         if (flowField == null || !(mob.level() instanceof ServerLevel serverLevel)) return Optional.empty();
         BlockPos currentPos = mob.blockPosition();
 
-        SiegeNode node = flowField.getNextSiegeNode(serverLevel, currentPos);
+        FlowStep node = flowField.getNextStep(serverLevel, currentPos);
         if (node == null) {
             for (Direction dir : Direction.Plane.HORIZONTAL) {
-                node = flowField.getNextSiegeNode(serverLevel, currentPos.relative(dir));
+                node = flowField.getNextStep(serverLevel, currentPos.relative(dir));
                 if (node != null) break;
             }
         }
 
-        if (node != null && node.action() == SiegeNode.SiegeAction.WALK) {
-            SiegeNode nextNode = flowField.getNextSiegeNode(serverLevel, node.pos());
+        if (node != null && node.action() == PathAction.WALK) {
+            // Corrected (2026-08-06, Task 21): node.pos() always equals the query key under the
+            // disambiguated FlowStep convention (see RegionFlowField.getNextStep's own doc) - the
+            // real one-hop-ahead peek this lookahead needs is node.predecessorPos().
+            FlowStep nextNode = flowField.getNextStep(serverLevel, node.predecessorPos());
             if (nextNode != null && lookAheadMatch.test(nextNode.action())
                     && !nextNode.pos().equals(currentPos)
                     && currentPos.closerThan(nextNode.pos(), LOOKAHEAD_SNAP_DISTANCE)) {
@@ -70,7 +74,7 @@ final class SiegeNodeLookahead {
         // "no instruction" (safe - the mob just waits) instead of silently entombing it.
         // Confirmed via SiegeActivityLog in testing: exact mob-pos == target-pos matches on
         // BUILD_STAIR executions.
-        if (node != null && node.action() != SiegeNode.SiegeAction.WALK && node.pos().equals(currentPos)) {
+        if (node != null && node.action() != PathAction.WALK && node.pos().equals(currentPos)) {
             return Optional.empty();
         }
 

@@ -20,6 +20,7 @@ import org.ratden.skavenblight.entity.custom.ClanratEntity;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
 
@@ -27,8 +28,9 @@ import static org.ratden.skavenblight.gametest.PathingRegionGameTests.check;
  * Coverage for the formation-waiting feature (see
  * docs/superpowers/plans/2026-07-30-formation-waiting-goal.md): when a rat's nearest
  * construction work is already claimed by someone else, it should redirect to any other
- * unclaimed climb-type work in its region, or - if nothing else is available - wait at a
- * real, terrain-validated slot instead of piling into a crowd.
+ * unclaimed construction work in its region, or - if nothing else is available - wait at a
+ * real, terrain-validated slot in a dynamic row/column formation grid instead of piling into
+ * a crowd (see the {@code testFormationGrid*} methods for that grid's own coverage).
  */
 @GameTestHolder(Skavenblight.MODID)
 @PrefixGameTestTemplate(false)
@@ -38,7 +40,7 @@ public class AwaitFormationGoalGameTests {
     private static RegionFlowField buildFlowField(BlockPos anchorPos) {
         FlowFieldState state = new FlowFieldState(anchorPos, Set.of(new ChunkPos(anchorPos)));
         state.updateInstructions(Map.of());
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -98,11 +100,19 @@ public class AwaitFormationGoalGameTests {
         BlockPos freeTarget = helper.absolutePos(relativeFreeTarget);
 
         FlowFieldState state = new FlowFieldState(mobPos, Set.of(new ChunkPos(mobPos)));
+        // Genuine Shape-A entries (see RegionFlowField.getNextStep's own doc: a map value's pos()
+        // always equals its own key). mobPos is real WALK ground pointing at contestedTarget;
+        // contestedTarget and freeTarget are each their OWN unbuilt AIR_STAIR construction site
+        // (self-referencing predecessorPos - the established terminal convention, see
+        // FlowFieldCalculator.startCalculation's target seed) - findUnclaimedAlternative's raw
+        // getInstructionMap() scan needs freeTarget to be its own key, not merely another entry's
+        // pos(), or the redirect target it's supposed to find is unrepresentable.
         state.updateInstructions(Map.of(
-                mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR),
-                contestedTarget, new SiegeNode(freeTarget, SiegeNode.SiegeAction.BUILD_STAIR)
+                mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget),
+                freeTarget, new FlowStep(freeTarget, PathAction.AIR_STAIR, freeTarget)
         ));
-        TerrainEvaluator evaluator = new TerrainEvaluator();
+        PathStepEvaluator evaluator = new PathStepEvaluator();
         SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
         CalculationThrottler throttler = new CalculationThrottler();
         FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -133,9 +143,9 @@ public class AwaitFormationGoalGameTests {
         // single-worker-capacity SiegeProject at contestedTarget and fill it so the capacity
         // check this goal actually depends on trips.
         SiegeProject contestedProject = new SiegeProject(
-                Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
-                List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
-                mobPos, contestedTarget, 500);
+                Map.of(contestedTarget, new FlowStep(mobPos, PathAction.AIR_STAIR, mobPos)),
+                List.of(new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)),
+                mobPos, contestedTarget, 500, UUID.randomUUID());
         projectManager.addSharedConnectorProject(contestedProject);
         contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
                 org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
@@ -187,13 +197,19 @@ public class AwaitFormationGoalGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(!regions.isEmpty(), "test structure should scan into at least one region");
             Region region = regions.get(0);
 
             FlowFieldState state = new FlowFieldState(mobPos, territory);
-            state.updateInstructions(Map.of(mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)));
-            TerrainEvaluator evaluator = new TerrainEvaluator();
+            // Genuine Shape-A entries - see testAwaitFormationGoalRedirectsToUnclaimedAlternative's
+            // identical comment. No freeTarget here: this test is specifically about the
+            // no-alternative-exists fallback to a formation slot.
+            state.updateInstructions(Map.of(
+                    mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                    contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)
+            ));
+            PathStepEvaluator evaluator = new PathStepEvaluator();
             SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
             CalculationThrottler throttler = new CalculationThrottler();
             FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -212,9 +228,9 @@ public class AwaitFormationGoalGameTests {
             // See testAwaitFormationGoalRedirectsToUnclaimedAlternative's identical comment:
             // canUse() now depends on a real, at-capacity SiegeProject, not the old claim table.
             SiegeProject contestedProject = new SiegeProject(
-                    Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
-                    List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
-                    mobPos, contestedTarget, 500);
+                    Map.of(contestedTarget, new FlowStep(mobPos, PathAction.AIR_STAIR, mobPos)),
+                    List.of(new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)),
+                    mobPos, contestedTarget, 500, UUID.randomUUID());
             projectManager.addSharedConnectorProject(contestedProject);
             contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
                     org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
@@ -277,7 +293,7 @@ public class AwaitFormationGoalGameTests {
 
         helper.succeedWhen(() -> {
             check(!regionMap.isCalculating(), "region map still calculating");
-            List<Region> regions = regionMap.getRegionIndex().getRegions();
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
             check(!regions.isEmpty(), "test structure should scan into at least one region");
             Region region = regions.get(0);
             // Provisionally claim the unbuilt connector cell into the region - exactly what
@@ -289,8 +305,14 @@ public class AwaitFormationGoalGameTests {
                             + "matching production's registerConnector behavior");
 
             FlowFieldState state = new FlowFieldState(mobPos, territory);
-            state.updateInstructions(Map.of(mobPos, new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)));
-            TerrainEvaluator evaluator = new TerrainEvaluator();
+            // Genuine Shape-A entries - see testAwaitFormationGoalRedirectsToUnclaimedAlternative's
+            // identical comment. No freeTarget here: this test is specifically about the
+            // no-alternative-exists fallback to a formation slot.
+            state.updateInstructions(Map.of(
+                    mobPos, new FlowStep(mobPos, PathAction.WALK, contestedTarget),
+                    contestedTarget, new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)
+            ));
+            PathStepEvaluator evaluator = new PathStepEvaluator();
             SiegeProjectManager projectManager = new SiegeProjectManager(evaluator);
             CalculationThrottler throttler = new CalculationThrottler();
             FlowFieldCalculator calculator = new FlowFieldCalculator(evaluator, projectManager, throttler);
@@ -309,9 +331,9 @@ public class AwaitFormationGoalGameTests {
             // See testAwaitFormationGoalRedirectsToUnclaimedAlternative's identical comment:
             // canUse() now depends on a real, at-capacity SiegeProject, not the old claim table.
             SiegeProject contestedProject = new SiegeProject(
-                    Map.of(contestedTarget, new SiegeNode(mobPos, SiegeNode.SiegeAction.BUILD_STAIR)),
-                    List.of(new SiegeNode(contestedTarget, SiegeNode.SiegeAction.BUILD_STAIR)),
-                    mobPos, contestedTarget, 500);
+                    Map.of(contestedTarget, new FlowStep(mobPos, PathAction.AIR_STAIR, mobPos)),
+                    List.of(new FlowStep(contestedTarget, PathAction.AIR_STAIR, contestedTarget)),
+                    mobPos, contestedTarget, 500, UUID.randomUUID());
             projectManager.addSharedConnectorProject(contestedProject);
             contestedProject.tryRegisterWorker(claimant, new LiveTerrainAccess(helper.getLevel()), evaluator,
                     org.ratden.skavenblight.Config.projectWorkRadius, 1, 1);
@@ -350,5 +372,77 @@ public class AwaitFormationGoalGameTests {
         check(canUseState != null, "sanity check - describeSiegeGoalCanUseState should always return a non-null string");
 
         helper.succeed();
+    }
+
+    /**
+     * Real dynamic row/column formation grid coverage (Task 19 - "AwaitFormationGoal needs real
+     * dynamic row/column slot computation, never observed working" per the design doc). Anchored
+     * comfortably inside {@code pathing_test_giant} (96x64x96, plenty of open floor) well away
+     * from the structure's own edges, so every candidate the 3x3 grid generates lands on genuine
+     * open floor, not encasement padding - same anchoring caution
+     * PathingRegionGameTests' class javadoc documents for this reason.
+     */
+    @GameTest(template = "pathing_test_giant", timeoutTicks = 400, skyAccess = true)
+    public static void testFormationGridScalesRowsAndColumnsToRatCount(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(48, 2, 48);
+        BlockPos anchor = helper.absolutePos(relativeAnchor);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        Set<ChunkPos> territory = Set.of(new ChunkPos(anchor));
+        regionMap.rebuild(helper.getLevel(), territory, anchor);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
+            check(!regions.isEmpty(), "test structure should scan into at least one region");
+            Region region = regions.get(0);
+
+            RegionFlowField field = buildFlowField(anchor);
+            ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            mob.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(mob);
+            AwaitFormationGoal goal = new AwaitFormationGoal(mob);
+            goal.setFlowField(field);
+
+            // 9 rats should produce a 3x3 grid (columns = ceil(sqrt(9)) = 3, rows = ceil(9/3) = 3),
+            // 9 DISTINCT slot positions, no duplicates, every slot within the region and unclaimed.
+            List<BlockPos> slots = goal.computeFormationGrid(9, anchor, region, field);
+
+            check(slots.size() == 9, "expected 9 formation slots for 9 rats, got " + slots.size());
+            check(Set.copyOf(slots).size() == slots.size(), "formation slots must be distinct positions - no duplicates");
+
+            regionMap.cleanup(helper.getLevel());
+        });
+    }
+
+    @GameTest(template = "pathing_test_giant", timeoutTicks = 400, skyAccess = true)
+    public static void testFormationGridDegeneratesToOneSlotForOneRat(GameTestHelper helper) {
+        BlockPos relativeAnchor = new BlockPos(48, 2, 48);
+        BlockPos anchor = helper.absolutePos(relativeAnchor);
+
+        TerritoryRegionMap regionMap = new TerritoryRegionMap();
+        Set<ChunkPos> territory = Set.of(new ChunkPos(anchor));
+        regionMap.rebuild(helper.getLevel(), territory, anchor);
+
+        helper.succeedWhen(() -> {
+            check(!regionMap.isCalculating(), "region map still calculating");
+            List<Region> regions = regionMap.getRegionGraph().getRegions();
+            check(!regions.isEmpty(), "test structure should scan into at least one region");
+            Region region = regions.get(0);
+
+            RegionFlowField field = buildFlowField(anchor);
+            ClanratEntity mob = new ClanratEntity(ModEntities.CLANRAT.get(), helper.getLevel());
+            mob.setPos(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+            helper.getLevel().addFreshEntity(mob);
+            AwaitFormationGoal goal = new AwaitFormationGoal(mob);
+            goal.setFlowField(field);
+
+            List<BlockPos> slots = goal.computeFormationGrid(1, anchor, region, field);
+
+            check(slots.size() == 1, "one rat must get exactly one slot, not a full grid search radius");
+            check(slots.get(0).equals(anchor), "a 1x1 grid's only slot must be the anchor itself, not an offset position");
+
+            regionMap.cleanup(helper.getLevel());
+        });
     }
 }

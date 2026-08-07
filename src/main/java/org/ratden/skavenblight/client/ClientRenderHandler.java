@@ -11,7 +11,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
+import org.ratden.skavenblight.ai.pathing.PathAction;
 import com.mojang.blaze3d.vertex.BufferUploader;
 
 import java.util.Map;
@@ -58,7 +59,7 @@ public class ClientRenderHandler {
         // --- LAYER 2: Mode Specific Data ---
         if (ClientDebugData.currentMode == 0) {
             // DETAILED MODE: Draw block-level arrows
-            for (Map.Entry<BlockPos, SiegeNode> entry : ClientDebugData.flowFieldNodes.entrySet()) {
+            for (Map.Entry<BlockPos, FlowStep> entry : ClientDebugData.flowFieldNodes.entrySet()) {
                 if (entry.getKey().closerThan(player.blockPosition(), 24)) {
                     drawFloorArrow(pose, buffer, entry.getKey(), entry.getValue(), camPos);
                 }
@@ -73,7 +74,7 @@ public class ClientRenderHandler {
             }
         } else if (ClientDebugData.currentMode == 2) {
             // WILDERNESS VIEW MODE: Render the dynamic hybrid evaluation near the player
-            for (Map.Entry<BlockPos, SiegeNode> entry : ClientDebugData.flowFieldNodes.entrySet()) {
+            for (Map.Entry<BlockPos, FlowStep> entry : ClientDebugData.flowFieldNodes.entrySet()) {
                 drawWildernessArrow(pose, buffer, entry.getKey(), entry.getValue(), camPos);
             }
         }
@@ -146,7 +147,7 @@ public class ClientRenderHandler {
     // --------------------------------------------------------
     // 1. DETAILED MODE (Block-Level Navigation)
     // --------------------------------------------------------
-    private static void drawFloorArrow(Matrix4f pose, BufferBuilder buffer, BlockPos pos, SiegeNode node, Vec3 camPos) {
+    private static void drawFloorArrow(Matrix4f pose, BufferBuilder buffer, BlockPos pos, FlowStep node, Vec3 camPos) {
         BlockPos targetNode = node.pos();
 
         float dx = targetNode.getX() - pos.getX();
@@ -160,13 +161,10 @@ public class ClientRenderHandler {
         int r = 0, g = 255, b = 0, a = 255;
 
         switch (node.action()) {
-            case MINE -> { r = 255; g = 0; b = 255; }
-            case BUILD_BRIDGE, BUILD_STAIR -> { r = 0; g = 255; b = 255; }
-            case BUILD_LANDING -> { r = 255; g = 215; b = 0; }
-            case BUILD_PILLAR -> { r = 255; g = 140; b = 0; }
-            case LEAP -> { r = 255; g = 255; b = 0; }
-            case BUILD_LADDER -> { r = 138; g = 43; b = 226; }
-            case BUILD_SPIRAL -> { r = 0; g = 250; b = 154; }
+            case TUNNEL -> { r = 255; g = 0; b = 255; }
+            case BRIDGE -> { r = 0; g = 255; b = 255; }
+            case AIR_STAIR -> { r = 0; g = 191; b = 255; }
+            case CARVED_STAIR -> { r = 255; g = 140; b = 0; }
             case WALK -> {
                 int traffic = ClientDebugData.trafficMap.getOrDefault(pos, 1);
                 float ratio = (float) (Math.log(traffic) / Math.log(Math.max(2, ClientDebugData.maxTraffic)));
@@ -186,7 +184,7 @@ public class ClientRenderHandler {
             }
         }
 
-        if (node.action() != SiegeNode.SiegeAction.WALK) {
+        if (node.action() != PathAction.WALK) {
             float minX = (float) (targetNode.getX() + 0.1 - camPos.x());
             float minY = (float) (targetNode.getY() + 0.1 - camPos.y());
             float minZ = (float) (targetNode.getZ() + 0.1 - camPos.z());
@@ -286,7 +284,7 @@ public class ClientRenderHandler {
     // --------------------------------------------------------
     // 3. WILDERNESS MODE (Dynamic Hybrid Evaluation)
     // --------------------------------------------------------
-    private static void drawWildernessArrow(Matrix4f pose, BufferBuilder buffer, BlockPos pos, SiegeNode node, Vec3 camPos) {
+    private static void drawWildernessArrow(Matrix4f pose, BufferBuilder buffer, BlockPos pos, FlowStep node, Vec3 camPos) {
         BlockPos targetNode = node.pos();
 
         float dx = targetNode.getX() - pos.getX();
@@ -300,13 +298,10 @@ public class ClientRenderHandler {
         int r = 255, g = 255, b = 255, a = 255;
 
         switch (node.action()) {
-            case MINE -> { r = 255; g = 0; b = 128; }
-            case BUILD_BRIDGE, BUILD_STAIR -> { r = 0; g = 191; b = 255; }
-            case BUILD_LANDING -> { r = 255; g = 215; b = 0; }
-            case BUILD_PILLAR -> { r = 255; g = 69; b = 0; }
-            case LEAP -> { r = 124; g = 252; b = 0; }
-            case BUILD_LADDER -> { r = 138; g = 43; b = 226; }
-            case BUILD_SPIRAL -> { r = 0; g = 250; b = 154; }
+            case TUNNEL -> { r = 255; g = 0; b = 128; }
+            case BRIDGE -> { r = 0; g = 191; b = 255; }
+            case AIR_STAIR -> { r = 0; g = 255; b = 255; }
+            case CARVED_STAIR -> { r = 255; g = 69; b = 0; }
         }
 
         float minX = (float) (pos.getX() - camPos.x());

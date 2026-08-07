@@ -16,7 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import org.ratden.skavenblight.ai.pathing.SiegeNode;
+import org.ratden.skavenblight.ai.pathing.FlowStep;
 import org.ratden.skavenblight.ai.pathing.region.RegionFlowField;
 import org.ratden.skavenblight.ai.pathing.region.TerritoryRegionMap;
 import org.ratden.skavenblight.debug.PathingDebugFileWriter;
@@ -194,7 +194,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             // FollowFlowFieldGoal's identical use of this for wandering mobs), so
                             // grab any available region's field as a proxy instead of skipping
                             // visualization entirely for the one mode that needs this most.
-                            sharedField = regionMap.getRegionIndex().getRegions().stream()
+                            sharedField = regionMap.getRegionGraph().getRegions().stream()
                                     .map(r -> regionMap.getRegionFlowFieldFor(r.getMin()))
                                     .filter(Objects::nonNull)
                                     .findFirst().orElse(null);
@@ -211,7 +211,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             continue;
                         }
 
-                        Map<BlockPos, SiegeNode> localNodes = new HashMap<>();
+                        Map<BlockPos, FlowStep> localNodes = new HashMap<>();
                         currentMode.getServerLogic().collectData(serverLevel, playerPos, sharedField, regionMap, localNodes);
 
                         // The borrowed field above is picked arbitrarily (whichever region's
@@ -229,7 +229,7 @@ public class DebugFlowFieldReaderItem extends Item {
                             highlightedChunks = Set.of();
                         } else {
                             RegionFlowField highlightField = sharedField;
-                            highlightedChunks = regionMap.getRegionIndex().getRegions().stream()
+                            highlightedChunks = regionMap.getRegionGraph().getRegions().stream()
                                     .filter(r -> r.getId() == highlightField.getRegionId())
                                     .findFirst()
                                     .map(r -> r.getChunkCells().keySet())

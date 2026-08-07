@@ -152,6 +152,65 @@ public final class Config {
                     1_000_000
             );
 
+    private static final ModConfigSpec.IntValue TUNNEL_BASE_COST =
+            BUILDER.comment(
+                    "Base pathfinding cost for a TUNNEL step (mining "
+                            + "straight through)."
+            ).defineInRange(
+                    "tunnelBaseCost",
+                    400,
+                    1,
+                    10_000
+            );
+
+    private static final ModConfigSpec.IntValue BRIDGE_BASE_COST =
+            BUILDER.comment(
+                    "Base pathfinding cost for a BRIDGE step (building "
+                            + "across a gap)."
+            ).defineInRange(
+                    "bridgeBaseCost",
+                    600,
+                    1,
+                    10_000
+            );
+
+    private static final ModConfigSpec.IntValue CARVED_STAIR_BASE_COST =
+            BUILDER.comment(
+                    "Base pathfinding cost for a CARVED_STAIR step (mining "
+                            + "a stair into solid material)."
+            ).defineInRange(
+                    "carvedStairBaseCost",
+                    800,
+                    1,
+                    10_000
+            );
+
+    private static final ModConfigSpec.IntValue AIR_STAIR_BASE_COST =
+            BUILDER.comment(
+                    "Base pathfinding cost for an AIR_STAIR step (building "
+                            + "a stair through open air)."
+            ).defineInRange(
+                    "airStairBaseCost",
+                    1_000,
+                    1,
+                    10_000
+            );
+
+    private static final ModConfigSpec.IntValue BEDROCK_FAILSAFE_RAT_MINUTES =
+            BUILDER.comment(
+                    "Real-world minutes for ONE rat to clear an "
+                            + "unbreakable block. Linear with worker count "
+                            + "(25 rats clear it in 1/25th the time) using "
+                            + "the same work units as workPerRatPerTick, so "
+                            + "this and the build-speed cap can never drift "
+                            + "apart."
+            ).defineInRange(
+                    "bedrockFailsafeRatMinutes",
+                    25,
+                    1,
+                    1_000
+            );
+
     /*
      * Project-scoped siege construction settings
      */
@@ -211,6 +270,17 @@ public final class Config {
                     4,
                     1,
                     20
+            );
+
+    private static final ModConfigSpec.DoubleValue FORMATION_SLOT_SPACING =
+            BUILDER.comment(
+                    "Block spacing between adjacent slots in AwaitFormationGoal's "
+                            + "row/column formation grid."
+            ).defineInRange(
+                    "formationSlotSpacing",
+                    1.5,
+                    1.0,
+                    5.0
             );
 
     private static final ModConfigSpec.IntValue
@@ -364,11 +434,18 @@ public final class Config {
     public static int regionScanMaxCells;
     public static int minimumSettleDelayMs;
 
+    public static int tunnelBaseCost;
+    public static int bridgeBaseCost;
+    public static int carvedStairBaseCost;
+    public static int airStairBaseCost;
+    public static int bedrockFailsafeRatMinutes;
+
     public static double projectWorkRadius;
     public static int maxProjectWorkers;
     public static int workersPerWidenStep;
     public static double workPerRatPerTick;
     public static int maxProjectWidth;
+    public static double formationSlotSpacing;
 
     // --- Warp Lightning Coil Public Variables ---
     public static int wlCoilCapacity;
@@ -418,6 +495,21 @@ public final class Config {
         minimumSettleDelayMs =
                 MINIMUM_SETTLE_DELAY_MS.get();
 
+        tunnelBaseCost =
+                TUNNEL_BASE_COST.get();
+
+        bridgeBaseCost =
+                BRIDGE_BASE_COST.get();
+
+        carvedStairBaseCost =
+                CARVED_STAIR_BASE_COST.get();
+
+        airStairBaseCost =
+                AIR_STAIR_BASE_COST.get();
+
+        bedrockFailsafeRatMinutes =
+                BEDROCK_FAILSAFE_RAT_MINUTES.get();
+
         projectWorkRadius =
                 PROJECT_WORK_RADIUS.get();
 
@@ -432,6 +524,9 @@ public final class Config {
 
         maxProjectWidth =
                 MAX_PROJECT_WIDTH.get();
+
+        formationSlotSpacing =
+                FORMATION_SLOT_SPACING.get();
 
         wlCoilCapacity =
                 WL_COIL_CAPACITY.get();

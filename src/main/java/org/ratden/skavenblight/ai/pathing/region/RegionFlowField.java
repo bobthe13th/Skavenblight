@@ -29,9 +29,9 @@ public class RegionFlowField {
     private final SiegeProjectManager projectManager;
     private final FlowFieldCalculator calculator;
     private final CalculationThrottler throttler;
-    // Stateless, but getNextSiegeNode runs per-mob per-tick on the hottest path in a system meant
+    // Stateless, but getNextStep runs per-mob per-tick on the hottest path in a system meant
     // to carry hundreds of mobs - allocate it once here instead of once per call.
-    private final TerrainEvaluator terrainEvaluator = new TerrainEvaluator();
+    private final PathStepEvaluator pathStepEvaluator = new PathStepEvaluator();
 
     private final Map<BlockPos, Mob> claimedTargets = new HashMap<>();
 
@@ -61,41 +61,44 @@ public class RegionFlowField {
 
     /**
      * The raw computed instruction at {@code pos} within this region's own field, with none of
-     * getNextSiegeNode's live "is this action already done" resolution - for debug rendering
+     * getNextStep's live "is this action already done" resolution - for debug rendering
      * (PathingDebugFileWriter's grid), which wants to show exactly what the last Dijkstra pass
      * produced, cell by cell, not what a mob standing there right now would be told to do next.
      */
-    public SiegeNode getRawInstruction(BlockPos pos) {
+    public FlowStep getRawInstruction(BlockPos pos) {
         return state.getInstruction(pos);
     }
 
-    // Only these two actions come from determineMacroAction's pure-vertical ("Vertical Shaft /
-    // Column", dx==0 && dz==0) branch, where the placed block sits UNDER the mob's new footing -
-    // once built, the mob climbs one MORE block up to stand on top of it. Every other action
-    // places (or clears) the block the mob steps directly ONTO/INTO: BUILD_STAIR and BUILD_BRIDGE
-    // approach diagonally/horizontally and land AT node.pos() itself, MINE clears node.pos() itself
-    // for the mob to walk into, and BUILD_LANDING's own isActionCompleted special-case already
-    // means "the platform below is filled and pos itself is the clear standing spot". Using
-    // node.pos().above() for BUILD_STAIR specifically was confirmed wrong via
-    // StaircaseSiegeGroupGameTests: the mob would build the first diagonal step, correctly detect
-    // it as completed, but then get pointed one block above the newly-built stair - a position
-    // with no instruction of its own at all (only node.pos() itself, the stair's own position, is
-    // one of the connector's keyed positions), stranding the mob after exactly one step.
-    // BUILD_SPIRAL was originally grouped here too, but SiegeInteractionHandler places the exact
-    // same half-height cobblestone_stairs geometry for BUILD_SPIRAL as it does for BUILD_STAIR
-    // (see its BUILD_SPIRAL case) - it belongs with BUILD_STAIR's "lands AT node.pos()" treatment,
-    // not BUILD_PILLAR/BUILD_LADDER's "stand on top of a full block" one. Confirmed wrong the same
-    // way BUILD_STAIR's old bug was: see RegionFlowFieldClimbResolutionGameTests.
-    private static final Set<SiegeNode.SiegeAction> CLIMB_TO_ABOVE_ONCE_BUILT = Set.of(
-            SiegeNode.SiegeAction.BUILD_PILLAR, SiegeNode.SiegeAction.BUILD_LADDER);
-
-    public SiegeNode getNextSiegeNode(ServerLevel level, BlockPos ratPos) {
-        SiegeNode node = state.getInstruction(ratPos);
+    /**
+     * Renamed from getNextSiegeNode; drops the old CLIMB_TO_ABOVE_ONCE_BUILT ".above()" treatment
+     * entirely - no action in the new five-action vocabulary (WALK/TUNNEL/BRIDGE/CARVED_STAIR/
+     * AIR_STAIR) ever needs "stand ON TOP of the placed block" resolution the way the old
+     * BUILD_PILLAR/BUILD_LADDER pure-vertical actions did. Every one of the four new construction
+     * actions already lands the mob AT the node's own position once complete - the same treatment
+     * BUILD_STAIR/BUILD_BRIDGE/MINE already got, and pure-vertical climbing (the only case that
+     * ever needed the ".above()" adjustment) is permanently removed per the design doc, so there is
+     * no remaining action this table could apply to.
+     *
+     * <p><b>Corrected (2026-08-06, Task 21 go/no-go gate fix):</b> the collapse now preserves
+     * {@code node.predecessorPos()} instead of discarding it. Self-referencing BOTH fields (the
+     * previous behavior) meant every consumer that reads the resolved step's next hop off
+     * {@code .predecessorPos()} - {@code FollowFlowFieldGoal}, {@code SiegeNodeLookahead} - got back
+     * the rat's own position and instructed it to walk to exactly where it already was: the
+     * confirmed root cause of all 4 {@code StaircaseSiegeGroupGameTests} failures (see
+     * docs/superpowers/plans/2026-08-05-pathing-rewrite-implementation-plan.md's Task 21 section for
+     * the full writeup with log evidence). Preserving predecessorPos here is a no-op for a genuinely
+     * self-referential entry (the field's own local Dijkstra objective, per
+     * FlowFieldCalculator.startCalculation's target seed) - predecessorPos already equals pos there,
+     * so collapsing to WALK changes nothing. For every other entry, this now correctly hands the
+     * real next hop through once the construction action at {@code node.pos()} is done.
+     */
+    public FlowStep getNextStep(ServerLevel level, BlockPos ratPos) {
+        FlowStep node = state.getInstruction(ratPos);
         if (node == null) return null;
 
         LiveTerrainAccess live = new LiveTerrainAccess(level);
-        return terrainEvaluator.isActionCompleted(live, node)
-                ? new SiegeNode(CLIMB_TO_ABOVE_ONCE_BUILT.contains(node.action()) ? node.pos().above() : node.pos(), SiegeNode.SiegeAction.WALK)
+        return pathStepEvaluator.isActionCompleted(live, node.pos(), node.action())
+                ? new FlowStep(node.pos(), PathAction.WALK, node.predecessorPos())
                 : node;
     }
 
@@ -142,7 +145,14 @@ public class RegionFlowField {
         return owner != null && owner.isAlive();
     }
 
-    /** AwaitFormationGoal needs this to reach the real Region object (via getRegionIndex()) for terrain-validated formation-slot search. */
+    /** Count of currently-claimed (live-claimant) formation slots - AwaitFormationGoal uses this
+     * to size its own formation grid to observed demand, without needing a shared "how many rats
+     * total" oracle: each rat sees how many slots are already taken and requests a grid one larger. */
+    public int getClaimedFormationSlotCount() {
+        return (int) formationSlots.values().stream().filter(Mob::isAlive).count();
+    }
+
+    /** AwaitFormationGoal needs this to reach the real Region object (via getRegionGraph()) for terrain-validated formation-slot search. */
     public TerritoryRegionMap getOwner() {
         return this.owner;
     }
@@ -213,7 +223,7 @@ public class RegionFlowField {
         return owner.getWildernessHeadingTarget(ratPos);
     }
 
-    public Map<BlockPos, SiegeNode> getInstructionMap() {
+    public Map<BlockPos, FlowStep> getInstructionMap() {
         return state.getInstructionMap();
     }
 
@@ -221,7 +231,7 @@ public class RegionFlowField {
         return state.getTargetPos();
     }
 
-    public Map<BlockPos, SiegeNode> getLiveDebugMap() {
+    public Map<BlockPos, FlowStep> getLiveDebugMap() {
         return calculator.getLiveDebugMap();
     }
 

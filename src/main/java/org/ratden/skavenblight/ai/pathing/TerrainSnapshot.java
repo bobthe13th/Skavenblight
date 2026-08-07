@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * An immutable, point-in-time copy of the block data the flow field calculation needs -
@@ -77,6 +78,19 @@ public final class TerrainSnapshot implements TerrainAccess {
      */
     public static RefreshResult refresh(ServerLevel level, TerrainSnapshot previous, Set<ChunkPos> territoryChunks,
                                          Set<ChunkPos> dirtyChunks, int minY, int maxYExclusive, int maxChunksToCapture) {
+        return refresh(level, previous, territoryChunks, dirtyChunks, minY, maxYExclusive, maxChunksToCapture, pos -> null);
+    }
+
+    /**
+     * Same as the 7-arg {@link #refresh}, plus {@code plannedStateOverride}: for a captured
+     * position where it returns non-null, that state (and its derived destroySpeed/isSolidRender)
+     * is used instead of the real, possibly-not-yet-built world state - the mechanism behind "an
+     * active project's planned final state is authoritative for terrain evaluation" (see
+     * SiegeProjectManager for where the real override function gets built and wired in).
+     */
+    public static RefreshResult refresh(ServerLevel level, TerrainSnapshot previous, Set<ChunkPos> territoryChunks,
+                                         Set<ChunkPos> dirtyChunks, int minY, int maxYExclusive, int maxChunksToCapture,
+                                         Function<BlockPos, BlockState> plannedStateOverride) {
         Map<ChunkPos, SnapshotChunkColumn> newColumns = new HashMap<>();
         Set<ChunkPos> captured = new HashSet<>();
 
@@ -94,7 +108,7 @@ public final class TerrainSnapshot implements TerrainAccess {
         for (ChunkPos cp : territoryChunks) {
             if (newColumns.containsKey(cp)) continue;
             if (capturedCount >= maxChunksToCapture) continue;
-            newColumns.put(cp, captureColumn(level, cp, minY, maxYExclusive));
+            newColumns.put(cp, captureColumn(level, cp, minY, maxYExclusive, plannedStateOverride));
             captured.add(cp);
             capturedCount++;
         }
@@ -102,7 +116,8 @@ public final class TerrainSnapshot implements TerrainAccess {
         return new RefreshResult(new TerrainSnapshot(newColumns, level.getMinBuildHeight(), level.getMaxBuildHeight()), captured);
     }
 
-    private static SnapshotChunkColumn captureColumn(ServerLevel level, ChunkPos cp, int minYRequested, int maxYExclusiveRequested) {
+    private static SnapshotChunkColumn captureColumn(ServerLevel level, ChunkPos cp, int minYRequested, int maxYExclusiveRequested,
+                                                       Function<BlockPos, BlockState> plannedStateOverride) {
         int minY = Math.max(level.getMinBuildHeight(), minYRequested);
         int maxYExclusive = Math.min(level.getMaxBuildHeight(), maxYExclusiveRequested);
         int ySpan = Math.max(0, maxYExclusive - minY);
@@ -124,6 +139,8 @@ public final class TerrainSnapshot implements TerrainAccess {
                     int idx = (ly * 16 + lz) * 16 + lx;
 
                     BlockState bs = level.getBlockState(cursor);
+                    BlockState overridden = plannedStateOverride.apply(cursor.immutable());
+                    if (overridden != null) bs = overridden;
                     states[idx] = bs;
                     destroySpeeds[idx] = bs.getDestroySpeed(level, cursor);
                     if (bs.isSolidRender(level, cursor)) {
