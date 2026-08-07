@@ -181,15 +181,22 @@ public class SiegeInteractionHandler {
     }
 
     /**
-     * 2 blocks of headroom above the tread (3 total with the step itself), matching the clearance
-     * PathStepEvaluator.candidateSteps already requires at plan time. That check only runs once,
-     * when the line is first traced, but the line is executed one step at a time over many ticks -
-     * a different project, or a later step of this same line, can obstruct that headroom before a
-     * rat actually reaches it, sealing the passage it just climbed. Reported in testing: rats got
-     * stuck "placing more stairs on top of the staircase, blocking the path."
+     * 3 blocks of headroom above the tread (4 total with the step itself). {@code pos} here is
+     * wherever the caller actually placed the block - for an ascending AIR_STAIR/CARVED_STAIR
+     * that's one cell BELOW the logical cell PathStepEvaluator.candidateSteps classified (see
+     * SiegeProject.placementPositionFor), so clearing y=1..3 above the physical placement covers
+     * the logical cell itself (y=1, the mob's own standing space) plus the two cells above it that
+     * isActionCompleted's CARVED_STAIR case separately verifies (isWalkableTerrain's own head check
+     * at y=2, plus the extra overhang-safety cell at y=3) - matching the clearance
+     * PathStepEvaluator.candidateSteps already requires at plan time (checked one cell lower, at
+     * the logical target and its own head, before this shift existed). That plan-time check only
+     * runs once, when the line is first traced, but the line is executed one step at a time over
+     * many ticks - a different project, or a later step of this same line, can obstruct that
+     * headroom before a rat actually reaches it, sealing the passage it just climbed. Reported in
+     * testing: rats got stuck "placing more stairs on top of the staircase, blocking the path."
      */
     private static void clearStairHeadroom(ServerLevel level, BlockPos pos, PathAction action, RegionFlowField flowField, LivingEntity actor) {
-        for (int y = 1; y <= 2; y++) {
+        for (int y = 1; y <= 3; y++) {
             BlockPos headroomPos = pos.above(y);
             BlockState headroomState = level.getBlockState(headroomPos);
             if (headroomState.blocksMotion() && !headroomState.canBeReplaced()) {

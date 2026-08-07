@@ -101,18 +101,18 @@ public class SiegeProjectGriefRecoveryGameTests {
                 .thenSucceed();
     }
 
-    /** First {@code COBBLESTONE_STAIRS} block found scanning the crossing zone, or null. */
+    /**
+     * First {@code COBBLESTONE_STAIRS} block found scanning the crossing zone, or null. Uses
+     * {@link StaircaseSiegeGroupGameTests#crossingZoneBounds} rather than a tight from/to box - see
+     * that method's own doc for why a shared-Z (or shared-X) box between ground spawn and nexus
+     * can miss every real stair a diagonal chain places.
+     */
     private static BlockPos findFirstStair(GameTestHelper helper, BlockPos relativeFrom, BlockPos relativeTo) {
-        int minX = Math.min(relativeFrom.getX(), relativeTo.getX());
-        int maxX = Math.max(relativeFrom.getX(), relativeTo.getX());
-        int minY = Math.min(relativeFrom.getY(), relativeTo.getY());
-        int maxY = Math.max(relativeFrom.getY(), relativeTo.getY());
-        int minZ = Math.min(relativeFrom.getZ(), relativeTo.getZ());
-        int maxZ = Math.max(relativeFrom.getZ(), relativeTo.getZ());
+        int[] bounds = StaircaseSiegeGroupGameTests.crossingZoneBounds(relativeFrom, relativeTo);
 
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
+        for (int x = bounds[0]; x <= bounds[1]; x++) {
+            for (int y = bounds[2]; y <= bounds[3]; y++) {
+                for (int z = bounds[4]; z <= bounds[5]; z++) {
                     BlockPos relative = new BlockPos(x, y, z);
                     if (helper.getBlockState(relative).is(Blocks.COBBLESTONE_STAIRS)) {
                         return helper.absolutePos(relative);

@@ -184,10 +184,53 @@ public class SiegeProject {
         List<PlannedStep> planned = new ArrayList<>(orderedSteps.size());
         BlockPos previous = anchor;
         for (FlowStep step : orderedSteps) {
-            planned.add(new PlannedStep(step.pos(), step.action(), approachFacing(previous, step.pos())));
+            BlockPos placementPos = placementPositionFor(previous, step.pos(), step.action());
+            planned.add(new PlannedStep(step.pos(), step.action(), approachFacing(previous, step.pos()), placementPos));
             previous = step.pos();
         }
         return planned;
+    }
+
+    /**
+     * Where a step's block is physically placed, as distinct from {@code target} (the LOGICAL cell
+     * a mob ends up standing in/on once it's crossed - see {@link PlannedStep}'s own doc). Identical
+     * to {@code target} for every action except an ASCENDING {@code AIR_STAIR}/{@code CARVED_STAIR}
+     * ({@code target} strictly above {@code from}, the real position this hop is approached from -
+     * always a genuinely adjacent cell, one {@code PathStepEvaluator.candidateSteps} offset away in
+     * every direction, regardless of whether {@code orderedSteps} is walked forward or reversed).
+     *
+     * <p>Root cause this corrects (Task 21's go/no-go gate, fourth/fifth session): {@code
+     * PathStepEvaluator.candidateSteps} classifies an ascending neighbor at {@code (dx, dy=+1, dz)}
+     * from the approach cell, and construction used to place the stair directly there. A bottom-half
+     * stair's own low tread sits at {@code cell-base + 0.5} - one full cell above the target PLUS
+     * 0.5 more above the approach floor, a 1.5-block rise no jump (vanilla's own jump height is
+     * ~1.25 blocks) can ever cross, regardless of momentum. A real vanilla staircase places each
+     * stair at the SAME cell level as its approach floor - crossing that one block delivers the full
+     * 1.0 rise via the stair's own tread+riser geometry (two ~0.5 auto-steps), landing the mob
+     * exactly one cell higher and correctly set up for an identically-placed next stair. Shifting
+     * placement down by one cell (to the approach cell's own level, {@code target.below()}, which
+     * always shares {@code target}'s X/Z) reproduces that geometry.
+     *
+     * <p>Only the ASCENDING case needs the shift. For a descending hop ({@code target} below {@code
+     * from}), {@code target} is already the lower of the two real cells - exactly where a stair
+     * should sit for a mob walking down onto it - so no adjustment is needed; unconditionally
+     * shifting both directions would place a descending stair two cells too low. Since {@code
+     * candidateSteps} only ever offers {@code dy} in {-1, 0, +1} per hop, "ascending" is exactly
+     * {@code target.getY() > from.getY()}, and the shift is always exactly one cell.
+     *
+     * <p>Deliberately does NOT touch {@code target}/{@code PlannedStep.pos()} itself: every other
+     * consumer of a build-order position ({@code plannedStepAt}, {@code getBuildOrderPositions}, the
+     * work-radius checks) already means "the logical cell," and {@code isActionCompleted} is checked
+     * against target too - see {@code PathStepEvaluator.isActionCompleted}'s AIR_STAIR/CARVED_STAIR
+     * cases, which ask "is target standable" ({@code isWalkableTerrain}) rather than "is target
+     * solid," so a stair one cell below target (providing target's own standing support) still
+     * correctly resolves the hop as complete without this method needing to touch the logical side
+     * at all.
+     */
+    private static BlockPos placementPositionFor(BlockPos from, BlockPos target, PathAction action) {
+        boolean isStairAction = action == PathAction.AIR_STAIR || action == PathAction.CARVED_STAIR;
+        boolean ascending = target.getY() > from.getY();
+        return (isStairAction && ascending) ? target.below() : target;
     }
 
     /** Same dx/dz-comparison logic as BuildFlowFieldGoal.computeApproachFacing, fed geometry
@@ -263,14 +306,27 @@ public class SiegeProject {
      * a widen-eligible project whose trace actually fails (terrain won't take another lane) still
      * reports true here and then fails in start(), the one case where the old MOVE-holding behavior
      * survives. Every other rejection reason is now caught before the goal ever starts.
+     *
+     * <p>The already-registered short-circuit runs BEFORE the radius check, not after: a mining
+     * action (TUNNEL/CARVED_STAIR) advances its own "next unbuilt step" out from under a stationary
+     * worker as soon as each hop completes, since - unlike AIR_STAIR, where the mob physically climbs
+     * each finished stair via FollowFlowFieldGoal and so closes distance every hop - mining carves
+     * space ahead of the mob's standing cell without ever moving it. Two or three consecutive hops
+     * can put the new next-step comfortably outside workRadius (3.5) of a mob that never left its
+     * original position, and canContinueToUse() routes through this same method - so checking radius
+     * first was dropping mid-chain workers the instant the frontier outran them, permanently
+     * orphaning the project's tick() calls. Registration (tryRegisterWorker, and canUse() since
+     * stop()/unregisterWorker always empties `workers` before canUse() is next consulted) still
+     * checks radius first via its own, separate call site, so admission is unaffected - this only
+     * loosens continuation for a mob already doing the work.
      */
     public boolean canAcceptWorker(Mob mob, TerrainAccess terrain, PathStepEvaluator evaluator, double workRadius,
                                     int maxProjectWorkers, int workersPerWidenStep) {
         Optional<PlannedStep> next = nextUnbuiltInstruction(terrain, evaluator);
         if (next.isEmpty()) return false;
         PlannedStep step = next.get();
-        if (!mob.blockPosition().closerThan(step.pos(), workRadius)) return false;
         if (workers.contains(mob)) return true;
+        if (!mob.blockPosition().closerThan(step.pos(), workRadius)) return false;
         if (workers.size() < effectiveCapFor(step.action(), this.width, maxProjectWorkers, workersPerWidenStep)) return true;
         return isWidenEligible(step.action());
     }
@@ -486,8 +542,17 @@ public class SiegeProject {
             // A placed stair/pillar is self-supporting for pathing purposes regardless of what ends
             // up below it once built - there is no floating-step risk here for tick() to guard
             // against in the first place.
-            SiegeInteractionHandler.constructSiegeBlock(level, step.pos(), step.facing(), step.action(), flowField, null, false,
-                    this.platformPositions.contains(step.pos()));
+            //
+            // targetPos: a PLATFORM seam (see PlatformInserter) clears a staging area keyed by the
+            // LOGICAL build-order position (a mob's own standing/turning cell), unaffected by the
+            // placement/logical split below - use step.pos() for those. Every other step passes
+            // step.placementPos(), which differs from step.pos() only for an ascending AIR_STAIR/
+            // CARVED_STAIR (see PlannedStep's own doc and SiegeProject.placementPositionFor) - the
+            // physical block goes one cell lower than the logical cell a mob ends up standing in.
+            boolean isPlatform = this.platformPositions.contains(step.pos());
+            BlockPos targetPos = isPlatform ? step.pos() : step.placementPos();
+            SiegeInteractionHandler.constructSiegeBlock(level, targetPos, step.facing(), step.action(), flowField, null, false,
+                    isPlatform);
             // Real placements never fire NeoForge's BlockEvent (SiegeInteractionHandler uses
             // level.setBlockAndUpdate/destroyBlock directly - see RegionFlowField#forceRecalculation's
             // own doc), so nothing else marks this region dirty. Without this call, region membership
@@ -495,8 +560,9 @@ public class SiegeProject {
             // rejecting it against the region's stale, pre-construction bounds forever), silently
             // stalling every chain after its first placed step - confirmed via a full GameTest suite
             // run showing 0 stairs built across every StaircaseSiegeGroupGameTests scenario before
-            // this fix.
-            flowField.forceRecalculation(step.pos());
+            // this fix. Dirty the position that actually changed (targetPos), matching whatever
+            // constructSiegeBlock was just called with above.
+            flowField.forceRecalculation(targetPos);
 
             Optional<PlannedStep> following = nextUnbuiltInstruction(terrain, evaluator);
             step = following.orElse(null);

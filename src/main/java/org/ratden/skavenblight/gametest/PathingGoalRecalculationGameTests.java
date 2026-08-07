@@ -218,11 +218,14 @@ public class PathingGoalRecalculationGameTests {
         // mob's real, untouched starting ground) gets an explicit WALK entry; chain[1..3] each get
         // their OWN unbuilt AIR_STAIR entry, which RegionFlowField#getNextStep dynamically collapses
         // to WALK (preserving predecessorPos) once that exact cell is actually built by an earlier
-        // step - AIR_STAIR's own isActionCompleted check tests the block AT that position, and a
-        // placed COBBLESTONE_STAIRS occupies exactly the chain cell it rises into (unlike BRIDGE,
-        // where the placed block sits at the gap position and the mob stands one cell above it -
-        // see testBuildFlowFieldGoalMarksRegionDirty's own two-entry fixture for that shape
-        // instead). SiegeProject's own `instructions` field (consumed by
+        // step - AIR_STAIR's own isActionCompleted check asks whether that position is STANDABLE
+        // (PathStepEvaluator.isWalkableTerrain), true once a placed COBBLESTONE_STAIRS occupies the
+        // cell directly BELOW the chain cell it rises into (SiegeProject.placementPositionFor shifts
+        // an ascending AIR_STAIR/CARVED_STAIR's physical placement one cell below the logical chain
+        // cell, matching a real vanilla staircase's own geometry - see that method's own doc; unlike
+        // BRIDGE, where the placed block sits directly at the gap position and the mob stands one
+        // cell above it - see testBuildFlowFieldGoalMarksRegionDirty's own two-entry fixture for that
+        // shape instead). SiegeProject's own `instructions` field (consumed by
         // SiegeProjectManager.findProjectContaining via getInstructions().containsKey(pos), and by
         // SiegeProject.isCompleted/getRemainingInstructions via entry.getKey()/entry.getValue()
         // .action() only - never .pos()) is unaffected by this convention and keeps its
@@ -311,8 +314,13 @@ public class PathingGoalRecalculationGameTests {
                         // not accessible from this gametest package) - tick until the real world
                         // shows the step done instead.
                         currentGoal[0].tick();
-                        helper.assertBlockState(relativeChain[stepIndex + 1], s -> s.is(Blocks.COBBLESTONE_STAIRS),
-                                () -> "step " + stepIndex + " should have placed a stair at " + relativeChain[stepIndex + 1]);
+                        // The stair lands one cell BELOW the logical chain cell it rises into - see
+                        // SiegeProject.placementPositionFor's own doc (also referenced in this
+                        // fixture's setup comment above) for why an ascending AIR_STAIR's physical
+                        // placement is shifted down from what candidateSteps classified.
+                        BlockPos placementPos = relativeChain[stepIndex + 1].below();
+                        helper.assertBlockState(placementPos, s -> s.is(Blocks.COBBLESTONE_STAIRS),
+                                () -> "step " + stepIndex + " should have placed a stair at " + placementPos);
                     })
                     .thenExecute(() -> currentGoal[0].stop());
         }

@@ -198,25 +198,53 @@ public class StaircaseSiegeGroupGameTests {
     }
 
     /**
-     * Counts {@code Blocks.COBBLESTONE_STAIRS} within the inclusive bounding box between
-     * {@code relativeFrom} and {@code relativeTo} (order-independent per axis) - the secondary
-     * pass condition. "Rats arrived" alone can't distinguish a real staircase crossing from some
-     * other action winning the race, or from an accidental shortcut through GameTest's own
-     * territory encasement (see this file's class javadoc / the design spec's terrain-margin
-     * note) - either would leave this count far below the expected diagonal step count.
+     * The inclusive bounding box between {@code relativeFrom} and {@code relativeTo}
+     * (order-independent per axis), widened to actually contain a real staircase crossing between
+     * them. Whichever horizontal axis has zero span between the two corners (every test in this
+     * file and {@code SiegeProjectGriefRecoveryGameTests}: ground spawn and nexus always share the
+     * same Z) gets widened by the vertical climb distance on both sides. Confirmed against a real
+     * production run: a diagonal AIR_STAIR/CARVED_STAIR chain trades exactly one block of
+     * horizontal drift per block climbed, but the region graph picks WHICH horizontal axis to
+     * drift in on its own - not necessarily the axis relativeFrom and relativeTo actually differ
+     * on. That run's real chain climbed entirely along Z (from relative Z=15 to Z=27) while X
+     * stayed pinned near the nexus, so a tight single-Z-value box only ever saw 1 of the 13 real
+     * stairs placed - not a construction defect, a blind spot that would have made any assertion
+     * built on this box structurally unsatisfiable regardless of how correctly the crossing was
+     * built. Returned as {@code {minX, maxX, minY, maxY, minZ, maxZ}}.
      */
-    static int countStairsInZone(GameTestHelper helper, BlockPos relativeFrom, BlockPos relativeTo) {
+    static int[] crossingZoneBounds(BlockPos relativeFrom, BlockPos relativeTo) {
+        int margin = Math.abs(relativeTo.getY() - relativeFrom.getY());
         int minX = Math.min(relativeFrom.getX(), relativeTo.getX());
         int maxX = Math.max(relativeFrom.getX(), relativeTo.getX());
         int minY = Math.min(relativeFrom.getY(), relativeTo.getY());
         int maxY = Math.max(relativeFrom.getY(), relativeTo.getY());
         int minZ = Math.min(relativeFrom.getZ(), relativeTo.getZ());
         int maxZ = Math.max(relativeFrom.getZ(), relativeTo.getZ());
+        if (minX == maxX) {
+            minX -= margin;
+            maxX += margin;
+        }
+        if (minZ == maxZ) {
+            minZ -= margin;
+            maxZ += margin;
+        }
+        return new int[] {minX, maxX, minY, maxY, minZ, maxZ};
+    }
+
+    /**
+     * Counts {@code Blocks.COBBLESTONE_STAIRS} within {@link #crossingZoneBounds} - the secondary
+     * pass condition. "Rats arrived" alone can't distinguish a real staircase crossing from some
+     * other action winning the race, or from an accidental shortcut through GameTest's own
+     * territory encasement (see this file's class javadoc / the design spec's terrain-margin
+     * note) - either would leave this count far below the expected diagonal step count.
+     */
+    static int countStairsInZone(GameTestHelper helper, BlockPos relativeFrom, BlockPos relativeTo) {
+        int[] bounds = crossingZoneBounds(relativeFrom, relativeTo);
 
         int count = 0;
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
+        for (int x = bounds[0]; x <= bounds[1]; x++) {
+            for (int y = bounds[2]; y <= bounds[3]; y++) {
+                for (int z = bounds[4]; z <= bounds[5]; z++) {
                     if (helper.getBlockState(new BlockPos(x, y, z)).is(Blocks.COBBLESTONE_STAIRS)) {
                         count++;
                     }
@@ -238,13 +266,26 @@ public class StaircaseSiegeGroupGameTests {
                                                   BlockPos relativeNexusPos, BlockPos relativeGroundEdge,
                                                   double arrivalRadius, int minStairsExpected) {
         BlockPos absoluteNexusPos = helper.absolutePos(relativeNexusPos);
+        // countStairsInZone's box scales with the crossing's height (see its own doc) - for the
+        // giant-gap test that's tens of thousands of cells, and succeedWhen's check runs every
+        // single tick. Rescanning that often starved the whole 40-test batch of real throughput
+        // (a full suite run went from ~60s to ~2m24s) and had knock-on failures in unrelated tests
+        // sharing the same tick loop. A staircase build takes hundreds of ticks; nothing here needs
+        // tighter than 10-tick resolution, so cache the last scan and only refresh on a stride.
+        int[] cachedStairsFound = {-1};
+        long[] lastScannedTick = {Long.MIN_VALUE};
 
         helper.succeedWhen(() -> {
             // Counted BEFORE the arrival checks purely so the arrival failure message can carry it:
             // "rat never arrived" on its own can't distinguish "no staircase was ever built" from
             // "a staircase exists but the rats couldn't or wouldn't climb it", and those point at
             // completely different subsystems. Both checks still have to pass either way.
-            int stairsFound = countStairsInZone(helper, relativeGroundEdge, relativeNexusPos);
+            long now = helper.getLevel().getGameTime();
+            if (cachedStairsFound[0] < 0 || now - lastScannedTick[0] >= 10) {
+                cachedStairsFound[0] = countStairsInZone(helper, relativeGroundEdge, relativeNexusPos);
+                lastScannedTick[0] = now;
+            }
+            int stairsFound = cachedStairsFound[0];
 
             for (ClanratEntity rat : rats) {
                 check(rat.isAlive(), "every rat must still be alive - one dying mid-crossing is a failure, not a pass");

@@ -129,7 +129,17 @@ public abstract class AbstractSiegeProjectGoal extends Goal implements SiegeGoal
 
     @Override
     public void tick() {
-        if (this.registeredProject == null || !(this.mob.level() instanceof ServerLevel serverLevel)) return;
+        // flowField can be reset to null mid-cycle by ClanratEntity.assignFlowField - it re-fetches
+        // and propagates to every SiegeGoal (including this already-running one) on any region
+        // generation bump, and a just-placed stair's own forceRecalculation call is exactly the kind
+        // of thing that triggers one. A momentary null here is a transient recompute race, not a
+        // permanent state (the very next tick's re-fetch either restores a real field or this goal's
+        // own canContinueToUse() eventually drops it) - skipping one tick's construction progress is
+        // harmless, unlike letting SiegeProject.tick() NPE on it.
+        if (this.registeredProject == null || this.flowField == null
+                || !(this.mob.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
 
         this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
         findEffectiveNode().ifPresent(node -> this.mob.getLookControl().setLookAt(

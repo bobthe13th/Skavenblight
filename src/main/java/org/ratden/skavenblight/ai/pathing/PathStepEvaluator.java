@@ -118,20 +118,37 @@ public class PathStepEvaluator {
     }
 
     /**
-     * Is the construction step at {@code pos} already done in the real world? TUNNEL/CARVED_STAIR
-     * check all three of foot/head/ceiling (not just foot) - checking foot alone let a mining step
+     * Is the construction step at {@code pos} already done in the real world? TUNNEL checks all
+     * three of foot/head/ceiling (not just foot) - checking foot alone let a mining step
      * approaching an overhang from below be reported "already completed" the moment the foot cell
      * happened to already be open air, even though the actual obstruction (the overhang itself) was
      * untouched (see the old TerrainEvaluator.isActionCompleted's identical MINE-branch fix, ported
-     * verbatim here since a TUNNEL/CARVED_STAIR step's "done" condition is exactly the same check).
+     * verbatim here since a TUNNEL step's "done" condition is exactly the same check).
+     *
+     * <p>AIR_STAIR/CARVED_STAIR ask "is {@code pos} standable" ({@link #isWalkableTerrain}), NOT "is
+     * {@code pos} solid" - deliberately different from BRIDGE, which places its own block directly
+     * AT {@code pos} and so can just check solidity there. An ascending AIR_STAIR/CARVED_STAIR's
+     * PHYSICAL stair sits one cell BELOW {@code pos} (see {@code SiegeProject.placementPositionFor}
+     * - {@code pos} stays the logical cell a mob ends up standing IN, the stair itself is the
+     * SUPPORT under that cell, not a block occupying it), so checking solidity at {@code pos}
+     * directly would never resolve true even once a real stair is built and climbable.
+     * {@code isWalkableTerrain} already treats "solid or scaffold support one cell below" as
+     * satisfying standability, so it transparently covers both the shifted-ascend case and the
+     * unshifted case (a stair placed directly at {@code pos}, e.g. a hand-fed fixture, or CARVED_STAIR
+     * biting into solid rock without needing a placed block there at all) without needing to know
+     * which one applies. CARVED_STAIR keeps TUNNEL's extra ceiling check (one cell higher than
+     * {@code isWalkableTerrain} itself looks) - see clearStairHeadroom's own doc for why construction
+     * clears exactly that cell too.
      */
     public boolean isActionCompleted(TerrainAccess terrain, BlockPos pos, PathAction action) {
         BlockState state = terrain.getBlockState(pos);
         return switch (action) {
-            case TUNNEL, CARVED_STAIR -> (!state.blocksMotion() || isWalkableScaffold(state))
+            case TUNNEL -> (!state.blocksMotion() || isWalkableScaffold(state))
                     && isOpenOrWalkable(terrain, pos.above())
                     && isOpenOrWalkable(terrain, pos.above(2));
-            case BRIDGE, AIR_STAIR -> state.blocksMotion() || isWalkableScaffold(state);
+            case CARVED_STAIR -> isWalkableTerrain(terrain, pos) && isOpenOrWalkable(terrain, pos.above(2));
+            case BRIDGE -> state.blocksMotion() || isWalkableScaffold(state);
+            case AIR_STAIR -> isWalkableTerrain(terrain, pos);
             case WALK -> isWalkableTerrain(terrain, pos);
         };
     }
