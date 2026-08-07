@@ -17,6 +17,7 @@ import org.ratden.skavenblight.debug.SiegeActivityLog;
 import org.slf4j.Logger;
 
 import java.util.List;
+import java.util.Set;
 
 public class SiegeInteractionHandler {
 
@@ -31,6 +32,16 @@ public class SiegeInteractionHandler {
      *              return early - a PLATFORM seam (see PlatformInserter) is a post-process
      *              annotation on an EXISTING build-order step, not a 6th PathAction, so this stays
      *              a separate boolean rather than a value {@code action} could hold.
+     * @param protectedPositions every build-order step's own logical position (see
+     *              SiegeProject#getBuildOrderPositions) - cells that must stay open/standable
+     *              regardless of which step is being built right now, since isActionCompleted
+     *              checks standability at each of them independently. Only consulted by the
+     *              platform branch: a PLATFORM's 3x3 floor is centered on its OWN node and wide
+     *              enough that a fringe cell can land exactly on a NEIGHBORING step's logical cell -
+     *              confirmed live: an AIR_STAIR-to-CARVED_STAIR seam's floor reached back into the
+     *              previous stair's own landing cell, filling it with cobblestone and stacking a
+     *              solid block directly above the stair a mob had just climbed, a real 2-block wall
+     *              blocking the crossing rather than the landing pad it was meant to be.
      */
     public static void constructSiegeBlock(
             ServerLevel level,
@@ -40,7 +51,8 @@ public class SiegeInteractionHandler {
             RegionFlowField flowField,
             LivingEntity actor,
             boolean supportSolidAtClaim,
-            boolean isPlatform
+            boolean isPlatform,
+            Set<BlockPos> protectedPositions
     ) {
         if (action == PathAction.WALK) {
             return;
@@ -63,7 +75,7 @@ public class SiegeInteractionHandler {
             for (int x = -1; x <= 1; x++) {
                 for (int z = -1; z <= 1; z++) {
                     BlockPos platformPos = pos.below().offset(x, 0, z);
-                    if (level.getBlockState(platformPos).canBeReplaced()) {
+                    if (level.getBlockState(platformPos).canBeReplaced() && !protectedPositions.contains(platformPos)) {
                         level.setBlockAndUpdate(platformPos, Blocks.COBBLESTONE.defaultBlockState());
                     }
 

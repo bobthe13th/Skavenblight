@@ -518,6 +518,11 @@ public class SiegeProject {
 
         this.accumulatedWork += activeWorkers * org.ratden.skavenblight.Config.workPerRatPerTick;
 
+        // Computed once per tick(), not per completed step below: buildOrder cannot grow mid-loop
+        // (tryWiden only ever runs from registration, never from tick() itself), so every iteration
+        // of the while loop below would otherwise rebuild an identical set from scratch.
+        Set<BlockPos> protectedPositions = new HashSet<>(getBuildOrderPositions());
+
         PlannedStep step = next.get();
         while (step != null) {
             int cost = evaluator.baseCostFor(step.action());
@@ -551,8 +556,17 @@ public class SiegeProject {
             // physical block goes one cell lower than the logical cell a mob ends up standing in.
             boolean isPlatform = this.platformPositions.contains(step.pos());
             BlockPos targetPos = isPlatform ? step.pos() : step.placementPos();
+            // protectedPositions (computed once above): every build-order step's own logical cell
+            // must stay open/standable (isActionCompleted checks standability there) regardless of
+            // whether THIS step is the one being built right now - a platform seam's 3x3 floor is
+            // centered on ITS OWN node, wide enough that a fringe cell can land exactly on a
+            // NEIGHBORING step's logical position (confirmed: an AIR_STAIR->CARVED_STAIR seam's
+            // floor reached back into the previous stair's own landing cell, filling it with
+            // cobblestone and stacking a solid block directly on top of the stair the mob had just
+            // climbed - a real 2-block wall, not a floor). See constructSiegeBlock's own doc for
+            // where this guard applies.
             SiegeInteractionHandler.constructSiegeBlock(level, targetPos, step.facing(), step.action(), flowField, null, false,
-                    isPlatform);
+                    isPlatform, protectedPositions);
             // Real placements never fire NeoForge's BlockEvent (SiegeInteractionHandler uses
             // level.setBlockAndUpdate/destroyBlock directly - see RegionFlowField#forceRecalculation's
             // own doc), so nothing else marks this region dirty. Without this call, region membership
