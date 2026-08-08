@@ -26,26 +26,37 @@ public class NexusScreen extends Screen {
         int startY = (this.height - 256) / 2;
 
         // Network Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Network"), button -> {
+        Button networkButton = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.network"), button -> {
             this.currentTab = Tab.NETWORK;
             this.rebuildWidgets();
-        }).bounds(startX, startY - 20, 60, 20).build());
+        }).bounds(startX, startY - 20, 60, 20)
+          .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.network.tooltip")))
+          .build();
+        networkButton.active = (this.currentTab != Tab.NETWORK);
+        this.addRenderableWidget(networkButton);
 
         // Scheme Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Schemes"), button -> {
+        Button schemesButton = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.schemes"), button -> {
             this.currentTab = Tab.SCHEMES;
             this.rebuildWidgets();
-        }).bounds(startX + 62, startY - 20, 60, 20).build());
+        }).bounds(startX + 62, startY - 20, 60, 20)
+          .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.schemes.tooltip")))
+          .build();
+        schemesButton.active = (this.currentTab != Tab.SCHEMES);
+        this.addRenderableWidget(schemesButton);
 
         // Research Tab Button (Opens Modonomicon)
-        this.addRenderableWidget(Button.builder(Component.literal("Research"), button -> {
+        Button researchButton = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.research"), button -> {
             if (this.minecraft != null) {
                 this.minecraft.setScreen(null); // Close the custom Nexus screen
 
                 // TODO: Send a network packet to the server to open the Modonomicon book.
                 // PacketHandler.sendToServer(new OpenResearchPacket());
             }
-        }).bounds(startX + 124, startY - 20, 60, 20).build());
+        }).bounds(startX + 124, startY - 20, 60, 20)
+          .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.research.tooltip")))
+          .build();
+        this.addRenderableWidget(researchButton);
 
         // Initialize specific widgets based on the active tab
         if (this.currentTab == Tab.NETWORK) {
@@ -77,9 +88,9 @@ public class NexusScreen extends Screen {
 
         // Render tab-specific text/overlays
         if (this.currentTab == Tab.NETWORK) {
-            graphics.drawString(this.font, "Warp-Network Status: Active", startX + 10, startY + 10, 0x44FF44, false);
+            graphics.drawString(this.font, Component.translatable("gui.skavenblight.nexus.status.active"), startX + 10, startY + 10, 0x44FF44, false);
         } else {
-            graphics.drawString(this.font, "Active Schemes", startX + 10, startY + 10, 0xFF4444, false);
+            graphics.drawString(this.font, Component.translatable("gui.skavenblight.nexus.status.schemes"), startX + 10, startY + 10, 0xFF4444, false);
         }
     }
 }

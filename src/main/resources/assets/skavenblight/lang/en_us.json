@@ -51,6 +51,16 @@
   "block.skavenblight.research_table_ulgu": "Veil of Ulgu",
   "block.skavenblight.research_table_shyish": "Ossuary of Shyish",
 
+  "gui.skavenblight.nexus": "Warpstone Nexus",
+  "gui.skavenblight.nexus.tab.network": "Network",
+  "gui.skavenblight.nexus.tab.network.tooltip": "View active Warp-Network and nodes, yes-yes!",
+  "gui.skavenblight.nexus.tab.schemes": "Schemes",
+  "gui.skavenblight.nexus.tab.schemes.tooltip": "Select and configure active machinations!",
+  "gui.skavenblight.nexus.tab.research": "Research",
+  "gui.skavenblight.nexus.tab.research.tooltip": "Consult the grimoires of power!",
+  "gui.skavenblight.nexus.status.active": "Warp-Network Status: Active",
+  "gui.skavenblight.nexus.status.schemes": "Active Schemes",
+
   "gui.skavenblight.research_table.choose_prompt": "Choose a spell to study, yes-yes!",
   "gui.skavenblight.research_table.begin": "Begin Research",
   "gui.skavenblight.research_table.studying": "Studying...",
