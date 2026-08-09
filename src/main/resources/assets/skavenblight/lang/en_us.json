@@ -33,6 +33,16 @@
   "block.skavenblight.warpstone_nexus": "Warpstone Nexus",
   "block.skavenblight.active_warpstone_nexus": "Active Warpstone Nexus",
 
+  "gui.skavenblight.nexus": "Warpstone Nexus",
+  "gui.skavenblight.nexus.tab.network": "Network",
+  "gui.skavenblight.nexus.tab.network.tooltip": "Monitor and manage the local Warp-Flux power grid.",
+  "gui.skavenblight.nexus.tab.schemes": "Schemes",
+  "gui.skavenblight.nexus.tab.schemes.tooltip": "Formulate and trigger advanced engineering plans.",
+  "gui.skavenblight.nexus.tab.research": "Research",
+  "gui.skavenblight.nexus.tab.research.tooltip": "Access your Modonomicon logbook to study magic and machinery.",
+  "gui.skavenblight.nexus.network_status": "Warp-Network Status: %s",
+  "gui.skavenblight.nexus.active_schemes": "Active Schemes",
+
   "block.skavenblight.skaven_tunnel_source": "Skaven Tunnel Source",
 
   "block.skavenblight.spawn_tunnel_small_active": "Small Spawn Tunnel (Active)",
