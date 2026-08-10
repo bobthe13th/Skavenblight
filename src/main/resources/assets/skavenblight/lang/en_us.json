@@ -51,6 +51,16 @@
   "block.skavenblight.research_table_ulgu": "Veil of Ulgu",
   "block.skavenblight.research_table_shyish": "Ossuary of Shyish",
 
+  "gui.skavenblight.nexus": "Warpstone Nexus",
+  "gui.skavenblight.nexus.tab.network": "Network",
+  "gui.skavenblight.nexus.tab.network.tooltip": "View Warp-Network status and active connections, yes-yes!",
+  "gui.skavenblight.nexus.tab.schemes": "Schemes",
+  "gui.skavenblight.nexus.tab.schemes.tooltip": "Review and deploy active under-empire schemes!",
+  "gui.skavenblight.nexus.tab.research": "Research",
+  "gui.skavenblight.nexus.tab.research.tooltip": "Consult the great Book of Nexus Research.",
+  "gui.skavenblight.nexus.network_status": "Warp-Network Status: Active",
+  "gui.skavenblight.nexus.active_schemes": "Active Schemes",
+
   "gui.skavenblight.research_table.choose_prompt": "Choose a spell to study, yes-yes!",
   "gui.skavenblight.research_table.begin": "Begin Research",
   "gui.skavenblight.research_table.studying": "Studying...",

@@ -1,7 +1,10 @@
 package org.ratden.skavenblight.screen;
 
+import com.klikli_dev.modonomicon.client.gui.BookGuiManager;
+import com.klikli_dev.modonomicon.client.gui.book.BookAddress;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -11,6 +14,7 @@ public class NexusScreen extends Screen {
 
     // 1.21 uses fromNamespaceAndPath instead of the old constructor
     private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath("skavenblight", "textures/gui/nexus.png");
+    private static final ResourceLocation BOOK_ID = ResourceLocation.fromNamespaceAndPath("skavenblight", "nexus_research");
 
     private enum Tab { NETWORK, SCHEMES }
     private Tab currentTab = Tab.NETWORK;
@@ -26,26 +30,32 @@ public class NexusScreen extends Screen {
         int startY = (this.height - 256) / 2;
 
         // Network Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Network"), button -> {
+        Button networkBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.network"), button -> {
             this.currentTab = Tab.NETWORK;
             this.rebuildWidgets();
-        }).bounds(startX, startY - 20, 60, 20).build());
+        }).bounds(startX, startY - 20, 60, 20).build();
+        networkBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.network.tooltip")));
+        networkBtn.active = (this.currentTab != Tab.NETWORK);
+        this.addRenderableWidget(networkBtn);
 
         // Scheme Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Schemes"), button -> {
+        Button schemesBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.schemes"), button -> {
             this.currentTab = Tab.SCHEMES;
             this.rebuildWidgets();
-        }).bounds(startX + 62, startY - 20, 60, 20).build());
+        }).bounds(startX + 62, startY - 20, 60, 20).build();
+        schemesBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.schemes.tooltip")));
+        schemesBtn.active = (this.currentTab != Tab.SCHEMES);
+        this.addRenderableWidget(schemesBtn);
 
         // Research Tab Button (Opens Modonomicon)
-        this.addRenderableWidget(Button.builder(Component.literal("Research"), button -> {
+        Button researchBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.research"), button -> {
             if (this.minecraft != null) {
                 this.minecraft.setScreen(null); // Close the custom Nexus screen
-
-                // TODO: Send a network packet to the server to open the Modonomicon book.
-                // PacketHandler.sendToServer(new OpenResearchPacket());
+                BookGuiManager.get().openBook(BookAddress.defaultFor(BOOK_ID));
             }
-        }).bounds(startX + 124, startY - 20, 60, 20).build());
+        }).bounds(startX + 124, startY - 20, 60, 20).build();
+        researchBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.research.tooltip")));
+        this.addRenderableWidget(researchBtn);
 
         // Initialize specific widgets based on the active tab
         if (this.currentTab == Tab.NETWORK) {
@@ -77,9 +87,9 @@ public class NexusScreen extends Screen {
 
         // Render tab-specific text/overlays
         if (this.currentTab == Tab.NETWORK) {
-            graphics.drawString(this.font, "Warp-Network Status: Active", startX + 10, startY + 10, 0x44FF44, false);
+            graphics.drawString(this.font, Component.translatable("gui.skavenblight.nexus.network_status"), startX + 10, startY + 10, 0x44FF44, false);
         } else {
-            graphics.drawString(this.font, "Active Schemes", startX + 10, startY + 10, 0xFF4444, false);
+            graphics.drawString(this.font, Component.translatable("gui.skavenblight.nexus.active_schemes"), startX + 10, startY + 10, 0xFF4444, false);
         }
     }
 }
