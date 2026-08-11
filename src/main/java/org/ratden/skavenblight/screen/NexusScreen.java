@@ -2,6 +2,7 @@ package org.ratden.skavenblight.screen;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -26,26 +27,37 @@ public class NexusScreen extends Screen {
         int startY = (this.height - 256) / 2;
 
         // Network Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Network"), button -> {
+        Button networkBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.network"), button -> {
             this.currentTab = Tab.NETWORK;
             this.rebuildWidgets();
-        }).bounds(startX, startY - 20, 60, 20).build());
+        }).bounds(startX, startY - 20, 60, 20).build();
+        networkBtn.active = (this.currentTab != Tab.NETWORK);
+        networkBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.network.tooltip")));
+        this.addRenderableWidget(networkBtn);
 
         // Scheme Tab Button
-        this.addRenderableWidget(Button.builder(Component.literal("Schemes"), button -> {
+        Button schemesBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.schemes"), button -> {
             this.currentTab = Tab.SCHEMES;
             this.rebuildWidgets();
-        }).bounds(startX + 62, startY - 20, 60, 20).build());
+        }).bounds(startX + 62, startY - 20, 60, 20).build();
+        schemesBtn.active = (this.currentTab != Tab.SCHEMES);
+        schemesBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.schemes.tooltip")));
+        this.addRenderableWidget(schemesBtn);
 
         // Research Tab Button (Opens Modonomicon)
-        this.addRenderableWidget(Button.builder(Component.literal("Research"), button -> {
+        Button researchBtn = Button.builder(Component.translatable("gui.skavenblight.nexus.tab.research"), button -> {
             if (this.minecraft != null) {
                 this.minecraft.setScreen(null); // Close the custom Nexus screen
-
-                // TODO: Send a network packet to the server to open the Modonomicon book.
-                // PacketHandler.sendToServer(new OpenResearchPacket());
+                // Directly open the Modonomicon book client-side as described in memories
+                com.klikli_dev.modonomicon.client.gui.book.BookAddress bookAddress =
+                        com.klikli_dev.modonomicon.client.gui.book.BookAddress.defaultFor(
+                                ResourceLocation.fromNamespaceAndPath("skavenblight", "nexus_research")
+                        );
+                com.klikli_dev.modonomicon.client.gui.BookGuiManager.get().openBook(bookAddress);
             }
-        }).bounds(startX + 124, startY - 20, 60, 20).build());
+        }).bounds(startX + 124, startY - 20, 60, 20).build();
+        researchBtn.setTooltip(Tooltip.create(Component.translatable("gui.skavenblight.nexus.tab.research.tooltip")));
+        this.addRenderableWidget(researchBtn);
 
         // Initialize specific widgets based on the active tab
         if (this.currentTab == Tab.NETWORK) {
