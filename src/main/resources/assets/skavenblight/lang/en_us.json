@@ -51,6 +51,13 @@
   "block.skavenblight.research_table_ulgu": "Veil of Ulgu",
   "block.skavenblight.research_table_shyish": "Ossuary of Shyish",
 
+  "gui.skavenblight.nexus.tab.network": "Network",
+  "gui.skavenblight.nexus.tab.network.tooltip": "Monitor and control the active Warp-Network anchors.",
+  "gui.skavenblight.nexus.tab.schemes": "Schemes",
+  "gui.skavenblight.nexus.tab.schemes.tooltip": "Plot and execute devious schemes across the holds.",
+  "gui.skavenblight.nexus.tab.research": "Research",
+  "gui.skavenblight.nexus.tab.research.tooltip": "Open the Great Book of Nexus Research, yes-yes!",
+
   "gui.skavenblight.research_table.choose_prompt": "Choose a spell to study, yes-yes!",
   "gui.skavenblight.research_table.begin": "Begin Research",
   "gui.skavenblight.research_table.studying": "Studying...",
